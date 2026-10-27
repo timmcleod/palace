@@ -5,6 +5,8 @@ mod git;
 mod history;
 mod remote;
 mod stash;
+mod tag;
+mod watch;
 #[cfg(test)]
 mod test_support;
 mod working;
@@ -16,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(history::HistoryState::default())
         .manage(cli::Running::default())
+        .manage(watch::RepoWatcher::default())
         .invoke_handler(tauri::generate_handler![
             git::repo_overview,
             history::load_history,
@@ -44,10 +47,15 @@ pub fn run() {
             stash::stash_save,
             stash::stash_apply,
             stash::stash_drop,
+            watch::watch_repo,
+            tag::create_tag,
+            tag::delete_tag,
             remote::fetch,
             remote::pull,
             remote::push,
             remote::cancel_remote,
+            remote::delete_remote_branch,
+            remote::push_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -104,6 +104,11 @@ async function runGit([running, done, failed], command, args = {}, { quietError 
       op.state = "failed";
       op.title = failed;
       op.message = message;
+      // A push rejected because the branch was rewritten (amend, rebase) can be
+      // published by force pushing.
+      if (command === "push" && message.includes("non-fast-forward")) {
+        op.actions = [{ label: "Force Push…", run: () => actions.forcePush() }];
+      }
     }
     return message;
   } finally {
@@ -139,6 +144,17 @@ function sidebarActivate(row) {
   if (kind === "branch" && name !== overview.value.head.branch) actions.checkout("branch", name);
   if (kind === "remote-branch") actions.checkout("remote-branch", name);
 }
+
+// Live refresh: the backend watches the open repository and reports changes made
+// anywhere, such as saving a file in an editor or committing from a terminal.
+watch(
+  () => overview.value?.path,
+  (path) => {
+    if (path) invoke("watch_repo", { path }).catch(() => {});
+  },
+);
+const unlistenChanges = listen("repo-changed", () => refresh());
+onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 
 const unlistenProgress = listen("remote-progress", (event) => {
   if (remoteOp.value?.state === "running") {
@@ -479,6 +495,7 @@ function startResize(event, pane, min, max) {
       :operation="remoteOp"
       @cancel="invoke('cancel_remote')"
       @dismiss="remoteOp = null"
+      @action="(action) => { remoteOp = null; action.run(); }"
     />
   </div>
 

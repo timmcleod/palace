@@ -7,6 +7,7 @@ import { openForm } from "./overlays.js";
 // repository overview ref.
 export function useGitActions({ overview, run }) {
   const current = () => overview.value?.head.branch ?? null;
+  const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
   const midOperation = () => !!overview.value?.operation;
 
@@ -122,6 +123,61 @@ export function useGitActions({ overview, run }) {
     if (ok) await run(["Dropping stash…", "Dropped stash", "Couldn't drop the stash"], "stash_drop", { index });
   }
 
+  async function forcePush() {
+    const branch = headBranchInfo();
+    const target = branch?.upstream ?? "its remote";
+    const ok = await confirm(
+      `Force push “${current()}” to ${target}?\n\nThis replaces the remote branch with your version, discarding the commits there that you've rewritten. If someone else has pushed commits you haven't fetched, Palace stops instead of overwriting them.`,
+      "Force Push",
+      "Force Push",
+    );
+    if (ok) await run(["Force pushing…", "Force pushed", "Force push failed"], "push", { force: true });
+  }
+
+  async function deleteRemoteBranch(name) {
+    const ok = await confirm(
+      `Delete “${name}” from the remote?\n\nThe branch is removed for everyone who uses the remote. Your local branches aren't affected.`,
+      "Delete Remote Branch",
+      "Delete",
+    );
+    if (ok) await run(["Deleting remote branch…", "Deleted remote branch", "Couldn't delete the remote branch"], "delete_remote_branch", { name });
+  }
+
+  async function createTag(target = null, targetLabel = null) {
+    const hasRemote = overview.value.remotes.length > 0;
+    const values = await openForm({
+      title: "New Tag",
+      message: `The tag will point at ${targetLabel ?? current() ?? "HEAD"}.`,
+      fields: [
+        { key: "name", label: "Name", type: "text", placeholder: "v1.2.0" },
+        { key: "message", label: "Message (optional; makes an annotated tag)", type: "text", optional: true },
+        hasRemote && { key: "push", label: "Push the tag to the remote", type: "checkbox", value: false },
+      ].filter(Boolean),
+      confirmLabel: "Create Tag",
+    });
+    if (!values) return;
+    const name = values.name.trim();
+    const error = await run(["Creating tag…", "Created tag", "Couldn't create the tag"], "create_tag", {
+      name,
+      target,
+      message: values.message.trim() || null,
+    });
+    if (!error && values.push) await pushTag(name);
+  }
+
+  function pushTag(name) {
+    return run(["Pushing tag…", "Pushed tag", "Couldn't push the tag"], "push_tag", { name });
+  }
+
+  async function deleteTag(name) {
+    const ok = await confirm(
+      `Delete the tag “${name}”?\n\nIt's only deleted here. If you've pushed it, the copy on the remote stays.`,
+      "Delete Tag",
+      "Delete",
+    );
+    if (ok) await run(["Deleting tag…", "Deleted tag", "Couldn't delete the tag"], "delete_tag", { name });
+  }
+
   async function controlOperation(action) {
     const operation = overview.value?.operation;
     if (action === "abort") {
@@ -144,11 +200,16 @@ export function useGitActions({ overview, run }) {
     return [
       { label: "Check Out", action: () => checkout("branch", name), disabled: isCurrent },
       { separator: true },
-      { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: isCurrent || !head || midOperation() },
-      { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: isCurrent || !head || midOperation() },
-      { separator: true },
+      // Merging or rebasing a branch onto itself means nothing, so the current branch
+      // doesn't offer it.
+      !isCurrent && { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
+      !isCurrent && { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
+      !isCurrent && { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
+      { label: `New Tag at “${name}”…`, action: () => createTag(name, name) },
       { label: "Rename…", action: () => renameBranch(name) },
+      isCurrent && headBranchInfo()?.upstream && { separator: true },
+      isCurrent && headBranchInfo()?.upstream && { label: "Force Push…", action: forcePush, danger: true },
       { separator: true },
       { label: "Delete…", action: () => deleteBranch(name), disabled: isCurrent, danger: true },
     ];
@@ -163,6 +224,8 @@ export function useGitActions({ overview, run }) {
       { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
+      { separator: true },
+      { label: "Delete from Remote…", action: () => deleteRemoteBranch(name), danger: true },
     ];
   }
 
@@ -173,6 +236,9 @@ export function useGitActions({ overview, run }) {
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
       { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
+      { separator: true },
+      { label: "Push to Remote", action: () => pushTag(name), disabled: !overview.value.remotes.length },
+      { label: "Delete…", action: () => deleteTag(name), danger: true },
     ];
   }
 
@@ -189,6 +255,7 @@ export function useGitActions({ overview, run }) {
     return [
       { label: "Check Out This Commit", action: () => checkout("commit", commit.id) },
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
+      { label: "New Tag Here…", action: () => createTag(commit.id, commit.short_id) },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },
     ];
@@ -196,6 +263,7 @@ export function useGitActions({ overview, run }) {
 
   return {
     checkout,
+    forcePush,
     newBranch,
     mergeInto,
     stashSave,

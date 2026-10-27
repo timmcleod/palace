@@ -28,6 +28,7 @@ git2 = { version = "0.21.0", default-features = false }
 tauri-plugin-dialog = "2"
 libc = "0.2"
 trash = "5.2.9"
+notify = "8.2.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

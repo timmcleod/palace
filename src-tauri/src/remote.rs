@@ -21,9 +21,35 @@ pub async fn pull(app: AppHandle, path: String) -> Result<String, String> {
     in_background(app, move |running, report| pull_current(&path, running, report)).await
 }
 
+/// Pushes the current branch. With `force`, overwrites the remote branch, but only if
+/// it's still where this repository last saw it (`--force-with-lease`), so commits
+/// someone else pushed in the meantime are never thrown away unseen.
 #[tauri::command]
-pub async fn push(app: AppHandle, path: String) -> Result<String, String> {
-    in_background(app, move |running, report| push_current(&path, running, report)).await
+pub async fn push(app: AppHandle, path: String, force: Option<bool>) -> Result<String, String> {
+    let force = force.unwrap_or(false);
+    in_background(app, move |running, report| push_current(&path, force, running, report)).await
+}
+
+/// Deletes a branch on its remote. `name` is the remote branch, e.g. "origin/feature".
+#[tauri::command]
+pub async fn delete_remote_branch(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    in_background(app, move |running, report| {
+        let (remote, branch) = split_remote_branch(&path, &name)?;
+        git_with_progress(&path, &["push", "--progress", &remote, "--delete", &branch], running, report)?;
+        Ok(format!("Deleted {branch} from {remote}."))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn push_tag(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    in_background(app, move |running, report| {
+        let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
+        let remote = default_remote(&repo)?;
+        git_with_progress(&path, &["push", "--progress", &remote, &format!("refs/tags/{name}")], running, report)?;
+        Ok(format!("Pushed the tag {name} to {remote}."))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -66,12 +92,17 @@ fn pull_current(path: &str, running: &Running, report: Report) -> Result<String,
     })
 }
 
-fn push_current(path: &str, running: &Running, report: Report) -> Result<String, String> {
+fn push_current(path: &str, force: bool, running: &Running, report: Report) -> Result<String, String> {
     let plan = push_plan(path)?;
-    let args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
+    let mut args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
+    if force {
+        args.insert(2, "--force-with-lease");
+    }
     let output = git_with_progress(path, &args, running, report)?;
     Ok(if output.contains("Everything up-to-date") {
         format!("Nothing to push; {} is up to date.", plan.upstream)
+    } else if force {
+        format!("Force pushed {} to {}.", plan.branch, plan.upstream)
     } else if plan.sets_upstream {
         format!("Pushed {} to {}, and set it as the upstream branch.", plan.branch, plan.upstream)
     } else {
@@ -84,6 +115,40 @@ struct Plan {
     branch: String,
     upstream: String,
     sets_upstream: bool,
+}
+
+/// The remote to use when nothing says otherwise: "origin", or the only remote.
+fn default_remote(repo: &Repository) -> Result<String, String> {
+    let names = remote_names(repo)?;
+    if names.iter().any(|n| n == "origin") {
+        Ok("origin".into())
+    } else if names.len() == 1 {
+        Ok(names[0].clone())
+    } else if names.is_empty() {
+        Err("This repository has no remote to push to.".into())
+    } else {
+        Err("There's more than one remote to choose from, and none is called origin.".into())
+    }
+}
+
+fn remote_names(repo: &Repository) -> Result<Vec<String>, String> {
+    let remotes = repo.remotes().map_err(|e| e.message().to_string())?;
+    Ok(remotes.iter().filter_map(|r| r.ok().flatten().map(str::to_string)).collect())
+}
+
+/// Splits "origin/feature/x" into ("origin", "feature/x"), matching the longest remote
+/// name, since remote names can contain slashes too.
+fn split_remote_branch(path: &str, name: &str) -> Result<(String, String), String> {
+    let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
+    remote_names(&repo)?
+        .into_iter()
+        .filter(|remote| name.starts_with(&format!("{remote}/")))
+        .max_by_key(String::len)
+        .map(|remote| {
+            let branch = name[remote.len() + 1..].to_string();
+            (remote, branch)
+        })
+        .ok_or_else(|| format!("{name} doesn't belong to any remote."))
 }
 
 /// The current branch, or an explanation of why there isn't one to pull or push.
@@ -136,19 +201,9 @@ fn push_plan(path: &str) -> Result<Plan, String> {
         return Ok(Plan { args: args.to_vec(), branch, upstream: format!("{remote}/{merge}"), sets_upstream: false });
     }
 
-    // No upstream yet: publish the branch under the same name, to "origin" or the only
-    // remote there is.
-    let remotes = repo.remotes().map_err(|e| e.message().to_string())?;
-    let names: Vec<String> = remotes.iter().filter_map(|r| r.ok().flatten().map(str::to_string)).collect();
-    let remote = if names.iter().any(|n| n == "origin") {
-        "origin".to_string()
-    } else if names.len() == 1 {
-        names[0].clone()
-    } else if names.is_empty() {
-        return Err("This repository has no remote to push to.".into());
-    } else {
-        return Err(format!("{branch} has no upstream branch, and there's more than one remote to choose from."));
-    };
+    // No upstream yet: publish the branch under the same name.
+    let remote = default_remote(&repo)
+        .map_err(|e| format!("{branch} has no upstream branch. {e}"))?;
 
     let args = ["push", "--progress", "--set-upstream", &remote, &branch].map(String::from);
     Ok(Plan { args: args.to_vec(), branch: branch.clone(), upstream: format!("{remote}/{branch}"), sets_upstream: true })
@@ -167,7 +222,7 @@ mod tests {
         let local = TempRepo::new(&format!("{name}-local"));
         local.commit(&[("a.txt", Some("a\n"))], "First");
         local.repo.remote("origin", server.path()).unwrap();
-        push_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
+        push_current(local.path(), false, &Running::default(), &mut |_| {}).unwrap();
         server.repo.set_head(&format!("refs/heads/{}", local.branch())).unwrap();
         (server, local)
     }
@@ -184,7 +239,7 @@ mod tests {
         local.repo.remote("origin", server.path()).unwrap();
 
         let mut progress = Vec::new();
-        let message = push_current(local.path(), &Running::default(), &mut |l| progress.push(l.to_string())).unwrap();
+        let message = push_current(local.path(), false, &Running::default(), &mut |l| progress.push(l.to_string())).unwrap();
 
         let branch = local.branch();
         assert_eq!(message, format!("Pushed {branch} to origin/{branch}, and set it as the upstream branch."));
@@ -198,7 +253,7 @@ mod tests {
         let (server, local) = setup("pull");
         let other = TempRepo::clone_of("pull-other", &server);
         other.commit(&[("b.txt", Some("b\n"))], "From elsewhere");
-        push_current(other.path(), &Running::default(), &mut |_| {}).unwrap();
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
 
         let message = pull_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
         let branch = local.branch();
@@ -215,7 +270,7 @@ mod tests {
         let before = local.head();
         let other = TempRepo::clone_of("fetch-other", &server);
         other.commit(&[("b.txt", Some("b\n"))], "From elsewhere");
-        push_current(other.path(), &Running::default(), &mut |_| {}).unwrap();
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
 
         fetch_all(local.path(), &Running::default(), &mut |_| {}).unwrap();
         assert_eq!(tracking(&local), other.head());
@@ -227,10 +282,10 @@ mod tests {
         let (server, local) = setup("diverged");
         let other = TempRepo::clone_of("diverged-other", &server);
         other.commit(&[("b.txt", Some("b\n"))], "Theirs");
-        push_current(other.path(), &Running::default(), &mut |_| {}).unwrap();
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
         local.commit(&[("c.txt", Some("c\n"))], "Ours");
 
-        let rejected = push_current(local.path(), &Running::default(), &mut |_| {}).unwrap_err();
+        let rejected = push_current(local.path(), false, &Running::default(), &mut |_| {}).unwrap_err();
         assert!(rejected.contains("rejected"), "{rejected}");
 
         // Merging is the fallback only when the user hasn't chosen a pull strategy.
@@ -240,8 +295,55 @@ mod tests {
             let head = local.repo.head().unwrap().peel_to_commit().unwrap();
             assert_eq!(head.parent_count(), 2);
         }
-        push_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
+        push_current(local.path(), false, &Running::default(), &mut |_| {}).unwrap();
         assert_eq!(tracking(&local), local.head());
+    }
+
+    #[test]
+    fn force_push_publishes_a_rewritten_branch() {
+        let (_server, local) = setup("force");
+        // Rewrite the pushed commit, as amending does.
+        crate::cli::git(local.path(), &["commit", "--amend", "-qm", "First, reworded"], None).unwrap();
+
+        let rejected = push_current(local.path(), false, &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(rejected.contains("non-fast-forward") || rejected.contains("rejected"), "{rejected}");
+
+        let message = push_current(local.path(), true, &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, format!("Force pushed {0} to origin/{0}.", local.branch()));
+        assert_eq!(tracking(&local), local.head());
+    }
+
+    #[test]
+    fn force_push_refuses_to_overwrite_commits_it_hasnt_seen() {
+        let (server, local) = setup("force-lease");
+        let other = TempRepo::clone_of("force-lease-other", &server);
+        other.commit(&[("b.txt", Some("b\n"))], "Someone else's work");
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
+
+        // Without fetching, rewrite and force push.
+        crate::cli::git(local.path(), &["commit", "--amend", "-qm", "Rewritten"], None).unwrap();
+        let refused = push_current(local.path(), true, &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(refused.contains("stale info"), "{refused}");
+        let server_head = server.repo.refname_to_id(&format!("refs/heads/{}", other.branch())).unwrap();
+        assert_eq!(server_head, other.head(), "their commit is still there");
+    }
+
+    #[test]
+    fn deleting_a_remote_branch_and_pushing_a_tag() {
+        let (server, local) = setup("delete-remote");
+        crate::cli::git(local.path(), &["push", "origin", "HEAD:refs/heads/feature/old"], None).unwrap();
+        assert!(server.repo.find_reference("refs/heads/feature/old").is_ok());
+
+        let path = local.path().to_string();
+        let (remote, branch) = split_remote_branch(&path, "origin/feature/old").unwrap();
+        assert_eq!((remote.as_str(), branch.as_str()), ("origin", "feature/old"));
+        git_with_progress(&path, &["push", "--progress", &remote, "--delete", &branch], &Running::default(), &mut |_: &str| {}).unwrap();
+        assert!(server.repo.find_reference("refs/heads/feature/old").is_err());
+
+        crate::cli::git(&path, &["tag", "v1"], None).unwrap();
+        let remote = default_remote(&local.repo).unwrap();
+        git_with_progress(&path, &["push", "--progress", &remote, "refs/tags/v1"], &Running::default(), &mut |_: &str| {}).unwrap();
+        assert!(server.repo.find_reference("refs/tags/v1").is_ok());
     }
 
     #[test]

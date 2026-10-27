@@ -8,7 +8,7 @@ const props = defineProps({
   // { title, line, state: "running" | "done" | "failed" | "conflict", message, cancellable }
   operation: { type: Object, required: true },
 });
-const emit = defineEmits(["cancel", "dismiss"]);
+const emit = defineEmits(["cancel", "dismiss", "action"]);
 
 // Git's progress lines look like "Receiving objects:  45% (9/20), 1.2 MiB | 3 MiB/s".
 const percent = computed(() => {
@@ -36,6 +36,11 @@ const percent = computed(() => {
       <div class="line">{{ operation.line || "Connecting…" }}</div>
     </template>
     <pre v-else-if="operation.state !== 'running'" class="message">{{ operation.message }}</pre>
+    <div v-if="operation.actions?.length && operation.state !== 'running'" class="actions">
+      <button v-for="action in operation.actions" :key="action.label" class="secondary-button" @click="emit('action', action)">
+        {{ action.label }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -70,6 +75,18 @@ const percent = computed(() => {
 
 .icon-failed {
   color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.actions button {
+  padding: 4px 12px;
+  font-size: 12.5px;
 }
 
 .icon-conflict {
