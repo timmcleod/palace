@@ -209,10 +209,12 @@ async function chooseRepository() {
 }
 
 function refresh() {
-  if (overview.value) {
-    loadRepository(overview.value.path, { quiet: true });
-    refreshKey.value++;
-  }
+  // While a repository the user chose is still opening, a refresh would reload the one
+  // on screen and, being newer, win over the switch. The window regains focus as the
+  // folder picker closes, so without this, opening another repository did nothing.
+  if (!overview.value || loading.value) return;
+  loadRepository(overview.value.path, { quiet: true });
+  refreshKey.value++;
 }
 
 function removeRecent(path) {
