@@ -1,0 +1,115 @@
+:root {
+  --toolbar-height: 56px;
+
+  --accent: #1f7cf2;
+  --danger: #d4342c;
+
+  --text-primary: #262626;
+  --text-secondary: #555;
+  --text-tertiary: #8c8c8c;
+  --icon: #6e6e6e;
+
+  --sidebar-bg: #f4f4f4;
+  --content-bg: #ffffff;
+  --input-bg: #ffffff;
+  --border: #e3e3e3;
+  --row-hover: rgba(0, 0, 0, 0.04);
+  --row-selected: rgba(0, 0, 0, 0.09);
+  --pill-bg: rgba(0, 0, 0, 0.08);
+  --toolbar-group-bg: rgba(0, 0, 0, 0.045);
+  --button-hover: rgba(0, 0, 0, 0.07);
+
+  font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #3b8ff6;
+    --danger: #ff6b61;
+
+    --text-primary: #e6e6e6;
+    --text-secondary: #b8b8b8;
+    --text-tertiary: #8a8a8a;
+    --icon: #a5a5a5;
+
+    --sidebar-bg: #262626;
+    --content-bg: #1e1e1e;
+    --input-bg: #1a1a1a;
+    --border: #363636;
+    --row-hover: rgba(255, 255, 255, 0.05);
+    --row-selected: rgba(255, 255, 255, 0.1);
+    --pill-bg: rgba(255, 255, 255, 0.12);
+    --toolbar-group-bg: rgba(255, 255, 255, 0.06);
+    --button-hover: rgba(255, 255, 255, 0.09);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+}
+
+/* Desktop-app behaviour: chrome isn't selectable text. */
+body {
+  user-select: none;
+  cursor: default;
+}
+
+input {
+  user-select: text;
+}
+
+.dim {
+  color: var(--text-tertiary);
+}
+
+.mono {
+  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--icon);
+}
+
+.icon-button.small {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--button-hover);
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background: var(--pill-bg) padding-box;
+}
