@@ -1,0 +1,88 @@
+# Builds Palace's Linux packages.
+#
+# Pushing a version tag (made by `npm run release`) runs the tests, builds the .deb
+# and AppImage, and publishes them as a GitHub release. Running the workflow by hand
+# from the Actions tab builds the packages without publishing anything, and attaches
+# them to the run instead.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Packages built against an older Ubuntu also install on newer ones, not the
+    # other way around.
+    runs-on: ubuntu-22.04
+    env:
+      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Run the backend tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Check the tag matches the app's version
+        if: env.IS_RELEASE == 'true'
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but the app's version is $version. Make releases with npm run release."
+            exit 1
+          fi
+
+      - name: Build and publish the release
+        if: env.IS_RELEASE == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Palace ${{ github.ref_name }}
+          releaseBody: |
+            **Ubuntu / Debian:** download the `.deb`, then run
+            `sudo apt install ./Palace_*.deb` in the folder you saved it to.
+
+            **Other distributions:** download the `.AppImage`, make it executable
+            (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed.
+          releaseDraft: false
+
+      - name: Build the packages
+        if: env.IS_RELEASE != 'true'
+        run: npm run package
+
+      - name: Attach the packages to this run
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: palace-linux-packages
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
