@@ -4,12 +4,11 @@
 //! Reading uses git2. Anything that changes the repository runs the git CLI instead,
 //! so hooks, signing and the user's git config apply exactly as they do in a terminal.
 
+use crate::cli::git;
 use crate::commit::{FileDiff, file_diff_from_patch};
 use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Patch, Repository, StatusOptions, Tree};
 use serde::Serialize;
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 #[derive(Serialize)]
 pub struct WorkingFile {
@@ -244,43 +243,6 @@ fn single_hunk_patch(patch: &str, hunk: usize) -> Option<String> {
 
 fn commit(path: &str, message: &str) -> Result<(), String> {
     git(path, &["commit", "-F", "-"], Some(message)).map(drop)
-}
-
-/// Runs git in the repository's working directory. On failure, returns what git
-/// printed so the user can see why (a failing hook, a missing identity, …).
-fn git(path: &str, args: &[&str], stdin: Option<&str>) -> Result<String, String> {
-    let repo = Repository::discover(path).map_err(message)?;
-    let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
-
-    let mut child = Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        // Never block on a credentials prompt nobody can see.
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Couldn't run git: {e}"))?;
-
-    if let Some(input) = stdin {
-        child
-            .stdin
-            .take()
-            .expect("stdin is piped")
-            .write_all(input.as_bytes())
-            .map_err(|e| format!("Couldn't send input to git: {e}"))?;
-    }
-
-    let output = child.wait_with_output().map_err(|e| format!("git failed: {e}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if output.status.success() {
-        return Ok(stdout);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    // Hooks often report problems on stdout, so include both.
-    Err([stderr, stdout].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n"))
 }
 
 fn message(e: git2::Error) -> String {

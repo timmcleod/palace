@@ -1,6 +1,8 @@
+mod cli;
 mod commit;
 mod git;
 mod history;
+mod remote;
 #[cfg(test)]
 mod test_support;
 mod working;
@@ -11,6 +13,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(history::HistoryState::default())
+        .manage(cli::Running::default())
         .invoke_handler(tauri::generate_handler![
             git::repo_overview,
             history::load_history,
@@ -23,6 +26,10 @@ pub fn run() {
             working::unstage_files,
             working::stage_hunk,
             working::commit_changes,
+            remote::fetch,
+            remote::pull,
+            remote::push,
+            remote::cancel_remote,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

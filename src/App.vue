@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -21,6 +22,7 @@ import {
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
 import HistoryList from "./components/HistoryList.vue";
+import RemoteStatus from "./components/RemoteStatus.vue";
 import Sidebar from "./components/Sidebar.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
@@ -46,6 +48,52 @@ const workingFile = ref(null);
 const draft = reactive({ subject: "", body: "" });
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
+
+// --- Fetch, pull and push ------------------------------------------------------
+
+// The network operation being shown: { kind, title, line, state, message }.
+const remoteOp = ref(null);
+let dismissTimer;
+
+const REMOTE_TITLES = {
+  fetch: ["Fetching…", "Fetched", "Fetch failed"],
+  pull: ["Pulling…", "Pulled", "Pull failed"],
+  push: ["Pushing…", "Pushed", "Push failed"],
+};
+
+const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
+const remoteBusy = computed(() => remoteOp.value?.state === "running");
+
+async function runRemote(kind) {
+  if (remoteBusy.value || !overview.value) return;
+  clearTimeout(dismissTimer);
+  const [running, done, failed] = REMOTE_TITLES[kind];
+  const op = reactive({ kind, title: running, line: "", state: "running", message: "" });
+  remoteOp.value = op;
+
+  try {
+    op.message = await invoke(kind, { path: overview.value.path });
+    op.state = "done";
+    op.title = done;
+    // Successes get out of the way; failures stay until dismissed.
+    dismissTimer = setTimeout(() => {
+      if (remoteOp.value === op) remoteOp.value = null;
+    }, 5000);
+  } catch (e) {
+    op.state = "failed";
+    op.title = failed;
+    op.message = String(e);
+  } finally {
+    refresh();
+  }
+}
+
+const unlistenProgress = listen("remote-progress", (event) => {
+  if (remoteOp.value?.state === "running") {
+    remoteOp.value.line = event.payload.line;
+  }
+});
+onBeforeUnmount(() => unlistenProgress.then((unlisten) => unlisten()));
 
 const PANES_KEY = "palace.paneWidths";
 const panes = reactive({ sidebar: 300, history: 580, ...readJson(PANES_KEY, {}) });
@@ -261,9 +309,35 @@ function startResize(event, pane, min, max) {
 
       <header class="toolbar actions">
         <div class="action-group">
-          <button class="icon-button" title="Fetch (coming soon)" disabled><CloudDownload :size="18" :stroke-width="1.5" /></button>
-          <button class="icon-button" title="Pull (coming soon)" disabled><ArrowDownToLine :size="18" :stroke-width="1.5" /></button>
-          <button class="icon-button" title="Push (coming soon)" disabled><ArrowUpFromLine :size="18" :stroke-width="1.5" /></button>
+          <button
+            class="icon-button"
+            :class="{ active: remoteOp?.kind === 'fetch' && remoteBusy }"
+            title="Fetch from all remotes"
+            :disabled="remoteBusy"
+            @click="runRemote('fetch')"
+          >
+            <CloudDownload :size="18" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :class="{ active: remoteOp?.kind === 'pull' && remoteBusy }"
+            :title="headBranch?.upstream ? `Pull from ${headBranch.upstream}` : 'Pull'"
+            :disabled="remoteBusy"
+            @click="runRemote('pull')"
+          >
+            <ArrowDownToLine :size="18" :stroke-width="1.5" />
+            <span v-if="headBranch?.behind" class="count-badge">{{ headBranch.behind }}</span>
+          </button>
+          <button
+            class="icon-button"
+            :class="{ active: remoteOp?.kind === 'push' && remoteBusy }"
+            :title="headBranch?.upstream ? `Push to ${headBranch.upstream}` : 'Publish this branch'"
+            :disabled="remoteBusy"
+            @click="runRemote('push')"
+          >
+            <ArrowUpFromLine :size="18" :stroke-width="1.5" />
+            <span v-if="headBranch?.ahead" class="count-badge">{{ headBranch.ahead }}</span>
+          </button>
         </div>
         <div class="action-group">
           <button class="icon-button" title="Branch (coming soon)" disabled><GitBranch :size="18" :stroke-width="1.5" /></button>
@@ -307,6 +381,13 @@ function startResize(event, pane, min, max) {
         </div>
       </template>
     </section>
+
+    <RemoteStatus
+      v-if="remoteOp"
+      :operation="remoteOp"
+      @cancel="invoke('cancel_remote')"
+      @dismiss="remoteOp = null"
+    />
   </div>
 
   <main v-else class="welcome">
@@ -411,6 +492,30 @@ function startResize(event, pane, min, max) {
 
 .actions {
   justify-content: flex-end;
+}
+
+.action-group .icon-button {
+  position: relative;
+}
+
+.action-group .icon-button.active {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* How many commits there are to pull or push. */
+.count-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
 }
 
 .action-group {

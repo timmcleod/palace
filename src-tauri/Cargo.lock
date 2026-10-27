@@ -2413,6 +2413,7 @@ name = "palace"
 version = "0.1.0"
 dependencies = [
  "git2",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
