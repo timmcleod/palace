@@ -1,6 +1,29 @@
 //! Creating and deleting tags. Pushing one is a network operation, in remote.rs.
 
 use crate::cli::git;
+use git2::Repository;
+use serde::Serialize;
+
+#[derive(Serialize, Debug)]
+pub struct RevisionInfo {
+    short_id: String,
+    summary: String,
+}
+
+/// The commit a revision (a branch, tag, hash, HEAD~2, …) points at, so the tag dialog
+/// can show what a new tag would mark.
+#[tauri::command]
+pub async fn describe_revision(path: String, revision: String) -> Result<RevisionInfo, String> {
+    let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
+    let commit = repo
+        .revparse_single(revision.trim())
+        .and_then(|object| object.peel_to_commit())
+        .map_err(|_| format!("“{}” isn't a branch, tag or commit in this repository.", revision.trim()))?;
+    Ok(RevisionInfo {
+        short_id: commit.id().to_string()[..7].to_string(),
+        summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+    })
+}
 
 /// Tags `target` (HEAD when omitted). With a message, the tag is annotated, recording
 /// who made it and when; without one it's a lightweight tag.
@@ -36,6 +59,21 @@ mod tests {
 
     fn run<T>(future: impl std::future::Future<Output = T>) -> T {
         tauri::async_runtime::block_on(future)
+    }
+
+    #[test]
+    fn describing_revisions() {
+        let t = TempRepo::new("describe");
+        let first = t.commit(&[("a.txt", Some("a\n"))], "First");
+        t.commit(&[("b.txt", Some("b\n"))], "Second\n\nWith a body.");
+
+        let head = run(describe_revision(t.path().into(), t.branch())).unwrap();
+        assert_eq!(head.summary, "Second");
+        let parent = run(describe_revision(t.path().into(), "HEAD~1".into())).unwrap();
+        assert_eq!(parent.short_id, first.to_string()[..7]);
+
+        let missing = run(describe_revision(t.path().into(), "no-such-branch".into())).unwrap_err();
+        assert!(missing.contains("isn't a branch, tag or commit"), "{missing}");
     }
 
     #[test]

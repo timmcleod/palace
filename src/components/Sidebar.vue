@@ -24,7 +24,7 @@ const props = defineProps({
   overview: { type: Object, required: true },
   selected: { type: String, default: null },
 });
-const emit = defineEmits(["update:selected", "open-repository", "menu", "activate"]);
+const emit = defineEmits(["update:selected", "open-repository", "menu", "activate", "section-menu"]);
 
 const filter = ref("");
 const collapsedSections = reactive(new Set());
@@ -168,7 +168,11 @@ function onRowClick(row) {
 
     <nav class="sidebar-scroll">
       <section v-for="section in sections" :key="section.id" class="section">
-        <button class="section-header" @click="toggleSection(section.id)">
+        <button
+          class="section-header"
+          @click="toggleSection(section.id)"
+          @contextmenu.prevent="emit('section-menu', section.id, $event)"
+        >
           <span>{{ section.title }}</span>
           <span class="section-toggle">{{ collapsedSections.has(section.id) ? "Show" : "Hide" }}</span>
         </button>

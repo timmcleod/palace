@@ -1,5 +1,5 @@
 import { ask } from "@tauri-apps/plugin-dialog";
-import { openForm } from "./overlays.js";
+import { openForm, openTagDialog } from "./overlays.js";
 
 // Branch, merge, rebase and stash actions, and the context menus that offer them.
 // `run(titles, command, args, options)` performs a backend command with progress and
@@ -143,26 +143,27 @@ export function useGitActions({ overview, run }) {
     if (ok) await run(["Deleting remote branch…", "Deleted remote branch", "Couldn't delete the remote branch"], "delete_remote_branch", { name });
   }
 
-  async function createTag(target = null, targetLabel = null) {
-    const hasRemote = overview.value.remotes.length > 0;
-    const values = await openForm({
-      title: "New Tag",
-      message: `The tag will point at ${targetLabel ?? current() ?? "HEAD"}.`,
-      fields: [
-        { key: "name", label: "Name", type: "text", placeholder: "v1.2.0" },
-        { key: "message", label: "Message (optional; makes an annotated tag)", type: "text", optional: true },
-        hasRemote && { key: "push", label: "Push the tag to the remote", type: "checkbox", value: false },
-      ].filter(Boolean),
-      confirmLabel: "Create Tag",
+  // Opens the Create New Tag dialog on `revision` (the current branch when omitted).
+  // Pushing a version tag is how releases are published.
+  async function createTag(revision = null) {
+    const o = overview.value;
+    const head = o.branches.find((b) => b.is_head)?.name;
+    const values = await openTagDialog({
+      path: o.path,
+      revision: revision ?? head ?? "HEAD",
+      // The current branch first, since it's the usual thing to tag.
+      branches: [head, ...o.branches.map((b) => b.name).filter((n) => n !== head)].filter(Boolean),
+      remoteBranches: o.remotes.flatMap((r) => r.branches.map((b) => `${r.name}/${b}`)),
+      tags: o.tags,
+      hasRemote: o.remotes.length > 0,
     });
     if (!values) return;
-    const name = values.name.trim();
     const error = await run(["Creating tag…", "Created tag", "Couldn't create the tag"], "create_tag", {
-      name,
-      target,
-      message: values.message.trim() || null,
+      name: values.name,
+      target: values.revision,
+      message: values.message || null,
     });
-    if (!error && values.push) await pushTag(name);
+    if (!error && values.push) await pushTag(values.name);
   }
 
   function pushTag(name) {
@@ -206,7 +207,7 @@ export function useGitActions({ overview, run }) {
       !isCurrent && { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       !isCurrent && { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
-      { label: `New Tag at “${name}”…`, action: () => createTag(name, name) },
+      { label: `New Tag at “${name}”…`, action: () => createTag(name) },
       { label: "Rename…", action: () => renameBranch(name) },
       isCurrent && headBranchInfo()?.upstream && { separator: true },
       isCurrent && headBranchInfo()?.upstream && { label: "Force Push…", action: forcePush, danger: true },
@@ -255,15 +256,23 @@ export function useGitActions({ overview, run }) {
     return [
       { label: "Check Out This Commit", action: () => checkout("commit", commit.id) },
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
-      { label: "New Tag Here…", action: () => createTag(commit.id, commit.short_id) },
+      { label: "New Tag Here…", action: () => createTag(commit.short_id) },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },
     ];
   }
 
+  // Menus for the sidebar's section headings.
+  function sectionMenu(section) {
+    if (section === "tags") return [{ label: "Create New Tag…", action: () => createTag() }];
+    if (section === "branches") return [{ label: "New Branch…", action: () => newBranch() }];
+    return null;
+  }
+
   return {
     checkout,
     forcePush,
+    sectionMenu,
     newBranch,
     mergeInto,
     stashSave,

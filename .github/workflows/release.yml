@@ -1,15 +1,17 @@
 # Builds Palace's Linux packages.
 #
-# Pushing a version tag (made by `npm run release`) runs the tests, builds the .deb
-# and AppImage, and publishes them as a GitHub release. Running the workflow by hand
-# from the Actions tab builds the packages without publishing anything, and attaches
-# them to the run instead.
+# Pushing a version tag such as v1.2.0 (made in Palace, with `npm run release`, or
+# with git) runs the tests, builds the .deb and AppImage with that version, and
+# publishes them as a GitHub release. Running the workflow by hand from the Actions
+# tab builds the packages without publishing anything, and attaches them to the run
+# instead.
 
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    # Only version tags; other tags starting with "v" aren't releases.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:
@@ -48,14 +50,10 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-      - name: Check the tag matches the app's version
+      # The tag decides the version, so tagging alone is enough to make a release.
+      - name: Set the app's version from the tag
         if: env.IS_RELEASE == 'true'
-        run: |
-          version="v$(node -p "require('./package.json').version")"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::The tag is $GITHUB_REF_NAME but the app's version is $version. Make releases with npm run release."
-            exit 1
-          fi
+        run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
 
       - name: Build and publish the release
         if: env.IS_RELEASE == 'true'

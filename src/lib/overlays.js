@@ -35,3 +35,20 @@ export function openMenu(event, items) {
 export function closeMenu() {
   contextMenu.value = null;
 }
+
+export const tagDialog = shallowRef(null);
+
+/**
+ * Shows the Create New Tag dialog and resolves to { name, revision, message, push },
+ * or null if cancelled. options: { path, revision, branches, remoteBranches, tags, hasRemote }
+ */
+export function openTagDialog(options) {
+  return new Promise((resolve) => {
+    tagDialog.value = { ...options, resolve };
+  });
+}
+
+export function closeTagDialog(values) {
+  tagDialog.value?.resolve(values);
+  tagDialog.value = null;
+}

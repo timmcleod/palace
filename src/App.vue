@@ -27,6 +27,7 @@ import FormDialog from "./components/FormDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
+import TagDialog from "./components/TagDialog.vue";
 import Sidebar from "./components/Sidebar.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
@@ -38,7 +39,7 @@ import {
   writeJson,
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
-import { contextMenu, formDialog, openMenu } from "./lib/overlays.js";
+import { contextMenu, formDialog, openMenu, tagDialog } from "./lib/overlays.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -331,6 +332,7 @@ function startResize(event, pane, min, max) {
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
       @activate="sidebarActivate"
+      @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
     />
 
     <section class="pane history-pane">
@@ -490,6 +492,7 @@ function startResize(event, pane, min, max) {
     </section>
 
     <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
+    <TagDialog v-if="tagDialog" :dialog="tagDialog" />
     <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
     <RemoteStatus

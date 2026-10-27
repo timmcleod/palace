@@ -50,6 +50,7 @@ pub fn run() {
             watch::watch_repo,
             tag::create_tag,
             tag::delete_tag,
+            tag::describe_revision,
             remote::fetch,
             remote::pull,
             remote::push,
