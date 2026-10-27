@@ -19,6 +19,15 @@
   --toolbar-group-bg: rgba(0, 0, 0, 0.045);
   --button-hover: rgba(0, 0, 0, 0.07);
 
+  --ref-remote: #9a9a9a;
+  --ref-tag: #b7862b;
+  --lane-1: #1f7cf2;
+  --lane-2: #8e4ec6;
+  --lane-3: #e5484d;
+  --lane-4: #30a46c;
+  --lane-5: #f76b15;
+  --lane-6: #0d9488;
+
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: 14px;
   line-height: 1.4;
@@ -45,6 +54,15 @@
     --pill-bg: rgba(255, 255, 255, 0.12);
     --toolbar-group-bg: rgba(255, 255, 255, 0.06);
     --button-hover: rgba(255, 255, 255, 0.09);
+
+    --ref-remote: #6b6b6b;
+    --ref-tag: #a07524;
+    --lane-1: #3b8ff6;
+    --lane-2: #a875e0;
+    --lane-3: #f2666a;
+    --lane-4: #3fbf7f;
+    --lane-5: #ff8b3d;
+    --lane-6: #2bb3a6;
   }
 }
 

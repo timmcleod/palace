@@ -15,11 +15,11 @@ import {
   FolderGit2,
   GitBranch,
   GitMerge,
-  History,
   RefreshCw,
   Search,
   X,
 } from "lucide-vue-next";
+import HistoryList from "./components/HistoryList.vue";
 import Sidebar from "./components/Sidebar.vue";
 import {
   forgetRepository,
@@ -34,6 +34,10 @@ const loading = ref(false);
 const error = ref("");
 const recents = ref(recentRepositories());
 const selected = ref("workspace:history");
+// The ref whose history is shown, as { kind, name }; null means HEAD.
+const historyRef = ref(null);
+const selectedCommit = ref(null);
+const refreshKey = ref(0);
 
 const PANES_KEY = "palace.paneWidths";
 const panes = reactive({ sidebar: 300, history: 580, ...readJson(PANES_KEY, {}) });
@@ -52,6 +56,8 @@ async function loadRepository(path, { quiet = false } = {}) {
     if (seq !== loadSeq) return;
     if (data.path !== overview.value?.path) {
       selected.value = "workspace:history";
+      historyRef.value = null;
+      selectedCommit.value = null;
     }
     overview.value = data;
     error.value = "";
@@ -79,6 +85,7 @@ async function chooseRepository() {
 function refresh() {
   if (overview.value) {
     loadRepository(overview.value.path, { quiet: true });
+    refreshKey.value++;
   }
 }
 
@@ -117,19 +124,44 @@ const subtitle = computed(() => {
   return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
 });
 
-// The ref the history pane will show: whatever ref is selected in the sidebar,
-// falling back to HEAD.
+// Selecting a ref in the sidebar shows its history; Workspace › History goes back to
+// HEAD. Other items (folders, Settings, …) leave the history pane as it is.
+const HISTORY_KINDS = ["branch", "remote-branch", "tag", "stash"];
+
+watch(selected, (key) => {
+  const [kind, name] = splitKey(key);
+  if (key === "workspace:history") {
+    historyRef.value = null;
+  } else if (HISTORY_KINDS.includes(kind)) {
+    historyRef.value = { kind, name };
+  }
+});
+
+const historyRev = computed(() => {
+  const r = historyRef.value;
+  if (!r) return null;
+  return {
+    branch: `refs/heads/${r.name}`,
+    "remote-branch": `refs/remotes/${r.name}`,
+    tag: `refs/tags/${r.name}`,
+    stash: `stash@{${r.name}}`,
+  }[r.kind];
+});
+
 const breadcrumb = computed(() => {
   const o = overview.value;
   if (!o) return [];
-  const [kind, name] = splitKey(selected.value);
+  const r = historyRef.value;
 
-  if (kind === "branch") {
-    const branch = o.branches.find((b) => b.name === name);
-    return [name, branch?.upstream].filter(Boolean);
+  if (r?.kind === "branch") {
+    const branch = o.branches.find((b) => b.name === r.name);
+    return [r.name, branch?.upstream].filter(Boolean);
   }
-  if (kind === "remote-branch" || kind === "tag") {
-    return [name];
+  if (r?.kind === "stash") {
+    return [`stash@{${r.name}}`];
+  }
+  if (r) {
+    return [r.name];
   }
   const head = o.branches.find((b) => b.is_head);
   return [o.head.branch ?? o.head.short_id ?? "HEAD", head?.upstream].filter(Boolean);
@@ -163,7 +195,7 @@ function startResize(event, pane, min, max) {
   <div
     v-if="overview"
     class="window"
-    :style="{ gridTemplateColumns: `${panes.sidebar}px ${panes.history}px minmax(320px, 1fr)` }"
+    :style="{ gridTemplateColumns: `${panes.sidebar}px minmax(280px, ${panes.history}px) minmax(320px, 1fr)` }"
   >
     <Sidebar v-model:selected="selected" :overview="overview" @open-repository="chooseRepository" />
 
@@ -190,10 +222,13 @@ function startResize(event, pane, min, max) {
         </span>
       </div>
 
-      <div class="empty-state">
-        <History :size="32" :stroke-width="1.25" />
-        <p>Commit history is coming in the next step.</p>
-      </div>
+      <HistoryList
+        :path="overview.path"
+        :rev="historyRev"
+        :refresh-key="refreshKey"
+        :selected-id="selectedCommit?.id"
+        @select="selectedCommit = $event"
+      />
     </section>
 
     <section class="pane detail-pane">
@@ -223,7 +258,7 @@ function startResize(event, pane, min, max) {
       </header>
 
       <div class="subheader">
-        <span />
+        <span class="mono dim">{{ selectedCommit?.short_id }}</span>
         <div class="segmented">
           <button class="active" disabled>Changeset</button>
           <button disabled>Tree</button>
@@ -231,7 +266,8 @@ function startResize(event, pane, min, max) {
       </div>
 
       <div class="empty-state">
-        <p>Select a commit to see its details.</p>
+        <p v-if="selectedCommit">Commit details are coming in the next step.</p>
+        <p v-else>Select a commit to see its details.</p>
       </div>
     </section>
   </div>
@@ -299,6 +335,7 @@ function startResize(event, pane, min, max) {
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .nav-buttons {
@@ -338,6 +375,8 @@ function startResize(event, pane, min, max) {
   align-items: center;
   gap: 6px;
   width: 220px;
+  min-width: 120px;
+  flex-shrink: 1;
   height: 32px;
   padding: 0 10px;
   border-radius: 8px;
