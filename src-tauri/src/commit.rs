@@ -40,13 +40,20 @@ pub struct FileDiff {
     total_lines: usize,
     /// True when the diff was longer than `max_lines` and its hunks were left out.
     truncated: bool,
-    hunks: Vec<Hunk>,
+    pub(crate) hunks: Vec<Hunk>,
+}
+
+impl FileDiff {
+    /// A diff for a file with no changes on the side asked about.
+    pub(crate) fn unchanged() -> Self {
+        FileDiff { binary: false, total_lines: 0, truncated: false, hunks: Vec::new() }
+    }
 }
 
 #[derive(Serialize)]
 pub struct Hunk {
     header: String,
-    lines: Vec<Line>,
+    pub(crate) lines: Vec<Line>,
 }
 
 #[derive(Serialize)]
@@ -55,7 +62,7 @@ pub struct Line {
     kind: char,
     old: Option<u32>,
     new: Option<u32>,
-    text: String,
+    pub(crate) text: String,
 }
 
 #[tauri::command]
@@ -127,12 +134,16 @@ fn read_file_diff(path: &str, id: &str, index: usize, max_lines: Option<usize>) 
     let repo = Repository::discover(path)?;
     let commit = repo.find_commit(Oid::from_str(id)?)?;
     let diff = commit_diff(&repo, &commit)?;
+    file_diff_from_patch(Patch::from_diff(&diff, index)?, max_lines)
+}
 
-    let Some(patch) = Patch::from_diff(&diff, index)? else {
-        return Ok(FileDiff { binary: true, total_lines: 0, truncated: false, hunks: Vec::new() });
-    };
+/// Converts one file's patch into lines the UI can render. `None` is what git2 returns
+/// for a binary file.
+pub(crate) fn file_diff_from_patch(patch: Option<Patch>, max_lines: Option<usize>) -> Result<FileDiff, git2::Error> {
+    let binary = FileDiff { binary: true, total_lines: 0, truncated: false, hunks: Vec::new() };
+    let Some(patch) = patch else { return Ok(binary) };
     if patch.delta().flags().is_binary() {
-        return Ok(FileDiff { binary: true, total_lines: 0, truncated: false, hunks: Vec::new() });
+        return Ok(binary);
     }
 
     let mut total_lines = 0;
@@ -203,54 +214,7 @@ fn path_string(path: Option<&std::path::Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::path::{Path, PathBuf};
-
-    struct TempRepo {
-        dir: PathBuf,
-        repo: Repository,
-    }
-
-    impl TempRepo {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("palace-test-{name}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&dir);
-            let repo = Repository::init(&dir).unwrap();
-            TempRepo { dir, repo }
-        }
-
-        fn commit(&self, files: &[(&str, Option<&str>)], message: &str) -> Oid {
-            let mut index = self.repo.index().unwrap();
-            for (path, content) in files {
-                match content {
-                    Some(content) => {
-                        fs::write(self.dir.join(path), content).unwrap();
-                        index.add_path(Path::new(path)).unwrap();
-                    }
-                    None => {
-                        fs::remove_file(self.dir.join(path)).unwrap();
-                        index.remove_path(Path::new(path)).unwrap();
-                    }
-                }
-            }
-            index.write().unwrap();
-            let tree = self.repo.find_tree(index.write_tree().unwrap()).unwrap();
-            let sig = Signature::now("Ada Lovelace", "ada@example.com").unwrap();
-            let parent = self.repo.head().ok().map(|h| h.peel_to_commit().unwrap());
-            let parents: Vec<&Commit> = parent.iter().collect();
-            self.repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents).unwrap()
-        }
-
-        fn path(&self) -> &str {
-            self.dir.to_str().unwrap()
-        }
-    }
-
-    impl Drop for TempRepo {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.dir);
-        }
-    }
+    use crate::test_support::TempRepo;
 
     #[test]
     fn root_commit_shows_every_file_as_added() {

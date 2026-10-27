@@ -8,6 +8,8 @@ pub struct RepoOverview {
     path: String,
     head: Head,
     commit_count: Option<usize>,
+    /// Number of files with staged or unstaged changes.
+    changes: usize,
     branches: Vec<LocalBranch>,
     remotes: Vec<Remote>,
     tags: Vec<String>,
@@ -68,6 +70,8 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
 
     let head = read_head(&repo)?;
     let commit_count = count_commits(&repo);
+    // A bare repository has no working copy to report on.
+    let changes = crate::working::read_status(&repo).map(|files| files.len()).unwrap_or(0);
     let branches = read_local_branches(&repo)?;
     let remotes = read_remotes(&repo)?;
     let tags = read_tags(&repo)?;
@@ -80,6 +84,7 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
         path: root.components().collect::<std::path::PathBuf>().to_string_lossy().into_owned(),
         head,
         commit_count,
+        changes,
         branches,
         remotes,
         tags,

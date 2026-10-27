@@ -22,6 +22,8 @@ import {
 import CommitDetails from "./components/CommitDetails.vue";
 import HistoryList from "./components/HistoryList.vue";
 import Sidebar from "./components/Sidebar.vue";
+import WorkingCopy from "./components/WorkingCopy.vue";
+import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import {
   forgetRepository,
   readJson,
@@ -39,6 +41,11 @@ const selected = ref("workspace:history");
 const historyRef = ref(null);
 const selectedCommit = ref(null);
 const refreshKey = ref(0);
+const workingFile = ref(null);
+// The commit message being written, kept while switching between views.
+const draft = reactive({ subject: "", body: "" });
+
+const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 
 const PANES_KEY = "palace.paneWidths";
 const panes = reactive({ sidebar: 300, history: 580, ...readJson(PANES_KEY, {}) });
@@ -59,6 +66,9 @@ async function loadRepository(path, { quiet = false } = {}) {
       selected.value = "workspace:history";
       historyRef.value = null;
       selectedCommit.value = null;
+      workingFile.value = null;
+      draft.subject = "";
+      draft.body = "";
     }
     overview.value = data;
     error.value = "";
@@ -215,7 +225,8 @@ function startResize(event, pane, min, max) {
       </header>
 
       <div class="subheader">
-        <span class="breadcrumb">
+        <span v-if="isWorkingCopy">Working Copy</span>
+        <span v-else class="breadcrumb">
           <template v-for="(part, i) in breadcrumb" :key="i">
             <span v-if="i > 0" class="breadcrumb-sep">›</span>
             <span :class="{ dim: i > 0 }">{{ part }}</span>
@@ -223,13 +234,26 @@ function startResize(event, pane, min, max) {
         </span>
       </div>
 
-      <HistoryList
+      <WorkingCopy
+        v-if="isWorkingCopy"
+        v-model:subject="draft.subject"
+        v-model:body="draft.body"
         :path="overview.path"
-        :rev="historyRev"
         :refresh-key="refreshKey"
-        :selected-id="selectedCommit?.id"
-        @select="selectedCommit = $event"
+        :selected-path="workingFile?.path"
+        @select="workingFile = $event"
+        @changed="refresh"
       />
+      <!-- Hidden rather than removed, so the history keeps its scroll position. -->
+      <div v-show="!isWorkingCopy" class="pane-body">
+        <HistoryList
+          :path="overview.path"
+          :rev="historyRev"
+          :refresh-key="refreshKey"
+          :selected-id="selectedCommit?.id"
+          @select="selectedCommit = $event"
+        />
+      </div>
     </section>
 
     <section class="pane detail-pane">
@@ -258,18 +282,30 @@ function startResize(event, pane, min, max) {
         </label>
       </header>
 
-      <div class="subheader">
-        <span class="mono dim">{{ selectedCommit?.short_id }}</span>
-        <div class="segmented">
-          <button class="active" disabled>Changeset</button>
-          <button disabled title="Browsing a commit's files is coming soon">Tree</button>
+      <template v-if="isWorkingCopy">
+        <div class="subheader">
+          <span class="file-title">{{ workingFile?.path }}</span>
         </div>
-      </div>
+        <WorkingFileDiff v-if="workingFile" :path="overview.path" :file="workingFile" @changed="refresh" />
+        <div v-else class="empty-state">
+          <p>Select a file to see its changes.</p>
+        </div>
+      </template>
 
-      <CommitDetails v-if="selectedCommit" :path="overview.path" :commit="selectedCommit" />
-      <div v-else class="empty-state">
-        <p>Select a commit to see its details.</p>
-      </div>
+      <template v-else>
+        <div class="subheader">
+          <span class="mono dim">{{ selectedCommit?.short_id }}</span>
+          <div class="segmented">
+            <button class="active" disabled>Changeset</button>
+            <button disabled title="Browsing a commit's files is coming soon">Tree</button>
+          </div>
+        </div>
+
+        <CommitDetails v-if="selectedCommit" :path="overview.path" :commit="selectedCommit" />
+        <div v-else class="empty-state">
+          <p>Select a commit to see its details.</p>
+        </div>
+      </template>
     </section>
   </div>
 
@@ -316,6 +352,18 @@ function startResize(event, pane, min, max) {
   min-width: 0;
   border-left: 1px solid var(--border);
   background: var(--content-bg);
+}
+
+.pane-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .splitter {
@@ -502,20 +550,6 @@ function startResize(event, pane, min, max) {
 .error svg {
   flex-shrink: 0;
   margin-top: 3px;
-}
-
-.primary-button {
-  padding: 7px 18px;
-  border: 0;
-  border-radius: 7px;
-  background: var(--accent);
-  color: white;
-  font: inherit;
-  font-weight: 500;
-}
-
-.primary-button:hover:not(:disabled) {
-  filter: brightness(1.08);
 }
 
 .recents {

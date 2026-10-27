@@ -1,6 +1,9 @@
 mod commit;
 mod git;
 mod history;
+#[cfg(test)]
+mod test_support;
+mod working;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,6 +17,12 @@ pub fn run() {
             history::history_page,
             commit::commit_details,
             commit::file_diff,
+            working::working_status,
+            working::working_diff,
+            working::stage_files,
+            working::unstage_files,
+            working::stage_hunk,
+            working::commit_changes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

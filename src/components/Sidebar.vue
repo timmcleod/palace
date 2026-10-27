@@ -36,7 +36,13 @@ const matches = (name) => !query.value || name.toLowerCase().includes(query.valu
 const isOpen = (key) => query.value !== "" || !collapsedFolders.has(key);
 
 const workspaceRows = computed(() => [
-  { key: "workspace:working-copy", label: "Working Copy", icon: Folder, depth: 0 },
+  {
+    key: "workspace:working-copy",
+    label: "Working Copy",
+    icon: Folder,
+    depth: 0,
+    count: props.overview.changes || null,
+  },
   { key: "workspace:history", label: "History", icon: History, depth: 0 },
   {
     key: "workspace:stashes",
