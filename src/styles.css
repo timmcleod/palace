@@ -28,6 +28,13 @@
   --lane-5: #f76b15;
   --lane-6: #0d9488;
 
+  --diff-gutter-bg: #f7f7f7;
+  --diff-hunk-bg: #f1f5fb;
+  --diff-added-bg: #e9f8ee;
+  --diff-added-gutter: #d3f0dd;
+  --diff-removed-bg: #fdecec;
+  --diff-removed-gutter: #f9d7d7;
+
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: 14px;
   line-height: 1.4;
@@ -63,6 +70,13 @@
     --lane-4: #3fbf7f;
     --lane-5: #ff8b3d;
     --lane-6: #2bb3a6;
+
+    --diff-gutter-bg: #232323;
+    --diff-hunk-bg: #1f2633;
+    --diff-added-bg: #17301f;
+    --diff-added-gutter: #1d3b27;
+    --diff-removed-bg: #3a1c1c;
+    --diff-removed-gutter: #472222;
   }
 }
 

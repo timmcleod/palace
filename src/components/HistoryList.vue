@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, History } from "lucide-vue-next";
+import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
 
 const props = defineProps({
@@ -202,19 +203,6 @@ const graphWidth = computed(() => Math.max(1, summary.value?.lanes ?? 1) * 14 + 
 const dateFormat = new Intl.DateTimeFormat(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
 const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
 
-function initials(name) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  return (parts[0][0] + (parts.length > 1 ? parts.at(-1)[0] : "")).toUpperCase();
-}
-
-// A stable colour per author, so the same person is recognisable down the list.
-function avatarHue(email) {
-  let hash = 0;
-  for (const char of email.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return Math.abs(hash) % 360;
-}
-
 const MAX_REFS = 3;
 </script>
 
@@ -252,13 +240,7 @@ const MAX_REFS = 3;
         >
           <template v-if="item.commit">
             <CommitGraph class="graph" :graph="item.commit.graph" :width="graphWidth" :height="ROW_HEIGHT" />
-            <div
-              class="avatar"
-              :style="{ '--hue': avatarHue(item.commit.author_email) }"
-              :title="`${item.commit.author_name} <${item.commit.author_email}>`"
-            >
-              {{ initials(item.commit.author_name) }}
-            </div>
+            <Avatar class="avatar" :name="item.commit.author_name" :email="item.commit.author_email" />
             <div class="body">
               <div class="line">
                 <span class="author">{{ item.commit.author_name }}</span>
@@ -340,21 +322,14 @@ const MAX_REFS = 3;
 }
 
 .avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
   margin-right: 10px;
-  border-radius: 50%;
-  background: hsl(var(--hue) 55% 88%);
-  color: hsl(var(--hue) 45% 32%);
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .avatar.placeholder {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   background: var(--pill-bg);
 }
 

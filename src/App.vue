@@ -19,6 +19,7 @@ import {
   Search,
   X,
 } from "lucide-vue-next";
+import CommitDetails from "./components/CommitDetails.vue";
 import HistoryList from "./components/HistoryList.vue";
 import Sidebar from "./components/Sidebar.vue";
 import {
@@ -261,13 +262,13 @@ function startResize(event, pane, min, max) {
         <span class="mono dim">{{ selectedCommit?.short_id }}</span>
         <div class="segmented">
           <button class="active" disabled>Changeset</button>
-          <button disabled>Tree</button>
+          <button disabled title="Browsing a commit's files is coming soon">Tree</button>
         </div>
       </div>
 
-      <div class="empty-state">
-        <p v-if="selectedCommit">Commit details are coming in the next step.</p>
-        <p v-else>Select a commit to see its details.</p>
+      <CommitDetails v-if="selectedCommit" :path="overview.path" :commit="selectedCommit" />
+      <div v-else class="empty-state">
+        <p>Select a commit to see its details.</p>
       </div>
     </section>
   </div>

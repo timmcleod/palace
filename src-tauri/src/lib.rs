@@ -1,3 +1,4 @@
+mod commit;
 mod git;
 mod history;
 
@@ -11,6 +12,8 @@ pub fn run() {
             git::repo_overview,
             history::load_history,
             history::history_page,
+            commit::commit_details,
+            commit::file_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
