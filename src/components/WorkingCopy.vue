@@ -334,11 +334,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   margin: 0 12px 8px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: var(--diff-removed-bg);
+  background: var(--error-bg);
   color: var(--danger);
   font-size: 12.5px;
   white-space: pre-wrap;
-  user-select: text;
 }
 
 .files {
@@ -448,11 +447,10 @@ input[type="checkbox"] {
   overflow-y: auto;
   padding: 8px 10px;
   border-radius: 6px;
-  background: var(--diff-removed-bg);
+  background: var(--error-bg);
   color: var(--danger);
   font-size: 12.5px;
   white-space: pre-wrap;
-  user-select: text;
 }
 
 .subject-row {

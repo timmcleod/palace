@@ -71,7 +71,7 @@ function splitPath(path) {
 </script>
 
 <template>
-  <div ref="scroller" class="details">
+  <div ref="scroller" class="details selectable">
     <div v-if="error" class="message">
       <CircleAlert :size="28" :stroke-width="1.25" />
       <p>{{ error }}</p>
@@ -175,7 +175,6 @@ dt {
 dd {
   margin: 0;
   overflow-wrap: anywhere;
-  user-select: text;
 }
 
 dd.mono {
@@ -214,7 +213,6 @@ dd.mono {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.6;
-  user-select: text;
 }
 
 .changes-bar {
@@ -334,11 +332,11 @@ dd.mono {
 }
 
 .plus {
-  color: var(--lane-4);
+  color: var(--diff-added-text);
 }
 
 .minus {
-  color: var(--danger);
+  color: var(--diff-removed-text);
 }
 
 .message {

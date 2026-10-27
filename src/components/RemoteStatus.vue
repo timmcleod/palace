@@ -138,7 +138,6 @@ const percent = computed(() => {
   font-size: 12.5px;
   color: var(--text-secondary);
   white-space: pre-wrap;
-  user-select: text;
 }
 
 .failed .message {

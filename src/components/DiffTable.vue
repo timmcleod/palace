@@ -11,6 +11,8 @@ defineProps({
 const emit = defineEmits(["hunk", "show-all"]);
 
 const LINE_CLASS = { "+": "added", "-": "removed", "\\": "marker" };
+// Marks each changed line, so added and removed lines differ by more than colour.
+const SIGN = { "+": "+", "-": "−" };
 </script>
 
 <template>
@@ -30,6 +32,7 @@ const LINE_CLASS = { "+": "added", "-": "removed", "\\": "marker" };
           <tr class="hunk-header">
             <td class="gutter" />
             <td class="gutter" />
+            <td class="sign" />
             <td class="text">
               <div class="hunk-bar">
                 <span>{{ hunk.header }}</span>
@@ -51,6 +54,7 @@ const LINE_CLASS = { "+": "added", "-": "removed", "\\": "marker" };
           <tr v-for="(line, l) in hunk.lines" :key="l" :class="LINE_CLASS[line.kind]">
             <td class="gutter">{{ line.old ?? "" }}</td>
             <td class="gutter">{{ line.new ?? "" }}</td>
+            <td class="sign">{{ SIGN[line.kind] ?? "" }}</td>
             <td class="text">{{ line.text }}</td>
           </tr>
         </tbody>
@@ -104,15 +108,35 @@ td {
   text-align: right;
   color: var(--text-tertiary);
   background: var(--diff-gutter-bg);
+  -webkit-user-select: none;
   user-select: none;
+}
+
+/* Left out of selections, like the line numbers, so copied code has no markers. */
+.sign {
+  width: 1.5em;
+  padding-left: 8px;
+  font-weight: 700;
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.added .sign {
+  color: var(--diff-added-text);
+  background: var(--diff-added-bg);
+}
+
+.removed .sign {
+  color: var(--diff-removed-text);
+  background: var(--diff-removed-bg);
 }
 
 .text {
   width: 100%;
-  padding: 0 10px;
+  padding: 0 10px 0 4px;
   white-space: pre;
   tab-size: 4;
-  user-select: text;
 }
 
 .hunk-header td {
@@ -145,6 +169,7 @@ td {
   font: inherit;
   font-family: system-ui, "Ubuntu", sans-serif;
   color: var(--text-primary);
+  -webkit-user-select: none;
   user-select: none;
   cursor: pointer;
 }

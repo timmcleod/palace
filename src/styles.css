@@ -28,14 +28,20 @@
   --lane-5: #f76b15;
   --lane-6: #0d9488;
 
+  /* Diffs use blue for added and orange for removed rather than green and red, so
+     they stay distinct with red-green colour blindness (deuteranopia); every line
+     also carries a +/− marker. */
   --diff-gutter-bg: #f7f7f7;
   --diff-hunk-bg: #f1f5fb;
-  --diff-added-bg: #e9f8ee;
-  --diff-added-gutter: #d3f0dd;
-  --diff-removed-bg: #fdecec;
-  --diff-removed-gutter: #f9d7d7;
-  --conflict-current: #e3eeff;
-  --conflict-incoming: #e6f6ea;
+  --diff-added-bg: #ddeeff;
+  --diff-added-gutter: #c2dcff;
+  --diff-added-text: #0969da;
+  --diff-removed-bg: #ffe8d1;
+  --diff-removed-gutter: #ffd0a3;
+  --diff-removed-text: #bc4c00;
+  --conflict-current: #ddeeff;
+  --conflict-incoming: #fdf0c4;
+  --error-bg: #fdecec;
   --banner-warning-bg: #fdf3dc;
 
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
@@ -76,12 +82,15 @@
 
     --diff-gutter-bg: #232323;
     --diff-hunk-bg: #1f2633;
-    --diff-added-bg: #17301f;
-    --diff-added-gutter: #1d3b27;
-    --diff-removed-bg: #3a1c1c;
-    --diff-removed-gutter: #472222;
-    --conflict-current: #1c2c45;
-    --conflict-incoming: #17301f;
+    --diff-added-bg: #12304f;
+    --diff-added-gutter: #173f6b;
+    --diff-added-text: #58a6ff;
+    --diff-removed-bg: #3f2810;
+    --diff-removed-gutter: #5a3812;
+    --diff-removed-text: #e8873a;
+    --conflict-current: #12304f;
+    --conflict-incoming: #3b3214;
+    --error-bg: #3a1c1c;
     --banner-warning-bg: #3a3020;
   }
 }
@@ -98,14 +107,26 @@ body {
   background: var(--sidebar-bg);
 }
 
-/* Desktop-app behaviour: chrome isn't selectable text. */
+/* Desktop-app behaviour: text isn't selectable, so clicking, double-clicking or
+   dragging things like branches doesn't highlight their labels. The detail pane's
+   content opts back in with .selectable, and form fields stay editable. WebKitGTK,
+   which runs the app on Linux, only understands the prefixed property. */
 body {
+  -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
-input {
+input,
+textarea,
+.selectable {
+  -webkit-user-select: text;
   user-select: text;
+}
+
+.selectable button {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .dim {

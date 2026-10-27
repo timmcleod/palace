@@ -69,7 +69,7 @@ async function run(command, args) {
 </script>
 
 <template>
-  <div class="conflict-view">
+  <div class="conflict-view selectable">
     <p class="intro">
       This file has conflicting changes. Keep one side, or edit the file to combine them and mark it as resolved.
     </p>
@@ -140,11 +140,10 @@ async function run(command, args) {
   margin: 10px 0 0;
   padding: 8px 10px;
   border-radius: 6px;
-  background: var(--diff-removed-bg);
+  background: var(--error-bg);
   color: var(--danger);
   font-size: 12.5px;
   white-space: pre-wrap;
-  user-select: text;
 }
 
 .count {
@@ -195,6 +194,7 @@ td {
   text-align: right;
   color: var(--text-tertiary);
   background: var(--diff-gutter-bg);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -203,7 +203,6 @@ td {
   padding: 0 10px;
   white-space: pre;
   tab-size: 4;
-  user-select: text;
 }
 
 .current .text {

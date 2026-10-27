@@ -120,7 +120,7 @@ const SECTIONS = [
 </script>
 
 <template>
-  <div class="working-diff">
+  <div class="working-diff selectable">
     <p v-if="file.conflicted" class="note">
       This file has merge conflicts. Resolve them in your editor, then stage the file to mark it resolved.
     </p>
@@ -166,11 +166,10 @@ const SECTIONS = [
   color: var(--text-secondary);
   font-size: 12.5px;
   white-space: pre-wrap;
-  user-select: text;
 }
 
 .note.error {
-  background: var(--diff-removed-bg);
+  background: var(--error-bg);
   color: var(--danger);
 }
 
