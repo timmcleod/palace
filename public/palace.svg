@@ -1,0 +1,26 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b93f8"/>
+      <stop offset="1" stop-color="#1d4fd0"/>
+    </linearGradient>
+  </defs>
+  <!-- Leaves a margin so the icon sits like other desktop icons. -->
+  <rect x="72" y="72" width="880" height="880" rx="200" fill="url(#bg)"/>
+  <g fill="#fff">
+    <!-- Pediment -->
+    <path d="M512 214 L792 360 L232 360 Z" stroke="#fff" stroke-width="28" stroke-linejoin="round"/>
+    <!-- Entablature -->
+    <rect x="236" y="384" width="552" height="44" rx="12"/>
+    <!-- Base steps -->
+    <rect x="236" y="726" width="552" height="44" rx="12"/>
+    <rect x="200" y="788" width="624" height="40" rx="12"/>
+  </g>
+  <!-- Columns: the outer two plain, the middle one a branch joining back in. -->
+  <g stroke="#fff" stroke-width="44" stroke-linecap="round" fill="none">
+    <line x1="312" y1="468" x2="312" y2="690"/>
+    <line x1="712" y1="468" x2="712" y2="690"/>
+    <line x1="512" y1="468" x2="512" y2="690"/>
+  </g>
+  <circle cx="512" cy="580" r="44" fill="#2563e0" stroke="#fff" stroke-width="30"/>
+</svg>
