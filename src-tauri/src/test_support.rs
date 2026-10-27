@@ -54,7 +54,11 @@ impl TempRepo {
     pub fn write(&self, files: &[(&str, Option<&str>)]) {
         for (path, content) in files {
             match content {
-                Some(content) => fs::write(self.dir.join(path), content).unwrap(),
+                Some(content) => {
+                    let file = self.dir.join(path);
+                    fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    fs::write(file, content).unwrap();
+                }
                 None => fs::remove_file(self.dir.join(path)).unwrap(),
             }
         }

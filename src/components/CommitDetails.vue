@@ -1,5 +1,5 @@
 <script setup>
-import { computed, provide, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
@@ -9,6 +9,8 @@ const props = defineProps({
   path: { type: String, required: true },
   // The selected row from the history list; supplies the id and ref labels.
   commit: { type: Object, required: true },
+  // A file to open and scroll to, such as the one whose history is being shown.
+  focusFile: { type: String, default: null },
 });
 
 const details = shallowRef(null);
@@ -28,13 +30,28 @@ async function load() {
 
   try {
     const result = await invoke("commit_details", { path: props.path, id: props.commit.id });
-    if (seq === loadSeq) details.value = result;
+    if (seq !== loadSeq) return;
+    details.value = result;
+    if (props.focusFile) focus(props.focusFile);
   } catch (e) {
     if (seq === loadSeq) error.value = String(e);
   }
 }
 
 watch(() => [props.path, props.commit.id], load, { immediate: true });
+
+// Older commits may have the file under a previous name, which still shows up as
+// the old side of a rename or, failing that, as a file with the same name.
+async function focus(file) {
+  const files = details.value.files;
+  const name = file.slice(file.lastIndexOf("/") + 1);
+  let index = files.findIndex((f) => f.path === file || f.old_path === file);
+  if (index < 0) index = files.findIndex((f) => f.path.endsWith(`/${name}`) || f.path === name);
+  if (index < 0) return;
+  expanded.add(index);
+  await nextTick();
+  scroller.value?.querySelectorAll(".file")[index]?.scrollIntoView({ block: "start" });
+}
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "long" });
 const formatDate = (seconds) => dateFormat.format(seconds * 1000);

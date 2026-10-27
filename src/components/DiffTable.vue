@@ -136,7 +136,7 @@ td {
   width: 100%;
   padding: 0 10px 0 4px;
   white-space: pre;
-  tab-size: 4;
+  tab-size: var(--tab-size);
 }
 
 .hunk-header td {

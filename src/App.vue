@@ -17,18 +17,20 @@ import {
   GitBranch,
   GitMerge,
   RefreshCw,
-  Search,
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import FileSearch from "./components/FileSearch.vue";
 import FormDialog from "./components/FormDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
-import TagDialog from "./components/TagDialog.vue";
+import SettingsView from "./components/SettingsView.vue";
 import Sidebar from "./components/Sidebar.vue";
+import TagDialog from "./components/TagDialog.vue";
+import TreeView from "./components/TreeView.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import {
@@ -56,7 +58,21 @@ const workingFile = ref(null);
 // `saved` holds the draft that was there before, to restore if amending is undone.
 const draft = reactive({ subject: "", body: "", amend: false, saved: null });
 
+// Set when the history shows only the commits that changed this file.
+const fileFilter = ref(null);
+// The detail pane shows a commit's changes, or all its files ("tree").
+const detailMode = ref("changeset");
+
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
+const isSettings = computed(() => selected.value === "workspace:settings");
+
+// Picking a file in the search shows its history, with the file opened in whichever
+// view the detail pane is in.
+function showFileHistory(file) {
+  fileFilter.value = file;
+  selectedCommit.value = null;
+  if (isWorkingCopy.value || isSettings.value) selected.value = "workspace:history";
+}
 
 // --- Running git operations ------------------------------------------------------
 
@@ -189,6 +205,7 @@ async function loadRepository(path, { quiet = false } = {}) {
       historyRef.value = null;
       selectedCommit.value = null;
       workingFile.value = null;
+      fileFilter.value = null;
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
     }
     overview.value = data;
@@ -340,7 +357,12 @@ function startResize(event, pane, min, max) {
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
     />
 
-    <section class="pane history-pane">
+    <section v-if="isSettings" class="pane settings-pane">
+      <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
+      <SettingsView :path="overview.path" :name="overview.name" />
+    </section>
+
+    <section v-show="!isSettings" class="pane history-pane">
       <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
 
       <header class="toolbar">
@@ -361,6 +383,12 @@ function startResize(event, pane, min, max) {
             <span v-if="i > 0" class="breadcrumb-sep">›</span>
             <span :class="{ dim: i > 0 }">{{ part }}</span>
           </template>
+        </span>
+        <span v-if="fileFilter && !isWorkingCopy" class="file-filter" :title="`Only commits that changed ${fileFilter}`">
+          <span class="file-filter-name">{{ fileFilter.slice(fileFilter.lastIndexOf("/") + 1) }}</span>
+          <button class="icon-button small" title="Show all commits" @click="fileFilter = null">
+            <X :size="13" />
+          </button>
         </span>
       </div>
 
@@ -386,6 +414,7 @@ function startResize(event, pane, min, max) {
         <HistoryList
           :path="overview.path"
           :rev="historyRev"
+          :file="fileFilter"
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           @select="selectedCommit = $event"
@@ -394,7 +423,7 @@ function startResize(event, pane, min, max) {
       </div>
     </section>
 
-    <section class="pane detail-pane">
+    <section v-show="!isSettings" class="pane detail-pane">
       <div class="splitter" @pointerdown="startResize($event, 'history', 360, 1000)" />
 
       <header class="toolbar actions">
@@ -463,10 +492,7 @@ function startResize(event, pane, min, max) {
         <button class="icon-button" title="Refresh" @click="refresh">
           <RefreshCw :size="17" :stroke-width="1.5" :class="{ spinning: loading }" />
         </button>
-        <label class="search" title="File search (coming soon)">
-          <Search :size="15" :stroke-width="1.5" />
-          <input placeholder="Search for File" disabled />
-        </label>
+        <FileSearch :path="overview.path" :refresh-key="refreshKey" @pick="showFileHistory" />
       </header>
 
       <template v-if="isWorkingCopy">
@@ -484,12 +510,17 @@ function startResize(event, pane, min, max) {
         <div class="subheader">
           <span class="mono dim">{{ selectedCommit?.short_id }}</span>
           <div class="segmented">
-            <button class="active" disabled>Changeset</button>
-            <button disabled title="Browsing a commit's files is coming soon">Tree</button>
+            <button :class="{ active: detailMode === 'changeset' }" @click="detailMode = 'changeset'">Changeset</button>
+            <button :class="{ active: detailMode === 'tree' }" title="Every file at this commit" @click="detailMode = 'tree'">
+              Tree
+            </button>
           </div>
         </div>
 
-        <CommitDetails v-if="selectedCommit" :path="overview.path" :commit="selectedCommit" />
+        <template v-if="selectedCommit">
+          <TreeView v-if="detailMode === 'tree'" :path="overview.path" :commit="selectedCommit" :reveal="fileFilter" />
+          <CommitDetails v-else :path="overview.path" :commit="selectedCommit" :focus-file="fileFilter" />
+        </template>
         <div v-else class="empty-state">
           <p>Select a commit to see its details.</p>
         </div>
@@ -643,29 +674,6 @@ function startResize(event, pane, min, max) {
   background: var(--toolbar-group-bg);
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 220px;
-  min-width: 120px;
-  flex-shrink: 1;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: var(--toolbar-group-bg);
-  color: var(--text-tertiary);
-}
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: none;
-  font: inherit;
-}
-
 .subheader {
   display: flex;
   align-items: center;
@@ -680,6 +688,28 @@ function startResize(event, pane, min, max) {
 .breadcrumb {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.file-filter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+  margin-left: 10px;
+  padding: 1px 2px 1px 9px;
+  border-radius: 6px;
+  background: var(--pill-bg);
+  font-size: 12.5px;
+}
+
+.file-filter-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-pane {
+  grid-column: 2 / -1;
 }
 
 .breadcrumb-sep {

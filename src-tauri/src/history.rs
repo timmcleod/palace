@@ -1,3 +1,4 @@
+use crate::cli;
 use git2::{ErrorCode, Oid, Repository, Sort};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -14,6 +15,8 @@ struct History {
     generation: u64,
     path: String,
     rev: String,
+    /// Set when only the commits that changed this file are listed.
+    file: Option<String>,
     fingerprint: String,
     rows: Vec<GraphRow>,
     times: Vec<i64>,
@@ -68,12 +71,14 @@ pub struct CommitRow {
 
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Loads the history reachable from `rev` (HEAD when omitted). If nothing has changed
-/// since the last load of the same history, the cached walk is reused.
+/// Loads the history reachable from `rev` (HEAD when omitted), or with `file`, only
+/// the commits that changed that file. If nothing has changed since the last load of
+/// the same history, the cached walk is reused.
 #[tauri::command]
 pub async fn load_history(
     path: String,
     rev: Option<String>,
+    file: Option<String>,
     state: State<'_, HistoryState>,
 ) -> Result<HistorySummary, String> {
     let rev = rev.unwrap_or_else(|| "HEAD".to_string());
@@ -82,12 +87,12 @@ pub async fn load_history(
 
     let mut cache = state.0.lock().unwrap();
     if let Some(h) = cache.as_ref() {
-        if h.path == path && h.rev == rev && h.fingerprint == fingerprint {
+        if h.path == path && h.rev == rev && h.file == file && h.fingerprint == fingerprint {
             return Ok(summary(h));
         }
     }
 
-    let history = walk(&repo, path, rev, fingerprint).map_err(message)?;
+    let history = walk(&repo, path, rev, file, fingerprint).map_err(message)?;
     let result = summary(&history);
     *cache = Some(history);
     Ok(result)
@@ -160,11 +165,18 @@ fn fingerprint(repo: &Repository) -> Result<String, git2::Error> {
     Ok(parts.join("\n"))
 }
 
-fn walk(repo: &Repository, path: String, rev: String, fingerprint: String) -> Result<History, git2::Error> {
+fn walk(
+    repo: &Repository,
+    path: String,
+    rev: String,
+    file: Option<String>,
+    fingerprint: String,
+) -> Result<History, git2::Error> {
     let mut history = History {
         generation: GENERATION.fetch_add(1, Ordering::Relaxed) + 1,
         path,
         rev,
+        file,
         fingerprint,
         rows: Vec::new(),
         times: Vec::new(),
@@ -180,6 +192,25 @@ fn walk(repo: &Repository, path: String, rev: String, fingerprint: String) -> Re
         }
         Err(e) => return Err(e),
     };
+
+    if let Some(file) = &history.file {
+        let ids = file_commits(&history.path, start, file).map_err(|e| git2::Error::from_str(&e))?;
+        // One commit after another, so the graph is a single straight line.
+        let last = ids.len().saturating_sub(1);
+        for (i, oid) in ids.into_iter().enumerate() {
+            let commit = repo.find_commit(oid)?;
+            let graph = Graph {
+                lane: 0,
+                pass: Vec::new(),
+                merge_in: if i > 0 { vec![0] } else { Vec::new() },
+                out: if i < last { vec![0] } else { Vec::new() },
+            };
+            history.lanes = 1;
+            history.times.push(commit.author().when().seconds());
+            history.rows.push(GraphRow { oid, graph });
+        }
+        return Ok(history);
+    }
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
@@ -198,6 +229,13 @@ fn walk(repo: &Repository, path: String, rev: String, fingerprint: String) -> Re
     }
 
     Ok(history)
+}
+
+/// The commits from `start` back that changed `file`, newest first. Git follows the
+/// file through renames, which a plain revwalk can't do cheaply.
+fn file_commits(path: &str, start: Oid, file: &str) -> Result<Vec<Oid>, String> {
+    let output = cli::git(path, &["log", "--format=%H", "--follow", &start.to_string(), "--", file], None)?;
+    Ok(output.lines().filter_map(|line| Oid::from_str(line.trim()).ok()).collect())
 }
 
 /// Places one commit in the graph. `lanes` holds, for each column, the commit that the
@@ -300,6 +338,22 @@ mod tests {
 
     fn oid(n: u8) -> Oid {
         Oid::from_bytes(&[n; 20]).unwrap()
+    }
+
+    #[test]
+    fn file_history_follows_renames() {
+        let t = crate::test_support::TempRepo::new("file-history");
+        let first = t.commit(&[("old.txt", Some("one\ntwo\nthree\nfour\n"))], "Add");
+        t.commit(&[("other.txt", Some("x"))], "Unrelated");
+        let moved = t.commit(&[("old.txt", None), ("new.txt", Some("one\ntwo\nthree\nfour\n"))], "Rename");
+        let edited = t.commit(&[("new.txt", Some("one\ntwo\nthree\nfour\nfive\n"))], "Edit");
+
+        let repo = Repository::open(t.path()).unwrap();
+        let history = walk(&repo, t.path().into(), "HEAD".into(), Some("new.txt".into()), String::new()).unwrap();
+        let ids: Vec<Oid> = history.rows.iter().map(|r| r.oid).collect();
+        assert_eq!(ids, [edited, moved, first]);
+        assert_eq!(history.rows[0].graph.out, [0]);
+        assert!(history.rows[2].graph.out.is_empty());
     }
 
     #[test]

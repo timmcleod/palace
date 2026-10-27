@@ -44,6 +44,8 @@
   --error-bg: #fdecec;
   --banner-warning-bg: #fdf3dc;
 
+  --tab-size: 4;
+
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: 14px;
   line-height: 1.4;
@@ -51,48 +53,68 @@
   -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent: #3b8ff6;
-    --danger: #ff6b61;
+/* The theme is resolved in settings.js, which follows the system unless Settings
+   chooses light or dark. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #3b8ff6;
+  --danger: #ff6b61;
 
-    --text-primary: #e6e6e6;
-    --text-secondary: #b8b8b8;
-    --text-tertiary: #8a8a8a;
-    --icon: #a5a5a5;
+  --text-primary: #e6e6e6;
+  --text-secondary: #b8b8b8;
+  --text-tertiary: #8a8a8a;
+  --icon: #a5a5a5;
 
-    --sidebar-bg: #262626;
-    --content-bg: #1e1e1e;
-    --input-bg: #1a1a1a;
-    --border: #363636;
-    --row-hover: rgba(255, 255, 255, 0.05);
-    --row-selected: rgba(255, 255, 255, 0.1);
-    --pill-bg: rgba(255, 255, 255, 0.12);
-    --toolbar-group-bg: rgba(255, 255, 255, 0.06);
-    --button-hover: rgba(255, 255, 255, 0.09);
+  --sidebar-bg: #262626;
+  --content-bg: #1e1e1e;
+  --input-bg: #1a1a1a;
+  --border: #363636;
+  --row-hover: rgba(255, 255, 255, 0.05);
+  --row-selected: rgba(255, 255, 255, 0.1);
+  --pill-bg: rgba(255, 255, 255, 0.12);
+  --toolbar-group-bg: rgba(255, 255, 255, 0.06);
+  --button-hover: rgba(255, 255, 255, 0.09);
 
-    --ref-remote: #6b6b6b;
-    --ref-tag: #a07524;
-    --lane-1: #3b8ff6;
-    --lane-2: #a875e0;
-    --lane-3: #f2666a;
-    --lane-4: #3fbf7f;
-    --lane-5: #ff8b3d;
-    --lane-6: #2bb3a6;
+  --ref-remote: #6b6b6b;
+  --ref-tag: #a07524;
+  --lane-1: #3b8ff6;
+  --lane-2: #a875e0;
+  --lane-3: #f2666a;
+  --lane-4: #3fbf7f;
+  --lane-5: #ff8b3d;
+  --lane-6: #2bb3a6;
 
-    --diff-gutter-bg: #232323;
-    --diff-hunk-bg: #1f2633;
-    --diff-added-bg: #12304f;
-    --diff-added-gutter: #173f6b;
-    --diff-added-text: #58a6ff;
-    --diff-removed-bg: #3f2810;
-    --diff-removed-gutter: #5a3812;
-    --diff-removed-text: #e8873a;
-    --conflict-current: #12304f;
-    --conflict-incoming: #3b3214;
-    --error-bg: #3a1c1c;
-    --banner-warning-bg: #3a3020;
-  }
+  --diff-gutter-bg: #232323;
+  --diff-hunk-bg: #1f2633;
+  --diff-added-bg: #12304f;
+  --diff-added-gutter: #173f6b;
+  --diff-added-text: #58a6ff;
+  --diff-removed-bg: #3f2810;
+  --diff-removed-gutter: #5a3812;
+  --diff-removed-text: #e8873a;
+  --conflict-current: #12304f;
+  --conflict-incoming: #3b3214;
+  --error-bg: #3a1c1c;
+  --banner-warning-bg: #3a3020;
+}
+
+/* Settings › Diffs can switch to the traditional green and red. */
+:root[data-diff-colors="classic"] {
+  --diff-added-bg: #dafbe1;
+  --diff-added-gutter: #aceebb;
+  --diff-added-text: #1a7f37;
+  --diff-removed-bg: #ffebe9;
+  --diff-removed-gutter: #ffcecb;
+  --diff-removed-text: #cf222e;
+}
+
+:root[data-theme="dark"][data-diff-colors="classic"] {
+  --diff-added-bg: #173322;
+  --diff-added-gutter: #1f4a2e;
+  --diff-added-text: #3fb950;
+  --diff-removed-bg: #3d1d20;
+  --diff-removed-gutter: #5c2629;
+  --diff-removed-text: #f85149;
 }
 
 * {

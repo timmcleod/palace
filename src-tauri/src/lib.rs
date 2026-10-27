@@ -4,9 +4,11 @@ mod cli;
 mod commit;
 mod git;
 mod history;
+mod identity;
 mod remote;
 mod stash;
 mod tag;
+mod tree;
 mod watch;
 #[cfg(test)]
 mod test_support;
@@ -54,6 +56,11 @@ pub fn run() {
             tag::create_tag,
             tag::delete_tag,
             tag::describe_revision,
+            tree::tracked_files,
+            tree::tree_entries,
+            tree::file_contents,
+            identity::git_identity,
+            identity::set_git_identity,
             remote::fetch,
             remote::pull,
             remote::push,

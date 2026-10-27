@@ -8,6 +8,8 @@ import CommitGraph from "./CommitGraph.vue";
 const props = defineProps({
   path: { type: String, required: true },
   rev: { type: String, default: null },
+  // Only commits that changed this file.
+  file: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
   selectedId: { type: String, default: null },
 });
@@ -36,7 +38,7 @@ const inflight = new Set();
 async function load({ resetScroll }) {
   const seq = ++loadSeq;
   try {
-    const next = await invoke("load_history", { path: props.path, rev: props.rev });
+    const next = await invoke("load_history", { path: props.path, rev: props.rev, file: props.file });
     if (seq !== loadSeq) return;
     error.value = "";
     // An unchanged generation means nothing moved; keep the rows already on screen.
@@ -78,7 +80,7 @@ function commitAt(index) {
 }
 
 watch(
-  () => [props.path, props.rev],
+  () => [props.path, props.rev, props.file],
   () => load({ resetScroll: true }),
   { immediate: true },
 );
