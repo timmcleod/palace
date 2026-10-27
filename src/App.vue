@@ -44,8 +44,9 @@ const historyRef = ref(null);
 const selectedCommit = ref(null);
 const refreshKey = ref(0);
 const workingFile = ref(null);
-// The commit message being written, kept while switching between views.
-const draft = reactive({ subject: "", body: "" });
+// The commit being written, kept while switching between views. While amending,
+// `saved` holds the draft that was there before, to restore if amending is undone.
+const draft = reactive({ subject: "", body: "", amend: false, saved: null });
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 
@@ -115,8 +116,7 @@ async function loadRepository(path, { quiet = false } = {}) {
       historyRef.value = null;
       selectedCommit.value = null;
       workingFile.value = null;
-      draft.subject = "";
-      draft.body = "";
+      Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
     }
     overview.value = data;
     error.value = "";
@@ -284,8 +284,7 @@ function startResize(event, pane, min, max) {
 
       <WorkingCopy
         v-if="isWorkingCopy"
-        v-model:subject="draft.subject"
-        v-model:body="draft.body"
+        :draft="draft"
         :path="overview.path"
         :refresh-key="refreshKey"
         :selected-path="workingFile?.path"

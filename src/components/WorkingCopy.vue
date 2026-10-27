@@ -1,17 +1,20 @@
 <script setup>
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleCheck, X } from "lucide-vue-next";
+import { CircleCheck, Undo2, X } from "lucide-vue-next";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { confirmDiscard } from "../lib/confirm.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
   path: { type: String, required: true },
   refreshKey: { type: Number, default: 0 },
   selectedPath: { type: String, default: null },
-  subject: { type: String, default: "" },
-  body: { type: String, default: "" },
+  // The commit being written: { subject, body, amend, saved }. Owned by the parent so
+  // it survives switching views; this component edits its fields.
+  draft: { type: Object, required: true },
 });
-const emit = defineEmits(["select", "changed", "update:subject", "update:body"]);
+const emit = defineEmits(["select", "changed"]);
 
 const files = shallowRef(null);
 const error = ref("");
@@ -74,19 +77,84 @@ function unstageAll() {
   run("unstage_files", { files: stagedFiles.value.flatMap(pathsOf) });
 }
 
+async function discard(list) {
+  const ok =
+    list.length === 1
+      ? await confirmDiscard(
+          `Discard all changes to “${list[0].path.split("/").at(-1)}”?`,
+          "Its staged and unstaged changes will be thrown away. The current version of the file will be moved to the Trash.",
+        )
+      : await confirmDiscard(
+          `Discard changes to ${list.length} files?`,
+          "All their staged and unstaged changes will be thrown away. The current versions of the files will be moved to the Trash.",
+        );
+  if (ok) run("discard_files", { files: list.map((f) => f.path) });
+}
+
+// --- Amend -----------------------------------------------------------------------
+
+// The commit being amended: { message, pushed }.
+const head = shallowRef(null);
+
+async function toggleAmend(on) {
+  commitError.value = "";
+  if (!on) {
+    // Put back whatever was being written before amending.
+    Object.assign(props.draft, props.draft.saved ?? { subject: "", body: "" }, { amend: false, saved: null });
+    return;
+  }
+
+  try {
+    head.value = await invoke("head_commit", { path: props.path });
+  } catch (e) {
+    commitError.value = String(e);
+    return;
+  }
+  if (!head.value) {
+    commitError.value = "There's no commit to amend yet.";
+    return;
+  }
+  const [subject, ...rest] = head.value.message.split("\n");
+  props.draft.saved = { subject: props.draft.subject, body: props.draft.body };
+  Object.assign(props.draft, { subject, body: rest.join("\n").trim(), amend: true });
+}
+
+// Reopening the view while amending needs the pushed warning again.
+watch(
+  () => props.draft.amend,
+  async (amend) => {
+    if (amend && !head.value) head.value = await invoke("head_commit", { path: props.path }).catch(() => null);
+  },
+  { immediate: true },
+);
+
+// --- Commit ----------------------------------------------------------------------
+
 const canCommit = computed(
-  () => stagedFiles.value.length > 0 && props.subject.trim() !== "" && !committing.value && !busy.value,
+  () =>
+    (stagedFiles.value.length > 0 || props.draft.amend) &&
+    props.draft.subject.trim() !== "" &&
+    !committing.value &&
+    !busy.value,
 );
 
 async function commit() {
   if (!canCommit.value) return;
+  if (props.draft.amend && head.value?.pushed) {
+    const ok = await ask(
+      "This commit has already been pushed. After amending it, your branch and its upstream will have diverged, and you'll need to force push to publish the change.",
+      { title: "Amend a Pushed Commit?", kind: "warning", okLabel: "Amend", cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+  }
+
   committing.value = true;
   commitError.value = "";
-  const message = [props.subject.trim(), props.body.trim()].filter(Boolean).join("\n\n");
+  const message = [props.draft.subject.trim(), props.draft.body.trim()].filter(Boolean).join("\n\n");
   try {
-    await invoke("commit_changes", { path: props.path, message });
-    emit("update:subject", "");
-    emit("update:body", "");
+    await invoke("commit_changes", { path: props.path, message, amend: props.draft.amend });
+    Object.assign(props.draft, { subject: "", body: "", amend: false, saved: null });
+    head.value = null;
   } catch (e) {
     commitError.value = String(e);
   } finally {
@@ -123,6 +191,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
       <span class="bar-actions">
         <button class="link-button" :disabled="busy || !unstagedFiles.length" @click="stageAll">Stage All</button>
         <button class="link-button" :disabled="busy || !stagedFiles.length" @click="unstageAll">Unstage All</button>
+        <button class="link-button danger" :disabled="busy" @click="discard(files)">Discard All…</button>
       </span>
     </div>
 
@@ -157,36 +226,60 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
           <span v-if="file.old_path" class="dim">{{ file.old_path }} → </span>
           <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
         </span>
+        <button
+          class="icon-button small discard"
+          title="Discard Changes…"
+          :disabled="busy"
+          @click.stop="discard([file])"
+        >
+          <Undo2 :size="14" />
+        </button>
       </div>
     </div>
 
     <form class="composer" @submit.prevent="commit">
       <p v-if="commitError" class="commit-error">{{ commitError }}</p>
+      <p v-if="draft.amend && head?.pushed" class="amend-warning">
+        This commit has already been pushed. Amending it will mean force pushing.
+      </p>
       <div class="subject-row">
         <input
+          v-model="draft.subject"
           class="subject"
           placeholder="Commit subject"
           spellcheck="true"
-          :value="subject"
-          @input="emit('update:subject', $event.target.value)"
           @keydown.ctrl.enter.prevent="commit"
         />
-        <span class="counter" :class="{ long: subject.length > 72 }" title="Keep subjects under about 72 characters">
-          {{ subject.length }}
+        <span
+          class="counter"
+          :class="{ long: draft.subject.length > 72 }"
+          title="Keep subjects under about 72 characters"
+        >
+          {{ draft.subject.length }}
         </span>
       </div>
       <textarea
+        v-model="draft.body"
         placeholder="Description (optional)"
         rows="4"
         spellcheck="true"
-        :value="body"
-        @input="emit('update:body', $event.target.value)"
         @keydown.ctrl.enter.prevent="commit"
       />
       <div class="composer-actions">
+        <label class="amend">
+          <input
+            type="checkbox"
+            :checked="draft.amend"
+            :disabled="committing"
+            @change="toggleAmend($event.target.checked)"
+          />
+          Amend last commit
+        </label>
         <span class="hint">Ctrl+Enter</span>
         <button type="submit" class="primary-button" :disabled="!canCommit">
-          {{ committing ? "Committing…" : `Commit ${plural(stagedFiles.length, "file")}` }}
+          <template v-if="committing">{{ draft.amend ? "Amending…" : "Committing…" }}</template>
+          <template v-else-if="draft.amend">Amend Last Commit</template>
+          <template v-else>Commit {{ plural(stagedFiles.length, "file") }}</template>
         </button>
       </div>
     </form>
@@ -229,6 +322,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   cursor: default;
 }
 
+.link-button.danger:not(:disabled) {
+  color: var(--danger);
+}
+
 .banner {
   display: flex;
   align-items: flex-start;
@@ -266,6 +363,19 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 .file.selected {
   background: var(--row-selected);
+}
+
+.discard {
+  flex-shrink: 0;
+  visibility: hidden;
+}
+
+.file:hover .discard {
+  visibility: visible;
+}
+
+.discard:hover:not(:disabled) {
+  color: var(--danger);
 }
 
 input[type="checkbox"] {
@@ -394,6 +504,24 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.amend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.amend-warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--toolbar-group-bg);
+  color: var(--ref-tag);
+  font-size: 12.5px;
 }
 
 .hint {

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { confirmDiscard } from "../lib/confirm.js";
 import DiffTable from "./DiffTable.vue";
 
 // The staged and unstaged changes of one working-copy file, with hunk staging.
@@ -73,8 +74,22 @@ async function run(command, args) {
   }
 }
 
-function toggleHunk(staged, hunk) {
-  run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk });
+async function onHunk(staged, { action, index }) {
+  if (action === "discard") {
+    const ok = await confirmDiscard("Discard this hunk?", "The change will be lost; it can't be recovered from the Trash.");
+    if (ok) run("discard_hunk", { file: props.file.path, hunk: index });
+  } else {
+    run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk: index });
+  }
+}
+
+async function discardFile() {
+  const name = props.file.path.split("/").at(-1);
+  const ok = await confirmDiscard(
+    `Discard all changes to “${name}”?`,
+    "Its staged and unstaged changes will be thrown away. The current version of the file will be moved to the Trash.",
+  );
+  if (ok) run("discard_files", { files: [props.file.path] });
 }
 
 function stageFile() {
@@ -86,8 +101,21 @@ function unstageFile() {
 }
 
 const SECTIONS = [
-  { staged: false, title: "Unstaged Changes", hunkAction: "Stage Hunk", fileAction: "Stage File" },
-  { staged: true, title: "Staged Changes", hunkAction: "Unstage Hunk", fileAction: "Unstage File" },
+  {
+    staged: false,
+    title: "Unstaged Changes",
+    hunkActions: [
+      { id: "discard", label: "Discard Hunk", danger: true },
+      { id: "stage", label: "Stage Hunk" },
+    ],
+    fileAction: "Stage File",
+  },
+  {
+    staged: true,
+    title: "Staged Changes",
+    hunkActions: [{ id: "unstage", label: "Unstage Hunk" }],
+    fileAction: "Unstage File",
+  },
 ];
 </script>
 
@@ -97,6 +125,10 @@ const SECTIONS = [
       This file has merge conflicts. Resolve them in your editor, then stage the file to mark it resolved.
     </p>
     <p v-if="error" class="note error">{{ error }}</p>
+
+    <div class="file-actions">
+      <button class="link-button danger" :disabled="busy" @click="discardFile">Discard All Changes…</button>
+    </div>
 
     <template v-for="section in SECTIONS" :key="section.title">
       <section v-if="diffs[section.staged ? 'staged' : 'unstaged']" class="section">
@@ -108,10 +140,10 @@ const SECTIONS = [
         </header>
         <DiffTable
           :diff="diffs[section.staged ? 'staged' : 'unstaged']"
-          :hunk-action="section.hunkAction"
+          :hunk-actions="section.hunkActions"
           :busy="busy"
           :loading-all="loadingAll === section.staged"
-          @hunk="toggleHunk(section.staged, $event)"
+          @hunk="onHunk(section.staged, $event)"
           @show-all="showAll(section.staged)"
         />
       </section>
@@ -172,5 +204,15 @@ h3 {
 
 .link-button:disabled {
   color: var(--text-tertiary);
+}
+
+.link-button.danger:not(:disabled) {
+  color: var(--danger);
+}
+
+.file-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 </style>

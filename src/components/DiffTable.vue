@@ -2,8 +2,8 @@
 // Renders one file's diff. Loading it is up to the parent.
 defineProps({
   diff: { type: Object, required: true },
-  // Label for a button on each hunk (e.g. "Stage Hunk"); no button when null.
-  hunkAction: { type: String, default: null },
+  // Buttons shown on each hunk, as [{ id, label, danger }].
+  hunkActions: { type: Array, default: () => [] },
   // Disables the hunk buttons while an action is running.
   busy: { type: Boolean, default: false },
   loadingAll: { type: Boolean, default: false },
@@ -33,9 +33,18 @@ const LINE_CLASS = { "+": "added", "-": "removed", "\\": "marker" };
             <td class="text">
               <div class="hunk-bar">
                 <span>{{ hunk.header }}</span>
-                <button v-if="hunkAction" class="hunk-action" :disabled="busy" @click="emit('hunk', h)">
-                  {{ hunkAction }}
-                </button>
+                <span v-if="hunkActions.length" class="hunk-actions">
+                  <button
+                    v-for="action in hunkActions"
+                    :key="action.id"
+                    class="hunk-action"
+                    :class="{ danger: action.danger }"
+                    :disabled="busy"
+                    @click="emit('hunk', { action: action.id, index: h })"
+                  >
+                    {{ action.label }}
+                  </button>
+                </span>
               </div>
             </td>
           </tr>
@@ -121,9 +130,14 @@ td {
 }
 
 /* Stays in view at the right edge even when long lines scroll the table sideways. */
-.hunk-action {
+.hunk-actions {
   position: sticky;
   right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.hunk-action {
   padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -138,6 +152,11 @@ td {
 .hunk-action:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.hunk-action.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .hunk-action:disabled {

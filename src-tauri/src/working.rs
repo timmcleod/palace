@@ -65,9 +65,38 @@ pub async fn stage_hunk(
     apply_hunk(&path, &file, old_path.as_deref(), staged, hunk)
 }
 
+/// Throws away all changes to the listed files, staged and unstaged, returning them to
+/// how they are in HEAD. The current version of each file goes to the Trash first, so
+/// a mistaken discard can be recovered.
 #[tauri::command]
-pub async fn commit_changes(path: String, message: String) -> Result<(), String> {
-    commit(&path, &message)
+pub async fn discard_files(path: String, files: Vec<String>) -> Result<(), String> {
+    discard(&path, &files, &move_to_trash)
+}
+
+/// Throws away one hunk of a file's unstaged changes.
+#[tauri::command]
+pub async fn discard_hunk(path: String, file: String, hunk: usize) -> Result<(), String> {
+    let patch = hunk_patch(&path, &file, None, false, hunk)?;
+    git(&path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
+}
+
+#[tauri::command]
+pub async fn commit_changes(path: String, message: String, amend: bool) -> Result<(), String> {
+    commit(&path, &message, amend)
+}
+
+#[derive(Serialize)]
+pub struct HeadCommit {
+    message: String,
+    /// Whether the commit is already on the branch's upstream, so amending it would
+    /// mean force pushing.
+    pushed: bool,
+}
+
+/// The commit an amend would replace, or None before the first commit.
+#[tauri::command]
+pub async fn head_commit(path: String) -> Result<Option<HeadCommit>, String> {
+    read_head_commit(&path).map_err(message)
 }
 
 pub(crate) fn read_status(repo: &Repository) -> Result<Vec<WorkingFile>, git2::Error> {
@@ -200,16 +229,7 @@ fn unstage(path: &str, files: &[String]) -> Result<(), String> {
 }
 
 fn apply_hunk(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk: usize) -> Result<(), String> {
-    let patch = {
-        let repo = Repository::discover(path).map_err(message)?;
-        let diff = file_diff(&repo, file, old_path, staged).map_err(message)?;
-        let index = delta_index(&diff, file).ok_or("This file no longer has those changes.")?;
-        let mut patch = Patch::from_diff(&diff, index)
-            .map_err(message)?
-            .ok_or("Binary files can't be staged by hunk.")?;
-        let text = patch.to_buf().map_err(message)?;
-        single_hunk_patch(&String::from_utf8_lossy(&text), hunk).ok_or("That hunk no longer exists.")?
-    };
+    let patch = hunk_patch(path, file, old_path, staged, hunk)?;
 
     // Unstaging applies the staged hunk in reverse to the index.
     let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
@@ -218,6 +238,18 @@ fn apply_hunk(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk
     }
     args.push("-");
     git(path, &args, Some(&patch)).map(drop)
+}
+
+/// A patch holding just one hunk of a file's staged or unstaged diff.
+fn hunk_patch(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk: usize) -> Result<String, String> {
+    let repo = Repository::discover(path).map_err(message)?;
+    let diff = file_diff(&repo, file, old_path, staged).map_err(message)?;
+    let index = delta_index(&diff, file).ok_or("This file no longer has those changes.")?;
+    let mut patch = Patch::from_diff(&diff, index)
+        .map_err(message)?
+        .ok_or("Binary files can't be changed by hunk.")?;
+    let text = patch.to_buf().map_err(message)?;
+    single_hunk_patch(&String::from_utf8_lossy(&text), hunk).ok_or_else(|| "That hunk no longer exists.".to_string())
 }
 
 /// Keeps a patch's file header and only its `hunk`th hunk.
@@ -241,8 +273,95 @@ fn single_hunk_patch(patch: &str, hunk: usize) -> Option<String> {
     Some(result)
 }
 
-fn commit(path: &str, message: &str) -> Result<(), String> {
-    git(path, &["commit", "-F", "-"], Some(message)).map(drop)
+fn commit(path: &str, message: &str, amend: bool) -> Result<(), String> {
+    let mut args = vec!["commit", "-F", "-"];
+    if amend {
+        args.push("--amend");
+    }
+    git(path, &args, Some(message)).map(drop)
+}
+
+fn read_head_commit(path: &str) -> Result<Option<HeadCommit>, git2::Error> {
+    let repo = Repository::discover(path)?;
+    let head = match repo.head() {
+        Ok(head) => head,
+        Err(e) if e.code() == ErrorCode::UnbornBranch || e.code() == ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let commit = head.peel_to_commit()?;
+
+    let upstream = head
+        .is_branch()
+        .then(|| git2::Branch::wrap(head).upstream().ok().and_then(|u| u.get().target()))
+        .flatten();
+    let pushed = match upstream {
+        Some(upstream) => upstream == commit.id() || repo.graph_descendant_of(upstream, commit.id())?,
+        None => false,
+    };
+
+    Ok(Some(HeadCommit {
+        message: String::from_utf8_lossy(commit.message_bytes()).trim_end().to_string(),
+        pushed,
+    }))
+}
+
+fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+    let repo = Repository::discover(path).map_err(message)?;
+    let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
+    let head = head_tree(&repo).map_err(message)?;
+
+    // Discarding a staged rename also brings back the file under its old name.
+    let status = read_status(&repo).map_err(message)?;
+    let mut targets: Vec<&str> = Vec::new();
+    for file in files {
+        targets.push(file);
+        if let Some(old) = status.iter().find(|s| &s.path == file).and_then(|s| s.old_path.as_deref()) {
+            targets.push(old);
+        }
+    }
+
+    for target in &targets {
+        let full = workdir.join(target);
+        if full.symlink_metadata().is_ok() {
+            backup(&full)?;
+        }
+    }
+
+    // Files HEAD knows about are restored from it; anything newer is dropped from the
+    // index (its working copy is already in the Trash).
+    let (known, new): (Vec<&str>, Vec<&str>) = targets
+        .iter()
+        .partition(|t| head.as_ref().is_some_and(|tree| tree.get_path(Path::new(t)).is_ok()));
+
+    if !new.is_empty() {
+        let mut args = vec!["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--"];
+        args.extend(&new);
+        git(path, &args, None)?;
+        for file in &new {
+            remove_empty_parents(&workdir, &workdir.join(file));
+        }
+    }
+    if !known.is_empty() {
+        let mut args = vec!["restore", "--source=HEAD", "--staged", "--worktree", "--"];
+        args.extend(&known);
+        git(path, &args, None)?;
+    }
+    Ok(())
+}
+
+fn move_to_trash(file: &Path) -> Result<(), String> {
+    trash::delete(file).map_err(|e| format!("Couldn't move {} to the Trash: {e}", file.display()))
+}
+
+/// Removes directories left empty by discarding new files, as git clean would.
+fn remove_empty_parents(workdir: &Path, file: &Path) {
+    let mut dir = file.parent();
+    while let Some(d) = dir {
+        if d == workdir || std::fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
 }
 
 fn message(e: git2::Error) -> String {
@@ -357,7 +476,7 @@ mod tests {
         t.write(&[("a.txt", Some("b\n")), ("other.txt", Some("x\n"))]);
         stage(t.path(), &["a.txt".into()]).unwrap();
 
-        commit(t.path(), "Second\n\nWith a body.").unwrap();
+        commit(t.path(), "Second\n\nWith a body.", false).unwrap();
 
         let head = t.repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head.message(), Ok("Second\n\nWith a body.\n"));
@@ -365,11 +484,131 @@ mod tests {
         assert_eq!(statuses(&t), [("other.txt".into(), None, Some("untracked"))]);
     }
 
+    /// Stands in for the Trash: moves discarded files into a backup folder.
+    fn backup_into(dir: &Path) -> impl Fn(&Path) -> Result<(), String> + '_ {
+        move |file: &Path| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::rename(file, dir.join(file.file_name().unwrap())).map_err(|e| e.to_string())
+        }
+    }
+
+    fn read(t: &TempRepo, file: &str) -> Option<String> {
+        std::fs::read_to_string(t.dir.join(file)).ok()
+    }
+
+    #[test]
+    fn discarding_returns_files_to_head_and_keeps_a_backup() {
+        let t = TempRepo::new("discard");
+        t.commit(&[("kept.txt", Some("original\n")), ("gone.txt", Some("still here\n"))], "First");
+        std::fs::create_dir_all(t.dir.join("new-dir")).unwrap();
+        t.write(&[
+            ("kept.txt", Some("staged edit\n")),
+            ("gone.txt", None),
+            ("new-dir/untracked.txt", Some("scratch\n")),
+            ("added.txt", Some("added\n")),
+        ]);
+        stage(t.path(), &["kept.txt".into(), "added.txt".into()]).unwrap();
+        t.write(&[("kept.txt", Some("unstaged edit on top\n"))]);
+
+        let backup = t.dir.with_extension("backup");
+        let files = ["kept.txt", "gone.txt", "new-dir/untracked.txt", "added.txt"].map(String::from);
+        discard(t.path(), &files, &backup_into(&backup)).unwrap();
+
+        assert_eq!(statuses(&t), []);
+        assert_eq!(read(&t, "kept.txt").as_deref(), Some("original\n"));
+        assert_eq!(read(&t, "gone.txt").as_deref(), Some("still here\n"));
+        assert!(!t.dir.join("new-dir").exists(), "the emptied directory is removed");
+        assert!(!t.dir.join("added.txt").exists());
+        // Everything that existed in the working copy was backed up first.
+        let saved = |f: &str| std::fs::read_to_string(backup.join(f)).ok();
+        assert_eq!(saved("kept.txt").as_deref(), Some("unstaged edit on top\n"));
+        assert_eq!(saved("untracked.txt").as_deref(), Some("scratch\n"));
+        assert_eq!(saved("added.txt").as_deref(), Some("added\n"));
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+
+    #[test]
+    fn discarding_a_staged_rename_brings_back_the_old_name() {
+        let t = TempRepo::new("discard-rename");
+        t.commit(&[("old.txt", Some("content\n"))], "First");
+        git(t.path(), &["mv", "old.txt", "new.txt"], None).unwrap();
+        assert_eq!(statuses(&t), [("new.txt".into(), Some("renamed"), None)]);
+
+        let backup = t.dir.with_extension("backup");
+        discard(t.path(), &["new.txt".into()], &backup_into(&backup)).unwrap();
+
+        assert_eq!(statuses(&t), []);
+        assert_eq!(read(&t, "old.txt").as_deref(), Some("content\n"));
+        assert!(!t.dir.join("new.txt").exists());
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+
+    #[test]
+    fn discarding_before_the_first_commit_drops_the_file() {
+        let t = TempRepo::new("discard-unborn");
+        t.write(&[("a.txt", Some("a\n"))]);
+        stage(t.path(), &["a.txt".into()]).unwrap();
+
+        let backup = t.dir.with_extension("backup");
+        discard(t.path(), &["a.txt".into()], &backup_into(&backup)).unwrap();
+
+        assert_eq!(statuses(&t), []);
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+
+    #[test]
+    fn discarding_a_single_hunk_keeps_the_rest() {
+        let t = TempRepo::new("discard-hunk");
+        let original: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+        t.commit(&[("a.txt", Some(&original))], "First");
+        let changed = original.replace("line 2\n", "line two\n").replace("line 19\n", "line nineteen\n");
+        t.write(&[("a.txt", Some(&changed))]);
+
+        let patch = hunk_patch(t.path(), "a.txt", None, false, 0).unwrap();
+        git(t.path(), &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).unwrap();
+
+        let now = read(&t, "a.txt").unwrap();
+        assert!(now.contains("line 2\n") && now.contains("line nineteen\n"), "{now}");
+    }
+
+    #[test]
+    fn amending_replaces_the_last_commit() {
+        let t = TempRepo::new("amend");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let original = t.commit(&[("b.txt", Some("b\n"))], "Secnod");
+        assert_eq!(read_head_commit(t.path()).unwrap().unwrap().message, "Secnod");
+
+        t.write(&[("c.txt", Some("forgotten\n"))]);
+        stage(t.path(), &["c.txt".into()]).unwrap();
+        commit(t.path(), "Second", true).unwrap();
+
+        let head = t.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_ne!(head.id(), original);
+        assert_eq!(head.message(), Ok("Second\n"));
+        assert_eq!(head.parent(0).unwrap().message(), Ok("First"));
+        assert!(head.tree().unwrap().get_path(Path::new("c.txt")).is_ok());
+    }
+
+    #[test]
+    fn a_pushed_head_commit_is_flagged_before_amending() {
+        let server = TempRepo::bare("amend-pushed-server");
+        let t = TempRepo::new("amend-pushed");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        assert!(!read_head_commit(t.path()).unwrap().unwrap().pushed);
+
+        t.repo.remote("origin", server.path()).unwrap();
+        git(t.path(), &["push", "-u", "origin", "HEAD"], None).unwrap();
+        assert!(read_head_commit(t.path()).unwrap().unwrap().pushed);
+
+        t.commit(&[("b.txt", Some("b\n"))], "Second");
+        assert!(!read_head_commit(t.path()).unwrap().unwrap().pushed);
+    }
+
     #[test]
     fn commit_errors_carry_gits_explanation() {
         let t = TempRepo::new("empty-commit");
         t.commit(&[("a.txt", Some("a\n"))], "First");
-        let error = commit(t.path(), "Nothing staged").unwrap_err();
+        let error = commit(t.path(), "Nothing staged", false).unwrap_err();
         assert!(error.contains("nothing to commit"), "{error}");
     }
 }
