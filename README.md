@@ -11,7 +11,7 @@ Palace runs the `git` command for everything that changes a repository, so your 
 
 ## Install
 
-Build the packages (see below), then install one:
+Build the packages (see below) or [download](https://github.com/timmcleod/palace/releases), then install one:
 
 ```sh
 # Ubuntu / Debian
