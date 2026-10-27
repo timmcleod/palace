@@ -128,7 +128,7 @@ pub(crate) fn git_with_progress(
     }
 }
 
-fn command(workdir: &PathBuf, args: &[&str]) -> Command {
+pub(crate) fn command(workdir: &PathBuf, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command
         .args(args)
@@ -152,7 +152,7 @@ fn command(workdir: &PathBuf, args: &[&str]) -> Command {
     command
 }
 
-fn workdir(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn workdir(path: &str) -> Result<PathBuf, String> {
     let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
     repo.workdir().map(PathBuf::from).ok_or_else(|| "This repository has no working copy.".to_string())
 }

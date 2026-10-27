@@ -40,6 +40,7 @@ import {
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
 import { contextMenu, formDialog, openMenu, tagDialog } from "./lib/overlays.js";
+import { loadAvatars } from "./lib/avatars.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -86,6 +87,8 @@ async function runGit([running, done, failed], command, args = {}, { quietError 
     op.message = await invoke(command, { path: overview.value.path, ...args });
     op.state = "done";
     op.title = done;
+    // Fetching and pulling can bring in commits by new authors.
+    if (command === "fetch" || command === "pull") loadAvatars(overview.value.path);
     // Successes get out of the way; failures stay until dismissed.
     dismissTimer = setTimeout(() => {
       if (remoteOp.value === op) remoteOp.value = null;
@@ -151,7 +154,9 @@ function sidebarActivate(row) {
 watch(
   () => overview.value?.path,
   (path) => {
-    if (path) invoke("watch_repo", { path }).catch(() => {});
+    if (!path) return;
+    invoke("watch_repo", { path }).catch(() => {});
+    loadAvatars(path);
   },
 );
 const unlistenChanges = listen("repo-changed", () => refresh());

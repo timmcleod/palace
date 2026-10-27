@@ -1,3 +1,4 @@
+mod avatars;
 mod branch;
 mod cli;
 mod commit;
@@ -19,6 +20,7 @@ pub fn run() {
         .manage(history::HistoryState::default())
         .manage(cli::Running::default())
         .manage(watch::RepoWatcher::default())
+        .manage(avatars::AvatarCache::default())
         .invoke_handler(tauri::generate_handler![
             git::repo_overview,
             history::load_history,
@@ -48,6 +50,7 @@ pub fn run() {
             stash::stash_apply,
             stash::stash_drop,
             watch::watch_repo,
+            avatars::github_avatars,
             tag::create_tag,
             tag::delete_tag,
             tag::describe_revision,

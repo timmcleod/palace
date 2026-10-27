@@ -29,6 +29,7 @@ tauri-plugin-dialog = "2"
 libc = "0.2"
 trash = "5.2.9"
 notify = "8.2.1"
+ureq = { version = "3", features = ["json"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
