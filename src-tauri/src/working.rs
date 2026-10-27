@@ -85,6 +85,39 @@ pub async fn commit_changes(path: String, message: String, amend: bool) -> Resul
     commit(&path, &message, amend)
 }
 
+/// A conflicted file's contents as they are in the working copy, conflict markers
+/// and all.
+#[tauri::command]
+pub async fn conflict_file(path: String, file: String) -> Result<String, String> {
+    let repo = Repository::discover(&path).map_err(message)?;
+    let full = repo.workdir().ok_or("This repository has no working copy.")?.join(&file);
+    let bytes = std::fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+    // A huge file would make an unusable view; the editor is the place for those.
+    const LIMIT: usize = 2 * 1024 * 1024;
+    if bytes.len() > LIMIT {
+        return Err(format!("{file} is too large to show here. Open it in your editor to resolve it."));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Resolves a conflicted file by taking one side ("current" is HEAD's version,
+/// "incoming" is the change being merged, rebased or applied), or with "resolved",
+/// by staging it as it is in the working copy.
+#[tauri::command]
+pub async fn resolve_conflict(path: String, file: String, side: String) -> Result<(), String> {
+    resolve(&path, &file, &side)
+}
+
+#[tauri::command]
+pub async fn open_in_editor(app: tauri::AppHandle, path: String, file: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let repo = Repository::discover(&path).map_err(message)?;
+    let full = repo.workdir().ok_or("This repository has no working copy.")?.join(&file);
+    app.opener()
+        .open_path(full.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("Couldn't open {file}: {e}"))
+}
+
 #[derive(Serialize)]
 pub struct HeadCommit {
     message: String,
@@ -97,6 +130,12 @@ pub struct HeadCommit {
 #[tauri::command]
 pub async fn head_commit(path: String) -> Result<Option<HeadCommit>, String> {
     read_head_commit(&path).map_err(message)
+}
+
+impl WorkingFile {
+    pub(crate) fn is_conflicted(&self) -> bool {
+        self.conflicted
+    }
 }
 
 pub(crate) fn read_status(repo: &Repository) -> Result<Vec<WorkingFile>, git2::Error> {
@@ -347,6 +386,21 @@ fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Result<(), St
         git(path, &args, None)?;
     }
     Ok(())
+}
+
+fn resolve(path: &str, file: &str, side: &str) -> Result<(), String> {
+    let flag = match side {
+        "current" => "--ours",
+        "incoming" => "--theirs",
+        "resolved" => return stage(path, &[file.to_string()]),
+        _ => return Err(format!("Unknown side: {side}")),
+    };
+    match git(path, &["checkout", flag, "--", file], None) {
+        Ok(_) => stage(path, &[file.to_string()]),
+        // That side deleted the file, so taking it means deleting the file.
+        Err(e) if e.contains("does not have") => git(path, &["rm", "-q", "--", file], None).map(drop),
+        Err(e) => Err(e),
+    }
 }
 
 fn move_to_trash(file: &Path) -> Result<(), String> {
@@ -602,6 +656,50 @@ mod tests {
 
         t.commit(&[("b.txt", Some("b\n"))], "Second");
         assert!(!read_head_commit(t.path()).unwrap().unwrap().pushed);
+    }
+
+    /// Both branches changed a.txt; merging leaves it conflicted.
+    fn merge_conflict(name: &str) -> TempRepo {
+        let t = TempRepo::new(name);
+        t.commit(&[("a.txt", Some("base\n")), ("gone.txt", Some("x\n"))], "Base");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "theirs"], None).unwrap();
+        t.commit(&[("a.txt", Some("theirs\n")), ("gone.txt", None)], "Theirs");
+        git(t.path(), &["switch", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours\n")), ("gone.txt", Some("edited\n"))], "Ours");
+        assert!(git(t.path(), &["merge", "theirs"], None).is_err());
+        t
+    }
+
+    #[test]
+    fn conflicts_are_listed_and_shown_with_markers() {
+        let t = merge_conflict("conflict-show");
+        let conflicted: Vec<_> = read_status(&t.repo).unwrap().into_iter().filter(|f| f.conflicted).map(|f| f.path).collect();
+        assert_eq!(conflicted, ["a.txt", "gone.txt"]);
+
+        let text = tauri::async_runtime::block_on(conflict_file(t.path().into(), "a.txt".into())).unwrap();
+        assert!(text.contains("<<<<<<<") && text.contains("ours") && text.contains("theirs"), "{text}");
+    }
+
+    #[test]
+    fn resolving_by_taking_a_side() {
+        let t = merge_conflict("conflict-resolve");
+        resolve(t.path(), "a.txt", "incoming").unwrap();
+        assert_eq!(read(&t, "a.txt").as_deref(), Some("theirs\n"));
+        // Their side deleted gone.txt, so taking it deletes the file.
+        resolve(t.path(), "gone.txt", "incoming").unwrap();
+        assert!(!t.dir.join("gone.txt").exists());
+        assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
+    }
+
+    #[test]
+    fn resolving_by_editing_and_marking_resolved() {
+        let t = merge_conflict("conflict-mark");
+        t.write(&[("a.txt", Some("both\n"))]);
+        resolve(t.path(), "a.txt", "resolved").unwrap();
+        resolve(t.path(), "gone.txt", "current").unwrap();
+        assert_eq!(read(&t, "gone.txt").as_deref(), Some("edited\n"));
+        assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
     }
 
     #[test]

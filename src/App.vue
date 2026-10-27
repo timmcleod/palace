@@ -21,7 +21,11 @@ import {
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
+import ConflictView from "./components/ConflictView.vue";
+import ContextMenu from "./components/ContextMenu.vue";
+import FormDialog from "./components/FormDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
+import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
 import Sidebar from "./components/Sidebar.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
@@ -33,6 +37,8 @@ import {
   rememberRepository,
   writeJson,
 } from "./lib/storage.js";
+import { useGitActions } from "./lib/gitActions.js";
+import { contextMenu, formDialog, openMenu } from "./lib/overlays.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -50,11 +56,60 @@ const draft = reactive({ subject: "", body: "", amend: false, saved: null });
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 
-// --- Fetch, pull and push ------------------------------------------------------
+// --- Running git operations ------------------------------------------------------
 
-// The network operation being shown: { kind, title, line, state, message }.
+// The operation shown in the status card: { command, title, line, state, message }.
 const remoteOp = ref(null);
 let dismissTimer;
+
+// Only network operations report progress and can be cancelled.
+const NETWORK = new Set(["fetch", "pull", "push"]);
+
+const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
+const remoteBusy = computed(() => remoteOp.value?.state === "running");
+
+/**
+ * Runs a backend command against the open repository, showing it in the status card
+ * and refreshing everything afterwards. Resolves to the error message, or null.
+ *
+ * titles: [while running, on success, on failure]. options.quietError(message)
+ * returning true hides that failure, for callers that handle it themselves.
+ */
+async function runGit([running, done, failed], command, args = {}, { quietError } = {}) {
+  if (remoteBusy.value || !overview.value) return "Another operation is still running.";
+  clearTimeout(dismissTimer);
+  const op = reactive({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
+  remoteOp.value = op;
+
+  try {
+    op.message = await invoke(command, { path: overview.value.path, ...args });
+    op.state = "done";
+    op.title = done;
+    // Successes get out of the way; failures stay until dismissed.
+    dismissTimer = setTimeout(() => {
+      if (remoteOp.value === op) remoteOp.value = null;
+    }, 5000);
+    return null;
+  } catch (e) {
+    const message = String(e);
+    if (quietError?.(message)) {
+      remoteOp.value = null;
+    } else if (message.startsWith("CONFLICT: ")) {
+      // The operation is under way and waiting on the user, not failed.
+      op.state = "conflict";
+      op.title = "Stopped for conflicts";
+      op.message = message.slice("CONFLICT: ".length);
+      selected.value = "workspace:working-copy";
+    } else {
+      op.state = "failed";
+      op.title = failed;
+      op.message = message;
+    }
+    return message;
+  } finally {
+    refresh();
+  }
+}
 
 const REMOTE_TITLES = {
   fetch: ["Fetching…", "Fetched", "Fetch failed"],
@@ -62,31 +117,27 @@ const REMOTE_TITLES = {
   push: ["Pushing…", "Pushed", "Push failed"],
 };
 
-const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
-const remoteBusy = computed(() => remoteOp.value?.state === "running");
+const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
 
-async function runRemote(kind) {
-  if (remoteBusy.value || !overview.value) return;
-  clearTimeout(dismissTimer);
-  const [running, done, failed] = REMOTE_TITLES[kind];
-  const op = reactive({ kind, title: running, line: "", state: "running", message: "" });
-  remoteOp.value = op;
+const actions = useGitActions({ overview, run: runGit });
 
-  try {
-    op.message = await invoke(kind, { path: overview.value.path });
-    op.state = "done";
-    op.title = done;
-    // Successes get out of the way; failures stay until dismissed.
-    dismissTimer = setTimeout(() => {
-      if (remoteOp.value === op) remoteOp.value = null;
-    }, 5000);
-  } catch (e) {
-    op.state = "failed";
-    op.title = failed;
-    op.message = String(e);
-  } finally {
-    refresh();
-  }
+// Context menus for sidebar rows, keyed the same way the sidebar keys them.
+function sidebarMenu(row, event) {
+  const [kind, name] = splitKey(row.key);
+  const items = {
+    branch: () => actions.branchMenu(name),
+    "remote-branch": () => actions.remoteBranchMenu(name),
+    tag: () => actions.tagMenu(name),
+    stash: () => actions.stashMenu(Number(name)),
+  }[kind]?.();
+  if (items) openMenu(event, items);
+}
+
+// Double-clicking a branch checks it out.
+function sidebarActivate(row) {
+  const [kind, name] = splitKey(row.key);
+  if (kind === "branch" && name !== overview.value.head.branch) actions.checkout("branch", name);
+  if (kind === "remote-branch") actions.checkout("remote-branch", name);
 }
 
 const unlistenProgress = listen("remote-progress", (event) => {
@@ -256,7 +307,13 @@ function startResize(event, pane, min, max) {
     class="window"
     :style="{ gridTemplateColumns: `${panes.sidebar}px minmax(280px, ${panes.history}px) minmax(320px, 1fr)` }"
   >
-    <Sidebar v-model:selected="selected" :overview="overview" @open-repository="chooseRepository" />
+    <Sidebar
+      v-model:selected="selected"
+      :overview="overview"
+      @open-repository="chooseRepository"
+      @menu="sidebarMenu"
+      @activate="sidebarActivate"
+    />
 
     <section class="pane history-pane">
       <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
@@ -282,6 +339,14 @@ function startResize(event, pane, min, max) {
         </span>
       </div>
 
+      <OperationBanner
+        v-if="overview.operation"
+        :operation="overview.operation"
+        :conflicts="overview.conflicts"
+        :busy="remoteBusy"
+        @action="actions.controlOperation"
+      />
+
       <WorkingCopy
         v-if="isWorkingCopy"
         :draft="draft"
@@ -299,6 +364,7 @@ function startResize(event, pane, min, max) {
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           @select="selectedCommit = $event"
+          @menu="(commit, event) => openMenu(event, actions.commitMenu(commit))"
         />
       </div>
     </section>
@@ -339,12 +405,35 @@ function startResize(event, pane, min, max) {
           </button>
         </div>
         <div class="action-group">
-          <button class="icon-button" title="Branch (coming soon)" disabled><GitBranch :size="18" :stroke-width="1.5" /></button>
-          <button class="icon-button" title="Merge (coming soon)" disabled><GitMerge :size="18" :stroke-width="1.5" /></button>
+          <button class="icon-button" title="New branch" :disabled="remoteBusy" @click="actions.newBranch()">
+            <GitBranch :size="18" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :title="overview.head.branch ? `Merge a branch into ${overview.head.branch}` : 'Check out a branch to merge into it'"
+            :disabled="remoteBusy || !overview.head.branch || !!overview.operation"
+            @click="actions.mergeInto()"
+          >
+            <GitMerge :size="18" :stroke-width="1.5" />
+          </button>
         </div>
         <div class="action-group">
-          <button class="icon-button" title="Stash (coming soon)" disabled><Archive :size="18" :stroke-width="1.5" /></button>
-          <button class="icon-button" title="Pop Stash (coming soon)" disabled><ArchiveRestore :size="18" :stroke-width="1.5" /></button>
+          <button
+            class="icon-button"
+            title="Stash changes"
+            :disabled="remoteBusy || !overview.changes"
+            @click="actions.stashSave()"
+          >
+            <Archive :size="18" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :title="overview.stashes.length ? `Pop ${overview.stashes[0].message}` : 'No stashes to pop'"
+            :disabled="remoteBusy || !overview.stashes.length"
+            @click="actions.stashApply(0, true)"
+          >
+            <ArchiveRestore :size="18" :stroke-width="1.5" />
+          </button>
         </div>
         <button class="icon-button" title="Refresh" @click="refresh">
           <RefreshCw :size="17" :stroke-width="1.5" :class="{ spinning: loading }" />
@@ -359,7 +448,8 @@ function startResize(event, pane, min, max) {
         <div class="subheader">
           <span class="file-title">{{ workingFile?.path }}</span>
         </div>
-        <WorkingFileDiff v-if="workingFile" :path="overview.path" :file="workingFile" @changed="refresh" />
+        <ConflictView v-if="workingFile?.conflicted" :path="overview.path" :file="workingFile" @changed="refresh" />
+        <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" @changed="refresh" />
         <div v-else class="empty-state">
           <p>Select a file to see its changes.</p>
         </div>
@@ -380,6 +470,9 @@ function startResize(event, pane, min, max) {
         </div>
       </template>
     </section>
+
+    <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
+    <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
     <RemoteStatus
       v-if="remoteOp"

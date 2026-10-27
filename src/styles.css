@@ -34,6 +34,9 @@
   --diff-added-gutter: #d3f0dd;
   --diff-removed-bg: #fdecec;
   --diff-removed-gutter: #f9d7d7;
+  --conflict-current: #e3eeff;
+  --conflict-incoming: #e6f6ea;
+  --banner-warning-bg: #fdf3dc;
 
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: 14px;
@@ -77,6 +80,9 @@
     --diff-added-gutter: #1d3b27;
     --diff-removed-bg: #3a1c1c;
     --diff-removed-gutter: #472222;
+    --conflict-current: #1c2c45;
+    --conflict-incoming: #17301f;
+    --banner-warning-bg: #3a3020;
   }
 }
 
@@ -126,6 +132,19 @@ input {
 
 .primary-button:disabled {
   opacity: 0.45;
+}
+
+.secondary-button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.secondary-button:hover {
+  background: var(--row-hover);
 }
 
 .icon-button {

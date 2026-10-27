@@ -1,8 +1,10 @@
+mod branch;
 mod cli;
 mod commit;
 mod git;
 mod history;
 mod remote;
+mod stash;
 #[cfg(test)]
 mod test_support;
 mod working;
@@ -29,6 +31,19 @@ pub fn run() {
             working::discard_files,
             working::discard_hunk,
             working::head_commit,
+            working::conflict_file,
+            working::resolve_conflict,
+            working::open_in_editor,
+            branch::checkout,
+            branch::create_branch,
+            branch::rename_branch,
+            branch::delete_branch,
+            branch::merge,
+            branch::rebase,
+            branch::control_operation,
+            stash::stash_save,
+            stash::stash_apply,
+            stash::stash_drop,
             remote::fetch,
             remote::pull,
             remote::push,

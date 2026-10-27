@@ -10,6 +10,9 @@ pub struct RepoOverview {
     commit_count: Option<usize>,
     /// Number of files with staged or unstaged changes.
     changes: usize,
+    /// "merge", "rebase", "cherry-pick" or "revert" while one is in progress.
+    operation: Option<&'static str>,
+    conflicts: usize,
     branches: Vec<LocalBranch>,
     remotes: Vec<Remote>,
     tags: Vec<String>,
@@ -71,7 +74,10 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
     let head = read_head(&repo)?;
     let commit_count = count_commits(&repo);
     // A bare repository has no working copy to report on.
-    let changes = crate::working::read_status(&repo).map(|files| files.len()).unwrap_or(0);
+    let status = crate::working::read_status(&repo).unwrap_or_default();
+    let changes = status.len();
+    let conflicts = status.iter().filter(|f| f.is_conflicted()).count();
+    let operation = crate::branch::operation(&repo);
     let branches = read_local_branches(&repo)?;
     let remotes = read_remotes(&repo)?;
     let tags = read_tags(&repo)?;
@@ -85,6 +91,8 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
         head,
         commit_count,
         changes,
+        operation,
+        conflicts,
         branches,
         remotes,
         tags,

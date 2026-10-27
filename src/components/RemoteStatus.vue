@@ -1,11 +1,11 @@
 <script setup>
 import { computed } from "vue";
-import { CircleAlert, CircleCheck, LoaderCircle, X } from "lucide-vue-next";
+import { CircleAlert, CircleCheck, LoaderCircle, TriangleAlert, X } from "lucide-vue-next";
 
-// A card in the corner of the window showing a fetch, pull or push: its live
-// progress while running, then the outcome.
+// A card in the corner of the window showing a git operation: its live progress while
+// running (for network operations), then the outcome.
 const props = defineProps({
-  // { title, line, state: "running" | "done" | "failed", message }
+  // { title, line, state: "running" | "done" | "failed" | "conflict", message, cancellable }
   operation: { type: Object, required: true },
 });
 const emit = defineEmits(["cancel", "dismiss"]);
@@ -22,17 +22,20 @@ const percent = computed(() => {
     <div class="heading">
       <LoaderCircle v-if="operation.state === 'running'" :size="16" class="spinning" />
       <CircleCheck v-else-if="operation.state === 'done'" :size="16" class="icon-done" />
+      <TriangleAlert v-else-if="operation.state === 'conflict'" :size="16" class="icon-conflict" />
       <CircleAlert v-else :size="16" class="icon-failed" />
       <span class="title">{{ operation.title }}</span>
-      <button v-if="operation.state === 'running'" class="text-button" @click="emit('cancel')">Cancel</button>
+      <template v-if="operation.state === 'running'">
+        <button v-if="operation.cancellable" class="text-button" @click="emit('cancel')">Cancel</button>
+      </template>
       <button v-else class="icon-button small" title="Dismiss" @click="emit('dismiss')"><X :size="14" /></button>
     </div>
 
-    <template v-if="operation.state === 'running'">
+    <template v-if="operation.state === 'running' && operation.cancellable">
       <div class="bar"><div class="fill" :style="{ width: `${percent ?? 0}%` }" /></div>
       <div class="line">{{ operation.line || "Connecting…" }}</div>
     </template>
-    <pre v-else class="message">{{ operation.message }}</pre>
+    <pre v-else-if="operation.state !== 'running'" class="message">{{ operation.message }}</pre>
   </div>
 </template>
 
@@ -67,6 +70,10 @@ const percent = computed(() => {
 
 .icon-failed {
   color: var(--danger);
+}
+
+.icon-conflict {
+  color: var(--ref-tag);
 }
 
 .text-button {

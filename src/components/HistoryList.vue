@@ -11,7 +11,7 @@ const props = defineProps({
   refreshKey: { type: Number, default: 0 },
   selectedId: { type: String, default: null },
 });
-const emit = defineEmits(["select"]);
+const emit = defineEmits(["select", "menu"]);
 
 const ROW_HEIGHT = 46;
 const HEADER_HEIGHT = 34;
@@ -237,6 +237,10 @@ const MAX_REFS = 3;
           :class="{ selected: item.commit && item.commit.id === selectedId }"
           :style="{ top: `${item.top}px`, height: `${ROW_HEIGHT}px` }"
           @click="select(item.index)"
+          @contextmenu.prevent="
+            select(item.index);
+            item.commit && emit('menu', item.commit, $event);
+          "
         >
           <template v-if="item.commit">
             <CommitGraph class="graph" :graph="item.commit.graph" :width="graphWidth" :height="ROW_HEIGHT" />

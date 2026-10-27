@@ -24,7 +24,7 @@ const props = defineProps({
   overview: { type: Object, required: true },
   selected: { type: String, default: null },
 });
-const emit = defineEmits(["update:selected", "open-repository"]);
+const emit = defineEmits(["update:selected", "open-repository", "menu", "activate"]);
 
 const filter = ref("");
 const collapsedSections = reactive(new Set());
@@ -182,6 +182,11 @@ function onRowClick(row) {
             :style="{ paddingLeft: `${8 + row.depth * 18}px` }"
             :title="row.title"
             @click="onRowClick(row)"
+            @dblclick="emit('activate', row)"
+            @contextmenu.prevent="
+              emit('update:selected', row.key);
+              emit('menu', row, $event);
+            "
           >
             <span class="chevron">
               <ChevronRight v-if="row.folder" :size="14" :class="{ open: row.open }" />
