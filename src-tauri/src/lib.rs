@@ -73,12 +73,15 @@ pub fn run() {
             github::github_account,
             github::github_sign_in,
             github::github_sign_out,
+            github::github_owners,
+            github::github_repos,
             remote::fetch,
             remote::pull,
             remote::push,
             remote::cancel_remote,
             remote::delete_remote_branch,
             remote::push_tag,
+            remote::clone_repo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

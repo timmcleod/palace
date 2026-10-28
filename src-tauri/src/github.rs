@@ -65,6 +65,150 @@ pub async fn github_sign_out() -> Result<(), String> {
     Ok(())
 }
 
+/// Someone whose repositories can be listed: the signed-in account, an organisation
+/// it belongs to, or someone whose repositories it collaborates on.
+#[derive(Serialize, Debug)]
+pub struct Owner {
+    login: String,
+    name: Option<String>,
+    avatar_url: String,
+    /// "me", "org" or "collaborator".
+    kind: &'static str,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Repo {
+    name: String,
+    full_name: String,
+    description: Option<String>,
+    private: bool,
+    fork: bool,
+    /// When it was last pushed to, which is what changes as work happens.
+    pushed_at: Option<String>,
+    clone_url: String,
+    html_url: String,
+    owner: RepoOwner,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct RepoOwner {
+    login: String,
+    avatar_url: String,
+}
+
+#[derive(Deserialize)]
+struct Org {
+    login: String,
+    avatar_url: String,
+}
+
+const NOT_SIGNED_IN: &str = "Sign in to GitHub first, in Settings › GitHub.";
+
+/// The signed-in account, its organisations, then the people whose repositories it
+/// collaborates on, alphabetically within each group.
+#[tauri::command]
+pub async fn github_owners() -> Result<Vec<Owner>, String> {
+    let saved = saved().ok_or(NOT_SIGNED_IN)?;
+    blocking(move || {
+        let me = &saved.account;
+        let mut owners = vec![Owner {
+            login: me.login.clone(),
+            name: me.name.clone(),
+            avatar_url: me.avatar_url.clone(),
+            kind: "me",
+        }];
+
+        let mut orgs: Vec<Org> = api_get(&saved.token, "/user/orgs?per_page=100")?;
+        orgs.sort_by_key(|o| o.login.to_lowercase());
+        owners.extend(orgs.into_iter().map(|o| Owner { login: o.login, name: None, avatar_url: o.avatar_url, kind: "org" }));
+
+        let mut people: Vec<RepoOwner> = Vec::new();
+        for repo in all_pages(&saved.token, "/user/repos?affiliation=collaborator&per_page=100")? {
+            if !people.iter().any(|p| p.login == repo.owner.login) && !owners.iter().any(|o| o.login == repo.owner.login) {
+                people.push(repo.owner);
+            }
+        }
+        people.sort_by_key(|p| p.login.to_lowercase());
+        owners.extend(people.into_iter().map(|p| Owner { login: p.login, name: None, avatar_url: p.avatar_url, kind: "collaborator" }));
+        Ok(owners)
+    })
+    .await
+}
+
+/// An owner's repositories that the account can see, private ones included, by name.
+/// `kind` is the owner's kind from `github_owners`.
+#[tauri::command]
+pub async fn github_repos(owner: String, kind: String) -> Result<Vec<Repo>, String> {
+    let token = saved().ok_or(NOT_SIGNED_IN)?.token;
+    blocking(move || {
+        let mut repos = match kind.as_str() {
+            "me" => all_pages(&token, "/user/repos?affiliation=owner&per_page=100")?,
+            "org" => all_pages(&token, &format!("/orgs/{owner}/repos?type=all&per_page=100"))?,
+            _ => all_pages(&token, "/user/repos?affiliation=collaborator&per_page=100")?
+                .into_iter()
+                .filter(|r| r.owner.login == owner)
+                .collect(),
+        };
+        repos.sort_by_key(|r| r.name.to_lowercase());
+        Ok(repos)
+    })
+    .await
+}
+
+/// Every page of a repository listing; GitHub returns at most 100 a page.
+fn all_pages(token: &str, path: &str) -> Result<Vec<Repo>, String> {
+    let mut repos = Vec::new();
+    for page in 1..=30 {
+        let batch: Vec<Repo> = api_get(token, &format!("{path}&page={page}"))?;
+        let done = batch.len() < 100;
+        repos.extend(batch);
+        if done {
+            break;
+        }
+    }
+    Ok(repos)
+}
+
+/// Runs a GitHub request off the async runtime, since the HTTP client blocks.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .user_agent("Palace")
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// GETs `path` from the GitHub API with the token, explaining failures in words.
+fn api_get<T: serde::de::DeserializeOwned>(token: &str, path: &str) -> Result<T, String> {
+    let mut response = agent()
+        .get(&format!("https://api.github.com{path}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("Authorization", format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
+    match response.status().as_u16() {
+        200 => response.body_mut().read_json().map_err(|e| format!("GitHub's reply didn't make sense: {e}")),
+        401 => Err("GitHub no longer accepts your token. Sign in again in Settings › GitHub.".into()),
+        status => {
+            // GitHub explains refusals (an organisation's SSO, rate limits) in "message".
+            let message = response
+                .body_mut()
+                .read_json::<serde_json::Value>()
+                .ok()
+                .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_string));
+            Err(match message {
+                Some(message) => format!("GitHub said: {message}"),
+                None => format!("GitHub couldn't list that (HTTP {status})."),
+            })
+        }
+    }
+}
+
 /// The `-c` options that make git ask Palace for github.com credentials, or none when
 /// not signed in. They replace any other github.com helper for that one command.
 pub(crate) fn git_config_args() -> Vec<String> {
@@ -130,13 +274,7 @@ fn check_token(token: &str) -> Result<Account, String> {
     if token.is_empty() {
         return Err("Paste a token first.".into());
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(15)))
-        .user_agent("Palace")
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let mut response = agent
+    let mut response = agent()
         .get("https://api.github.com/user")
         .header("Accept", "application/vnd.github+json")
         .header("Authorization", format!("Bearer {token}"))

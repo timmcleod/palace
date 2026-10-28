@@ -92,6 +92,17 @@ pub(crate) fn git_with_progress(
     path: &str,
     args: &[&str],
     running: &Running,
+    on_progress: impl FnMut(&str),
+) -> Result<String, String> {
+    git_with_progress_in(&workdir(path)?, args, running, on_progress)
+}
+
+/// `git_with_progress` in any folder, for commands like clone that don't run inside
+/// a repository.
+pub(crate) fn git_with_progress_in(
+    dir: &PathBuf,
+    args: &[&str],
+    running: &Running,
     mut on_progress: impl FnMut(&str),
 ) -> Result<String, String> {
     let mut child: Child = {
@@ -99,7 +110,7 @@ pub(crate) fn git_with_progress(
         if slot.is_some() {
             return Err("Another fetch, pull or push is still running.".into());
         }
-        let child = command(&workdir(path)?, args)
+        let child = command(dir, args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

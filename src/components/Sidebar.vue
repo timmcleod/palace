@@ -12,6 +12,7 @@ import {
   ListFilter,
   Package,
   Plus,
+  Github,
   Settings,
   SlidersHorizontal,
   Tag,
@@ -49,6 +50,7 @@ const workspaceRows = computed(() => [
     depth: 0,
     count: props.overview.stashes.length || null,
   },
+  { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
   { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
 ]);
 

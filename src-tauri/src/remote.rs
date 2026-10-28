@@ -1,7 +1,8 @@
 //! Fetch, pull and push. These run the git CLI, which handles credentials through the
 //! user's SSH agent and credential helpers, and stream git's progress to the window.
 
-use crate::cli::{Running, git_with_progress};
+use crate::cli::{Running, git_with_progress, git_with_progress_in};
+use std::path::{Path, PathBuf};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -69,6 +70,33 @@ pub async fn push_tag(app: AppHandle, path: String, name: String) -> Result<Stri
         Ok(format!("Pushed the tag {name} to {remote}."))
     })
     .await
+}
+
+/// Clones `url` into `dest`, which must not exist yet or be empty. The folders above
+/// it are created as needed.
+#[tauri::command]
+pub async fn clone_repo(app: AppHandle, url: String, dest: String) -> Result<String, String> {
+    in_background(app, move |running, report| clone_into(&url, Path::new(dest.trim()), running, report)).await
+}
+
+fn clone_into(url: &str, dest: &Path, running: &Running, report: Report) -> Result<String, String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("Enter the repository's URL.".into());
+    }
+    if !dest.is_absolute() {
+        return Err("Choose a folder to clone into.".into());
+    }
+    if dest.exists() && dest.read_dir().map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return Err(format!("There's already a folder with files in it at {}. Choose another location.", dest.display()));
+    }
+    let parent: PathBuf = dest.parent().ok_or("Choose a folder to clone into.")?.to_path_buf();
+    std::fs::create_dir_all(&parent).map_err(|e| format!("Couldn't create {}: {e}", parent.display()))?;
+
+    // If cloning fails or is cancelled, git removes what it had written.
+    git_with_progress_in(&parent, &["clone", "--progress", url, &dest.to_string_lossy()], running, report)?;
+    let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Ok(format!("Cloned {name} into {}.", parent.display()))
 }
 
 #[tauri::command]
@@ -454,5 +482,23 @@ mod tests {
         let message = pull_current(local.path(), &from, &Running::default(), &mut |_| {}).unwrap();
         assert_eq!(message, format!("Pulled origin/feature into {}.", local.branch()));
         assert_eq!(local.head(), feature);
+    }
+
+    #[test]
+    fn cloning_into_a_new_folder() {
+        let (server, _local) = setup("clone");
+        let dest = std::env::temp_dir().join(format!("palace-clone-{}/owner/repo", std::process::id()));
+        let _ = std::fs::remove_dir_all(dest.parent().unwrap().parent().unwrap());
+
+        let url = server.path().to_string();
+        let message = clone_into(&url, &dest, &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, format!("Cloned repo into {}.", dest.parent().unwrap().display()));
+        assert!(dest.join("a.txt").exists());
+
+        // Not over a folder that has files in it.
+        let again = clone_into(&url, &dest, &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(again.starts_with("There's already a folder with files in it"), "{again}");
+        assert!(clone_into(&url, Path::new("relative/path"), &Running::default(), &mut |_| {}).is_err());
+        let _ = std::fs::remove_dir_all(dest.parent().unwrap().parent().unwrap());
     }
 }

@@ -86,3 +86,20 @@ export function closeResetDialog(values) {
   resetDialog.value?.resolve(values);
   resetDialog.value = null;
 }
+
+export const cloneDialog = shallowRef(null);
+
+/**
+ * Shows the Clone dialog and resolves to { url, location }, or null if cancelled.
+ * options: { url, folder } — the URL to clone (may be empty) and the clone folder.
+ */
+export function openCloneDialog(options) {
+  return new Promise((resolve) => {
+    cloneDialog.value = { ...options, resolve };
+  });
+}
+
+export function closeCloneDialog(values) {
+  cloneDialog.value?.resolve(values);
+  cloneDialog.value = null;
+}

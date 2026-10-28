@@ -3,8 +3,10 @@ import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { loadAvatars } from "../lib/avatars.js";
-import { openForm } from "../lib/overlays.js";
+import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
+import { cloneFolder } from "../lib/clone.js";
+import { open } from "@tauri-apps/plugin-dialog";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -33,46 +35,35 @@ watch(() => props.path, loadIdentity, { immediate: true });
 
 // --- GitHub ----------------------------------------------------------------------
 
-const account = ref(null);
 const githubError = ref("");
 const signingIn = ref(false);
 
-invoke("github_account").then((a) => (account.value = a));
-
-// A new classic token with the scopes Palace needs: private repositories, workflow
-// files (pushing changes to .github/workflows), and organisations.
-const NEW_TOKEN_URL = "https://github.com/settings/tokens/new?description=Palace&scopes=repo,workflow,read:org";
-
 async function signIn() {
-  const values = await openForm({
-    title: "Sign In to GitHub",
-    message:
-      "Paste a personal access token. Palace keeps it in your system keyring and uses it to fetch, pull and push your GitHub repositories.",
-    fields: [{ key: "token", label: "Token", type: "password", placeholder: "ghp_…" }],
-    confirmLabel: "Sign In",
-  });
-  if (!values) return;
   githubError.value = "";
   signingIn.value = true;
-  try {
-    account.value = await invoke("github_sign_in", { token: values.token });
-    // Private repositories' authors can now be looked up too.
-    loadAvatars(props.path);
-  } catch (e) {
-    githubError.value = String(e);
-  } finally {
-    signingIn.value = false;
-  }
+  githubError.value = (await signInWithToken()) ?? "";
+  signingIn.value = false;
+  // Private repositories' authors can now be looked up too.
+  if (account.value) loadAvatars(props.path);
 }
 
 async function signOut() {
   githubError.value = "";
   try {
-    await invoke("github_sign_out");
-    account.value = null;
+    await githubSignOut();
   } catch (e) {
     githubError.value = String(e);
   }
+}
+
+// --- Cloning ---------------------------------------------------------------------
+
+const cloneInto = ref("");
+watch(() => settings.cloneFolder, async () => (cloneInto.value = await cloneFolder()), { immediate: true });
+
+async function chooseCloneFolder() {
+  const folder = await open({ directory: true, multiple: false, title: "Clone Into", defaultPath: cloneInto.value });
+  if (folder) settings.cloneFolder = folder;
 }
 
 const THEMES = [
@@ -125,6 +116,23 @@ const TAB_SIZES = [2, 4, 8];
           </div>
         </div>
         <p v-if="identityError" class="error">{{ identityError }}</p>
+      </section>
+
+      <section>
+        <h2>Cloning</h2>
+        <div class="fields">
+          <span class="label">Clone into:</span>
+          <div class="stack">
+            <div class="row folder-row">
+              <code class="mono folder">{{ cloneInto }}</code>
+              <button class="secondary-button" @click="chooseCloneFolder">Choose…</button>
+            </div>
+            <span class="dim small-note">
+              Repositories go in a folder for their owner, e.g. {{ cloneInto }}/acme/website. You can change it for
+              each clone.
+            </span>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -380,6 +388,20 @@ input[type="text"]:focus {
 
 .classic .removed {
   background: #e5484d;
+}
+
+.folder-row {
+  font-size: 13px;
+}
+
+.folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.small-note {
+  font-size: 12.5px;
 }
 
 .account {

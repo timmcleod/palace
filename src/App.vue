@@ -23,7 +23,9 @@ import {
 import CommitDetails from "./components/CommitDetails.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import CloneDialog from "./components/CloneDialog.vue";
 import FileSearch from "./components/FileSearch.vue";
+import GitHubView from "./components/GitHubView.vue";
 import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
 import FormDialog from "./components/FormDialog.vue";
@@ -46,7 +48,17 @@ import {
   writeJson,
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
-import { contextMenu, formDialog, openMenu, pullDialog, resetDialog, tagDialog } from "./lib/overlays.js";
+import {
+  cloneDialog,
+  contextMenu,
+  formDialog,
+  openCloneDialog,
+  openMenu,
+  pullDialog,
+  resetDialog,
+  tagDialog,
+} from "./lib/overlays.js";
+import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
 
 const overview = ref(null);
@@ -70,6 +82,11 @@ const detailMode = ref("changeset");
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 const isSettings = computed(() => selected.value === "workspace:settings");
+const isGitHub = computed(() => selected.value === "workspace:github");
+// Views that take the place of both the history and detail panes.
+const isFullView = computed(() => isSettings.value || isGitHub.value);
+// The GitHub view opened from the welcome screen, before any repository is open.
+const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
 
 // The Stashes view: the chosen stash (by index) and the search for one by message.
@@ -96,7 +113,7 @@ const detailCommit = computed(() => {
 function showFileHistory(file) {
   fileFilter.value = file;
   selectedCommit.value = null;
-  if (isWorkingCopy.value || isSettings.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
 }
 
 // --- Running git operations ------------------------------------------------------
@@ -106,7 +123,7 @@ const remoteOp = ref(null);
 let dismissTimer;
 
 // Only network operations report progress and can be cancelled.
-const NETWORK = new Set(["fetch", "pull", "push"]);
+const NETWORK = new Set(["fetch", "pull", "push", "clone_repo"]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 const remoteBusy = computed(() => remoteOp.value?.state === "running");
@@ -117,15 +134,17 @@ const remoteBusy = computed(() => remoteOp.value?.state === "running");
  *
  * titles: [while running, on success, on failure]. options.quietError(message)
  * returning true hides that failure, for callers that handle it themselves.
+ * options.path runs it somewhere other than the open repository, or with none open.
  */
-async function runGit([running, done, failed], command, args = {}, { quietError } = {}) {
-  if (remoteBusy.value || !overview.value) return "Another operation is still running.";
+async function runGit([running, done, failed], command, args = {}, { quietError, path } = {}) {
+  if (remoteBusy.value) return "Another operation is still running.";
+  if (!overview.value && !path) return "No repository is open.";
   clearTimeout(dismissTimer);
   const op = reactive({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
   remoteOp.value = op;
 
   try {
-    op.message = await invoke(command, { path: overview.value.path, ...args });
+    op.message = await invoke(command, { path: path ?? overview.value.path, ...args });
     op.state = "done";
     op.title = done;
     // Fetching and pulling can bring in commits by new authors.
@@ -249,6 +268,22 @@ async function loadRepository(path, { quiet = false } = {}) {
   } finally {
     if (seq === loadSeq) loading.value = false;
   }
+}
+
+// Clones a repository (asking where to), then opens it.
+async function cloneRepository(url = "") {
+  const values = await openCloneDialog({ url, folder: await cloneFolder() });
+  if (!values) return;
+  const error = await runGit(
+    ["Cloning…", "Cloned", "Clone failed"],
+    "clone_repo",
+    { url: values.url, dest: values.location },
+    { path: values.location },
+  );
+  if (error) return;
+  rememberCloneFolder(values.url, values.location);
+  browsingGitHub.value = false;
+  await loadRepository(values.location);
 }
 
 async function chooseRepository() {
@@ -422,7 +457,12 @@ function startResize(event, pane, min, max) {
       <SettingsView :path="overview.path" :name="overview.name" />
     </section>
 
-    <section v-show="!isSettings" class="pane history-pane">
+    <section v-if="isGitHub" class="pane settings-pane">
+      <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
+      <GitHubView @clone="cloneRepository" />
+    </section>
+
+    <section v-show="!isFullView" class="pane history-pane">
       <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
 
       <header class="toolbar">
@@ -492,7 +532,7 @@ function startResize(event, pane, min, max) {
       </div>
     </section>
 
-    <section v-show="!isSettings" class="pane detail-pane">
+    <section v-show="!isFullView" class="pane detail-pane">
       <div class="splitter" @pointerdown="startResize($event, 'history', 360, 1000)" />
 
       <header class="toolbar actions">
@@ -611,20 +651,11 @@ function startResize(event, pane, min, max) {
       </template>
     </section>
 
-    <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
-    <TagDialog v-if="tagDialog" :dialog="tagDialog" />
-    <PullDialog v-if="pullDialog" :dialog="pullDialog" />
-    <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
-    <ContextMenu v-if="contextMenu" :menu="contextMenu" />
-
-    <RemoteStatus
-      v-if="remoteOp"
-      :operation="remoteOp"
-      @cancel="invoke('cancel_remote')"
-      @dismiss="remoteOp = null"
-      @action="(action) => { remoteOp = null; action.run(); }"
-    />
   </div>
+
+  <main v-else-if="browsingGitHub" class="github-page">
+    <GitHubView standalone @clone="cloneRepository" @back="browsingGitHub = false" />
+  </main>
 
   <main v-else class="welcome">
     <div class="welcome-card">
@@ -634,9 +665,12 @@ function startResize(event, pane, min, max) {
 
       <p v-if="error" class="error"><CircleAlert :size="15" /> {{ error }}</p>
 
-      <button class="primary-button" :disabled="loading" @click="chooseRepository">
-        {{ loading ? "Opening…" : "Open Repository…" }}
-      </button>
+      <div class="welcome-buttons">
+        <button class="primary-button" :disabled="loading" @click="chooseRepository">
+          {{ loading ? "Opening…" : "Open Repository…" }}
+        </button>
+        <button class="secondary-button" :disabled="loading" @click="browsingGitHub = true">Clone Repository…</button>
+      </div>
 
       <div v-if="recents.length" class="recents">
         <div class="recents-title">Recent</div>
@@ -653,6 +687,22 @@ function startResize(event, pane, min, max) {
       </div>
     </div>
   </main>
+
+  <!-- Overlays, shown over whichever screen is up. -->
+  <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
+  <TagDialog v-if="tagDialog" :dialog="tagDialog" />
+  <PullDialog v-if="pullDialog" :dialog="pullDialog" />
+  <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
+  <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
+  <ContextMenu v-if="contextMenu" :menu="contextMenu" />
+
+  <RemoteStatus
+    v-if="remoteOp"
+    :operation="remoteOp"
+    @cancel="invoke('cancel_remote')"
+    @dismiss="remoteOp = null"
+    @action="(action) => { remoteOp = null; action.run(); }"
+  />
 </template>
 
 <style scoped>
@@ -867,6 +917,16 @@ function startResize(event, pane, min, max) {
   background: var(--content-bg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 30px rgba(0, 0, 0, 0.08);
   text-align: center;
+}
+
+.welcome-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.github-page {
+  display: flex;
+  height: 100vh;
 }
 
 .welcome-icon {
