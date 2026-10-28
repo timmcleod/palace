@@ -69,6 +69,7 @@ pub fn run() {
             config::git_identity,
             config::set_git_identity,
             config::pull_mode,
+            cli::git_check,
             github::github_account,
             github::github_sign_in,
             github::github_sign_out,

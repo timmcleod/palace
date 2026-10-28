@@ -32,6 +32,40 @@ pub(crate) fn git(path: &str, args: &[&str], stdin: Option<&str>) -> Result<Stri
     if output.status.success() { Ok(stdout) } else { Err(join_output(&stderr, &stdout)) }
 }
 
+/// The oldest git Palace works with: `git pull --autostash` needs 2.27 when merging.
+const MINIMUM_GIT: (u32, u32) = (2, 27);
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct GitCheck {
+    /// The installed version, e.g. "2.34.1", or None when git isn't installed.
+    version: Option<String>,
+    minimum: String,
+    supported: bool,
+}
+
+/// Whether a git Palace can use is installed. Checked at startup.
+#[tauri::command]
+pub async fn git_check() -> GitCheck {
+    let output = Command::new("git").arg("--version").stdin(Stdio::null()).output();
+    let text = output.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    check_version(text.as_deref())
+}
+
+fn check_version(output: Option<&str>) -> GitCheck {
+    // "git version 2.34.1", sometimes with more after it, e.g. " (Apple Git-145)".
+    let version = output.and_then(|o| o.trim().strip_prefix("git version ")).and_then(|v| v.split_whitespace().next());
+    let parts: Vec<u32> = version.map(|v| v.split('.').map_while(|p| p.parse().ok()).collect()).unwrap_or_default();
+    let supported = match parts.as_slice() {
+        [major, minor, ..] => (*major, *minor) >= MINIMUM_GIT,
+        _ => false,
+    };
+    GitCheck {
+        version: version.map(str::to_string),
+        minimum: format!("{}.{}", MINIMUM_GIT.0, MINIMUM_GIT.1),
+        supported,
+    }
+}
+
 /// The git process currently doing network work, so it can be cancelled.
 #[derive(Default)]
 pub struct Running(pub(crate) Mutex<Option<u32>>);
@@ -163,3 +197,26 @@ fn join_output(first: &str, second: &str) -> String {
     [first, second].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checking_git_versions() {
+        let check = |o| check_version(o);
+        assert!(check(Some("git version 2.34.1\n")).supported);
+        assert!(check(Some("git version 2.27.0")).supported);
+        assert!(check(Some("git version 3.0.0")).supported);
+        assert!(check(Some("git version 2.39.3 (Apple Git-145)")).supported);
+        assert_eq!(check(Some("git version 2.39.3 (Apple Git-145)")).version.as_deref(), Some("2.39.3"));
+        assert!(!check(Some("git version 2.25.1")).supported);
+        assert_eq!(check(None), GitCheck { version: None, minimum: "2.27".into(), supported: false });
+        assert!(!check(Some("something else")).supported);
+    }
+
+    #[test]
+    fn the_installed_git_is_found() {
+        let found = tauri::async_runtime::block_on(git_check());
+        assert!(found.version.is_some() && found.supported, "{found:?}");
+    }
+}

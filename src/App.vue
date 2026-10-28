@@ -24,6 +24,7 @@ import CommitDetails from "./components/CommitDetails.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import FileSearch from "./components/FileSearch.vue";
+import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
 import FormDialog from "./components/FormDialog.vue";
 import PullDialog from "./components/PullDialog.vue";
@@ -276,12 +277,28 @@ function removeRecent(path) {
 window.addEventListener("focus", refresh);
 onBeforeUnmount(() => window.removeEventListener("focus", refresh));
 
-onMounted(() => {
-  const last = recents.value[0];
-  if (last) {
-    loadRepository(last.path);
+// Without a usable git, Palace shows how to install it instead of the app.
+const gitStatus = ref(null);
+const checkingGit = ref(false);
+const gitMissing = computed(() => gitStatus.value && !gitStatus.value.supported);
+
+async function checkGit() {
+  checkingGit.value = true;
+  try {
+    gitStatus.value = await invoke("git_check");
+  } catch {
+    // Couldn't ask; carry on rather than block the app.
+    gitStatus.value = null;
+  } finally {
+    checkingGit.value = false;
   }
-});
+  if (!gitMissing.value && !overview.value) {
+    const last = recents.value[0];
+    if (last) loadRepository(last.path);
+  }
+}
+
+onMounted(checkGit);
 
 watch(
   () => overview.value?.name,
@@ -384,8 +401,10 @@ function startResize(event, pane, min, max) {
 </script>
 
 <template>
+  <GitMissing v-if="gitMissing" :status="gitStatus" :checking="checkingGit" @recheck="checkGit" />
+
   <div
-    v-if="overview"
+    v-else-if="overview"
     class="window"
     :style="{ gridTemplateColumns: `${panes.sidebar}px minmax(280px, ${panes.history}px) minmax(320px, 1fr)` }"
   >

@@ -22,7 +22,13 @@ chmod +x Palace_0.1.0_amd64.AppImage
 ./Palace_0.1.0_amd64.AppImage
 ```
 
-The `.deb` installs `git` if it's missing. The AppImage expects `git` to be installed already.
+The `.deb` installs `git` if it's missing. The AppImage needs `git` installed already, and on Ubuntu 22.04 and later, the FUSE library AppImages run with:
+
+```sh
+sudo apt install git libfuse2    # libfuse2t64 on Ubuntu 24.04 and later
+```
+
+If Git is missing or older than 2.27, Palace says so when it starts and shows the command to install it.
 
 ## Build
 

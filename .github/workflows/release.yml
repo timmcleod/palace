@@ -68,7 +68,8 @@ jobs:
             `sudo apt install ./Palace_*.deb` in the folder you saved it to.
 
             **Other distributions:** download the `.AppImage`, make it executable
-            (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed.
+            (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed,
+            and on Ubuntu 22.04 and later, `libfuse2` (`libfuse2t64` on 24.04 and later).
           releaseDraft: false
 
       - name: Build the packages
