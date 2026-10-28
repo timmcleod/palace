@@ -69,6 +69,7 @@ pub fn run() {
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,
+            tree::blame_file,
             config::git_identity,
             config::set_git_identity,
             config::pull_mode,

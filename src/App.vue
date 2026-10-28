@@ -85,6 +85,33 @@ const draft = reactive({ subject: "", body: "", amend: false, saved: null });
 const fileFilter = ref(null);
 // The detail pane shows a commit's changes, or all its files ("tree").
 const detailMode = ref("changeset");
+// The file open in the Tree view, a file for it to open (going Back to it, say), and
+// the commit and file a blame click jumped to, whose diff opens on arrival.
+const treeFile = ref(null);
+const treeReveal = ref(null);
+const blameFocus = ref(null);
+
+function onTreeFileOpened(file) {
+  treeFile.value = file;
+  // Once another file is opened, the one to reopen has done its job.
+  if (file !== treeReveal.value) treeReveal.value = null;
+}
+
+// From a line's blame to the commit that last changed it, with that file's diff open.
+function showBlamedCommit(hunk) {
+  if (isStashes.value) selected.value = headHistoryKey(overview.value);
+  blameFocus.value = { id: hunk.id, file: hunk.file };
+  selectedCommit.value = { id: hunk.id, short_id: hunk.short_id, refs: [] };
+  detailMode.value = "changeset";
+}
+
+// Which file the commit details open: the file whose history is shown, or the one a
+// blame click came from.
+const focusFile = computed(() => {
+  if (isStashes.value) return null;
+  if (fileFilter.value) return fileFilter.value;
+  return blameFocus.value?.id === detailCommit.value?.id ? blameFocus.value.file : null;
+});
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 const isSettings = computed(() => selected.value === "workspace:settings");
@@ -140,12 +167,19 @@ const placeHere = () => ({
   commit: selectedCommit.value,
   stash: selectedStash.value,
   fileFilter: fileFilter.value,
+  detailMode: detailMode.value,
+  treeFile: treeFile.value,
 });
 
 const samePlace = (a, b) =>
-  a.selected === b.selected && a.commit?.id === b.commit?.id && a.stash === b.stash && a.fileFilter === b.fileFilter;
+  a.selected === b.selected &&
+  a.commit?.id === b.commit?.id &&
+  a.stash === b.stash &&
+  a.fileFilter === b.fileFilter &&
+  a.detailMode === b.detailMode &&
+  a.treeFile === b.treeFile;
 
-watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter], () => {
+watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile], () => {
   if (restoring || !overview.value) return;
   const place = placeHere();
   if (here && samePlace(here, place)) return;
@@ -171,6 +205,9 @@ async function go(direction) {
   selectedCommit.value = place.commit;
   selectedStash.value = place.stash;
   fileFilter.value = place.fileFilter;
+  detailMode.value = place.detailMode;
+  treeFile.value = place.treeFile;
+  treeReveal.value = place.treeFile;
   // Let the views settle (opening a stash's view picks one, say) before recording again.
   await nextTick();
   await nextTick();
@@ -796,14 +833,16 @@ function startResize(event, pane, min, max) {
             v-if="detailMode === 'tree'"
             :path="overview.path"
             :commit="detailCommit"
-            :reveal="isStashes ? null : fileFilter"
+            :reveal="isStashes ? null : (fileFilter ?? treeReveal)"
+            @file-opened="onTreeFileOpened"
+            @show-commit="showBlamedCommit"
           />
           <CommitDetails
             v-else
             :path="overview.path"
             :commit="detailCommit"
             :stash="isStashes"
-            :focus-file="isStashes ? null : fileFilter"
+            :focus-file="focusFile"
           />
         </template>
         <div v-else class="empty-state">
