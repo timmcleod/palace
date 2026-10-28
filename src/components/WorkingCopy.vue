@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { confirmDiscard } from "../lib/confirm.js";
@@ -137,11 +137,35 @@ function onRowClick(file, event) {
   emit("select", file);
 }
 
+// ↑ and ↓ move to the previous or next file and show its changes; with Shift, they
+// extend the selection from where it started.
+const listEl = ref(null);
+
 function onListKeydown(event) {
-  if ((event.ctrlKey || event.metaKey) && event.key === "a" && files.value?.length) {
+  const list = files.value ?? [];
+  if ((event.ctrlKey || event.metaKey) && event.key === "a" && list.length) {
     event.preventDefault();
-    chosen.value = new Set(files.value.map((f) => f.path));
+    chosen.value = new Set(list.map((f) => f.path));
+    return;
   }
+  if ((event.key !== "ArrowDown" && event.key !== "ArrowUp") || !list.length) return;
+  event.preventDefault();
+
+  const at = list.findIndex((f) => f.path === props.selectedPath);
+  const step = event.key === "ArrowDown" ? 1 : -1;
+  const next = at < 0 ? 0 : Math.min(list.length - 1, Math.max(0, at + step));
+  const file = list[next];
+
+  if (event.shiftKey && anchor) {
+    const from = list.findIndex((f) => f.path === anchor);
+    const [start, end] = from < next ? [from, next] : [next, from];
+    chosen.value = new Set(list.slice(Math.max(start, 0), end + 1).map((f) => f.path));
+  } else {
+    chosen.value = new Set([file.path]);
+    anchor = file.path;
+  }
+  emit("select", file);
+  nextTick(() => listEl.value?.children[next]?.scrollIntoView({ block: "nearest" }));
 }
 
 const label = (list) => (list.length === 1 ? `“${list[0].path.split("/").at(-1)}”` : `${list.length} Files`);
@@ -308,7 +332,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
       <p>No local changes.</p>
     </div>
 
-    <div v-else class="files" tabindex="0" @keydown="onListKeydown">
+    <div v-else ref="listEl" class="files" tabindex="0" @keydown="onListKeydown">
       <div
         v-for="file in files"
         :key="file.path"
