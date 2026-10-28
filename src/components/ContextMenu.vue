@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { Check } from "lucide-vue-next";
 import { closeMenu } from "../lib/overlays.js";
 
 const props = defineProps({
@@ -36,12 +37,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <button
         v-else
         class="item"
-        :class="{ danger: item.danger }"
         :disabled="item.disabled"
+        :class="{ danger: item.danger, detailed: item.detail, checkable: menu.items.some((i) => i.checked) }"
         role="menuitem"
         @click="choose(item)"
       >
-        {{ item.label }}
+        <Check v-if="item.checked" :size="14" class="check" />
+        <span class="label">{{ item.label }}</span>
+        <span v-if="item.detail" class="detail">{{ item.detail }}</span>
       </button>
     </template>
   </div>
@@ -60,7 +63,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   display: flex;
   flex-direction: column;
   min-width: 200px;
-  max-width: 360px;
+  max-width: 440px;
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -80,6 +83,42 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.item.checkable {
+  padding-left: 28px;
+}
+
+.check {
+  position: absolute;
+  top: 7px;
+  left: 8px;
+}
+
+.label,
+.detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item.detailed .label {
+  font-weight: 500;
+}
+
+.detail {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.item:hover:not(:disabled) .detail {
+  color: inherit;
+  opacity: 0.85;
 }
 
 .item:hover:not(:disabled) {

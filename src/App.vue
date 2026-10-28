@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Archive,
@@ -335,7 +336,12 @@ const panes = reactive({ sidebar: 300, history: 580, ...readJson(PANES_KEY, {}) 
 // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
 let loadSeq = 0;
 
-async function loadRepository(path, { quiet = false } = {}) {
+/**
+ * Opens the repository at `path`. `quiet` refreshes the open one in the background.
+ * With `keepOnError`, a repository that can't be opened leaves the current one open
+ * and says why, instead of going back to the welcome screen.
+ */
+async function loadRepository(path, { quiet = false, keepOnError = false } = {}) {
   const seq = ++loadSeq;
   if (!quiet) {
     loading.value = true;
@@ -365,7 +371,18 @@ async function loadRepository(path, { quiet = false } = {}) {
   } catch (e) {
     if (seq !== loadSeq) return;
     // A failed background refresh keeps showing the last good state.
-    if (!quiet) {
+    if (quiet) return;
+    if (keepOnError && overview.value) {
+      clearTimeout(dismissTimer);
+      remoteOp.value = reactive({
+        title: "Couldn't open the repository",
+        state: "failed",
+        message: `${path}\n${e}`,
+        actions: recents.value.some((r) => r.path === path)
+          ? [{ label: "Remove from List", run: () => removeRecent(path) }]
+          : [],
+      });
+    } else {
       overview.value = null;
       error.value = `Couldn't open ${path}: ${e}`;
     }
@@ -393,8 +410,30 @@ async function cloneRepository(url = "") {
 async function chooseRepository() {
   const path = await open({ directory: true, multiple: false, title: "Open Repository" });
   if (path) {
-    await loadRepository(path);
+    await loadRepository(path, { keepOnError: true });
   }
+}
+
+// The recent repositories, to jump between, below the sidebar's ▾ button.
+const home = ref("");
+homeDir()
+  .then((dir) => (home.value = dir))
+  .catch(() => {});
+
+function recentMenu(anchor) {
+  const current = overview.value?.path;
+  const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
+  openMenu(anchor, [
+    ...recents.value.map((repo) => ({
+      label: repo.name,
+      detail: tidy(repo.path),
+      checked: repo.path === current,
+      action: () => repo.path !== current && loadRepository(repo.path, { keepOnError: true }),
+    })),
+    recents.value.length && { separator: true },
+    { label: "Open Repository…", action: chooseRepository },
+    { label: "Clone Repository…", action: () => cloneRepository() },
+  ]);
 }
 
 function refresh() {
@@ -556,6 +595,7 @@ function startResize(event, pane, min, max) {
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
       @merge-into-head="(name) => actions.merge(name)"
       @add-menu="(event) => openMenu(event, actions.addMenu())"
+      @recent-menu="recentMenu"
     />
 
     <section v-if="isSettings" class="pane settings-pane">

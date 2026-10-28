@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   ChevronRight,
   Cloud,
   Folder,
@@ -31,7 +32,14 @@ const emit = defineEmits([
   "section-menu",
   "merge-into-head",
   "add-menu",
+  "recent-menu",
 ]);
+
+// Where to open a menu so it drops down from the button that was clicked.
+function below(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} };
+}
 
 const filter = ref("");
 const collapsedSections = reactive(new Set());
@@ -226,6 +234,9 @@ function onRowClick(row) {
       <button class="icon-button" title="Open Repository…" @click="emit('open-repository')">
         <FolderOpen :size="18" :stroke-width="1.5" />
       </button>
+      <button class="icon-button recent-button" title="Recent Repositories" @click="emit('recent-menu', below($event))">
+        <ChevronDown :size="15" :stroke-width="1.75" />
+      </button>
     </header>
 
     <nav class="sidebar-scroll">
@@ -303,6 +314,11 @@ function onRowClick(row) {
   flex-direction: column;
   min-width: 0;
   background: var(--sidebar-bg);
+}
+
+.recent-button {
+  width: 22px;
+  margin-left: -6px;
 }
 
 .sidebar-toolbar {

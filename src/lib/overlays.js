@@ -24,8 +24,9 @@ export function closeForm(values) {
 export const contextMenu = shallowRef(null);
 
 /**
- * Shows a menu at the pointer. items: [{ label, action, disabled, danger }] or
- * { separator: true }.
+ * Shows a menu at the pointer. items: [{ label, action, disabled, danger, detail,
+ * checked }] or { separator: true }. `detail` is a second, smaller line; `checked`
+ * puts a tick beside the item.
  */
 export function openMenu(event, items) {
   event.preventDefault();
