@@ -104,6 +104,60 @@ pub async fn rebase(path: String, onto: String) -> Result<String, String> {
     })
 }
 
+/// Applies the changes commit `id` made on top of the current branch, as a new commit.
+#[tauri::command]
+pub async fn cherry_pick(path: String, id: String) -> Result<String, String> {
+    apply_commit(&path, "cherry-pick", &id)?;
+    Ok(format!("Cherry-picked {}.", short(&id)))
+}
+
+/// Adds a commit that undoes the changes commit `id` made.
+#[tauri::command]
+pub async fn revert(path: String, id: String) -> Result<String, String> {
+    apply_commit(&path, "revert", &id)?;
+    Ok(format!("Reverted {}.", short(&id)))
+}
+
+/// Runs `git cherry-pick` or `git revert` for one commit. A merge commit's changes
+/// are taken relative to its first parent, the branch it was merged into.
+fn apply_commit(path: &str, operation: &str, id: &str) -> Result<(), String> {
+    let merge = open(path)?
+        .revparse_single(id)
+        .and_then(|o| o.peel_to_commit())
+        .map(|c| c.parent_count() > 1)
+        .map_err(|e| e.message().to_string())?;
+    let mut args = vec![operation, "--no-edit"];
+    if merge {
+        args.extend(["-m", "1"]);
+    }
+    args.push(id);
+
+    match git(path, &args, None) {
+        Ok(_) => Ok(()),
+        // The branch already has these changes (or already lacks them, for a revert).
+        // Git stops with nothing to commit; skip the empty commit and say so.
+        Err(e) if e.contains("is now empty") || e.contains("nothing to commit") => {
+            if operation_in_progress(path) {
+                let _ = git(path, &[operation, "--skip"], None);
+            }
+            Err(if operation == "revert" {
+                format!("Nothing to revert: the changes from {} aren't on this branch.", short(id))
+            } else {
+                format!("Nothing to cherry-pick: the changes from {} are already on this branch.", short(id))
+            })
+        }
+        Err(e) => Err(stopped_or(path, e)),
+    }
+}
+
+fn operation_in_progress(path: &str) -> bool {
+    open(path).map(|repo| operation(&repo).is_some()).unwrap_or(false)
+}
+
+fn short(id: &str) -> &str {
+    &id[..id.len().min(7)]
+}
+
 /// Continues, aborts or skips (rebase only) the operation in progress.
 #[tauri::command]
 pub async fn control_operation(path: String, action: String) -> Result<String, String> {
@@ -300,5 +354,71 @@ mod tests {
         assert_eq!(head.message().unwrap().trim_end(), "Their change");
         assert_eq!(head.parent(0).unwrap().message().unwrap().trim_end(), "Our change");
         assert_eq!(t.branch(), "theirs");
+    }
+
+    #[test]
+    fn cherry_picking_and_reverting() {
+        let t = TempRepo::new("pick");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        let feature = t.commit(&[("f.txt", Some("f\n"))], "Feature").to_string();
+        git(t.path(), &["switch", &main], None).unwrap();
+
+        let message = run(cherry_pick(t.path().into(), feature.clone())).unwrap();
+        assert_eq!(message, format!("Cherry-picked {}.", &feature[..7]));
+        assert!(t.dir.join("f.txt").exists());
+        let head = t.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.summary().unwrap(), Some("Feature"));
+
+        // Picking it again would change nothing.
+        let empty = run(cherry_pick(t.path().into(), feature)).unwrap_err();
+        assert!(empty.starts_with("Nothing to cherry-pick"), "{empty}");
+        assert!(operation(&t.repo).is_none());
+
+        let picked = head.id().to_string();
+        run(revert(t.path().into(), picked.clone())).unwrap();
+        assert!(!t.dir.join("f.txt").exists());
+        let head = t.repo.head().unwrap().peel_to_commit().unwrap();
+        assert!(head.summary().unwrap().unwrap().starts_with("Revert"), "{:?}", head.summary());
+    }
+
+    #[test]
+    fn a_conflicting_cherry_pick_waits_for_the_user() {
+        let t = TempRepo::new("pick-conflict");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        let feature = t.commit(&[("a.txt", Some("theirs\n"))], "Theirs").to_string();
+        git(t.path(), &["switch", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours\n"))], "Ours");
+
+        let stopped = run(cherry_pick(t.path().into(), feature)).unwrap_err();
+        assert!(stopped.starts_with("CONFLICT: The cherry-pick stopped because 1 file conflicted"), "{stopped}");
+        run(control_operation(t.path().into(), "abort".into())).unwrap();
+        assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn reverting_a_merge_undoes_what_it_brought_in() {
+        let t = TempRepo::new("revert-merge");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        // Committed with the git CLI throughout, as a real merge would be.
+        let commit = |file: &str, message: &str| {
+            t.write(&[(file, Some("x\n"))]);
+            git(t.path(), &["add", file], None).unwrap();
+            git(t.path(), &["commit", "-m", message], None).unwrap();
+        };
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        commit("f.txt", "Feature");
+        git(t.path(), &["switch", &main], None).unwrap();
+        commit("m.txt", "Main");
+        git(t.path(), &["merge", "--no-edit", "feature"], None).unwrap();
+        let merge = t.head().to_string();
+
+        run(revert(t.path().into(), merge)).unwrap();
+        assert!(!t.dir.join("f.txt").exists());
+        assert!(t.dir.join("m.txt").exists());
     }
 }

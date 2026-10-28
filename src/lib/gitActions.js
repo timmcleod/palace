@@ -219,6 +219,16 @@ export function useGitActions({ overview, run }) {
     });
   }
 
+  // Copies a commit's changes onto the current branch as a new commit.
+  function cherryPick(commit) {
+    return run(["Cherry-picking…", "Cherry-picked", "Couldn't cherry-pick"], "cherry_pick", { id: commit.id });
+  }
+
+  // Adds a commit that undoes another's changes.
+  function revert(commit) {
+    return run(["Reverting…", "Reverted", "Couldn't revert"], "revert", { id: commit.id });
+  }
+
   function pushTag(name) {
     return run(["Pushing tag…", "Pushed tag", "Couldn't push the tag"], "push_tag", { name });
   }
@@ -313,6 +323,12 @@ export function useGitActions({ overview, run }) {
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
       { label: "New Tag Here…", action: () => createTag(commit.short_id) },
       { separator: true },
+      {
+        label: `Cherry-Pick “${commit.short_id}” into “${current() ?? "HEAD"}”`,
+        action: () => cherryPick(commit),
+        disabled: midOperation(),
+      },
+      { label: `Revert “${commit.short_id}”`, action: () => revert(commit), disabled: midOperation() },
       { label: `Reset HEAD to “${commit.short_id}”…`, action: () => resetTo(commit.id), disabled: midOperation() },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },

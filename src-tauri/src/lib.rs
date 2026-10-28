@@ -49,6 +49,8 @@ pub fn run() {
             branch::merge,
             branch::rebase,
             branch::control_operation,
+            branch::cherry_pick,
+            branch::revert,
             reset::reset,
             reset::reset_preview,
             stash::stash_save,
