@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn a_conflict_stops_and_continuing_finishes_with_the_new_message() {
-        let t = TempRepo::new("rebase-conflict");
+        let t = TempRepo::new("interactive-rebase-conflict");
         let a = t.commit(&[("f.txt", Some("1\n"))], "A");
         let b = t.commit(&[("f.txt", Some("2\n"))], "B");
         let c = t.commit(&[("f.txt", Some("3\n"))], "C");

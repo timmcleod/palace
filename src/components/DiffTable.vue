@@ -151,14 +151,20 @@ td {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-right: -10px;
 }
 
-/* Stays in view at the right edge even when long lines scroll the table sideways. */
+/* Stays in view at the right edge even when long lines scroll the table sideways,
+   covering the header text it floats over rather than showing it through. */
 .hunk-actions {
   position: sticky;
-  right: 8px;
+  right: 0;
   display: flex;
+  flex-shrink: 0;
   gap: 6px;
+  padding: 0 8px 0 6px;
+  background: var(--diff-hunk-bg);
+  box-shadow: -14px 0 10px -4px var(--diff-hunk-bg);
 }
 
 .hunk-action {

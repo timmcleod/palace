@@ -48,6 +48,7 @@ pub fn run() {
             working::head_commit,
             working::conflict_file,
             working::resolve_conflict,
+            working::resolve_conflict_block,
             working::open_in_editor,
             branch::checkout,
             branch::create_branch,

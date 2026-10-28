@@ -28,16 +28,20 @@ watch(
   { immediate: true },
 );
 
-// Tags each line with the part of a conflict it's in. Git writes:
+// Tags each line with the part of a conflict it's in, and numbers each conflict where
+// it starts. Git writes:
 //   <<<<<<< current … ||||||| base (diff3 style only) … ======= … >>>>>>> incoming
 const lines = computed(() => {
   if (text.value == null) return [];
   let region = null;
+  let blocks = 0;
   return text.value.split("\n").map((line, i) => {
     let kind = region;
-    if (line.startsWith("<<<<<<<")) {
+    let block = null;
+    if (line.startsWith("<<<<<<<") && !region) {
       kind = "marker";
       region = "current";
+      block = blocks++;
     } else if (line.startsWith("|||||||") && region) {
       kind = "marker";
       region = "base";
@@ -48,11 +52,25 @@ const lines = computed(() => {
       kind = "marker";
       region = null;
     }
-    return { number: i + 1, text: line, kind };
+    return { number: i + 1, text: line, kind, block };
   });
 });
 
-const conflictCount = computed(() => lines.value.filter((l) => l.text.startsWith("<<<<<<<")).length);
+const conflictCount = computed(() => lines.value.filter((l) => l.block != null).length);
+
+// Settles one conflict, leaving the rest of the file to resolve.
+async function resolveBlock(block, side) {
+  busy.value = true;
+  error.value = "";
+  try {
+    text.value = await invoke("resolve_conflict_block", { path: props.path, file: props.file.path, block, side });
+    emit("changed");
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
 
 async function run(command, args) {
   busy.value = true;
@@ -71,14 +89,15 @@ async function run(command, args) {
 <template>
   <div class="conflict-view selectable">
     <p class="intro">
-      This file has conflicting changes. Keep one side, or edit the file to combine them and mark it as resolved.
+      This file has conflicting changes. Choose a side for each conflict below, keep one side for the whole file, or
+      edit the file to combine them, then mark it as resolved.
     </p>
 
     <div class="actions">
-      <button class="secondary-button" :disabled="busy" title="Keep HEAD's version" @click="run('resolve_conflict', { side: 'current' })">
+      <button class="secondary-button" :disabled="busy" title="Keep HEAD's version of the whole file" @click="run('resolve_conflict', { side: 'current' })">
         Use Current
       </button>
-      <button class="secondary-button" :disabled="busy" title="Keep the version being merged, rebased or applied" @click="run('resolve_conflict', { side: 'incoming' })">
+      <button class="secondary-button" :disabled="busy" title="Keep the whole file as it is in the change being merged, rebased or applied" @click="run('resolve_conflict', { side: 'incoming' })">
         Use Incoming
       </button>
       <button class="secondary-button" :disabled="busy" @click="run('open_in_editor')">Open in Editor</button>
@@ -98,10 +117,35 @@ async function run(command, args) {
 
       <div class="scroller">
         <table class="mono">
-          <tr v-for="line in lines" :key="line.number" :class="line.kind">
-            <td class="gutter">{{ line.number }}</td>
-            <td class="text">{{ line.text }}</td>
-          </tr>
+          <template v-for="line in lines" :key="line.number">
+            <tr v-if="line.block != null" class="block-row">
+              <td class="gutter" />
+              <td>
+                <div class="block-bar">
+                  <span class="block-label">Conflict {{ line.block + 1 }}</span>
+                  <span class="use">Use:</span>
+                  <button class="secondary-button" :disabled="busy" title="Keep the current side" @click="resolveBlock(line.block, 'current')">
+                    Current
+                  </button>
+                  <button class="secondary-button" :disabled="busy" title="Keep the incoming side" @click="resolveBlock(line.block, 'incoming')">
+                    Incoming
+                  </button>
+                  <button
+                    class="secondary-button"
+                    :disabled="busy"
+                    title="Keep both, the current side first"
+                    @click="resolveBlock(line.block, 'both')"
+                  >
+                    Both
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr :class="line.kind">
+              <td class="gutter">{{ line.number }}</td>
+              <td class="text">{{ line.text }}</td>
+            </tr>
+          </template>
         </table>
       </div>
     </template>
@@ -215,6 +259,45 @@ td {
 
 .base .text {
   background: var(--toolbar-group-bg);
+}
+
+.block-row td {
+  padding-top: 10px;
+  background: var(--diff-gutter-bg);
+}
+
+tr.block-row:first-child td {
+  padding-top: 4px;
+}
+
+/* Stays in view when the file is scrolled sideways. */
+.block-bar {
+  position: sticky;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 10px 4px;
+  white-space: nowrap;
+  font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
+}
+
+.use {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.block-label {
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.block-bar button {
+  padding: 2px 10px;
+  font-size: 12px;
 }
 
 .marker .text {

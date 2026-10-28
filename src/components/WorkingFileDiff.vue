@@ -76,7 +76,7 @@ async function run(command, args) {
 
 async function onHunk(staged, { action, index }) {
   if (action === "discard") {
-    const ok = await confirmDiscard("Discard this hunk?", "The change will be lost; it can't be recovered from the Trash.");
+    const ok = await confirmDiscard("Discard this chunk?", "The change will be lost; it can't be recovered from the Trash.");
     if (ok) run("discard_hunk", { file: props.file.path, hunk: index });
   } else {
     run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk: index });
@@ -105,15 +105,15 @@ const SECTIONS = [
     staged: false,
     title: "Unstaged Changes",
     hunkActions: [
-      { id: "discard", label: "Discard Hunk", danger: true },
-      { id: "stage", label: "Stage Hunk" },
+      { id: "discard", label: "Discard Chunk", danger: true },
+      { id: "stage", label: "Stage Chunk" },
     ],
     fileAction: "Stage File",
   },
   {
     staged: true,
     title: "Staged Changes",
-    hunkActions: [{ id: "unstage", label: "Unstage Hunk" }],
+    hunkActions: [{ id: "unstage", label: "Unstage Chunk" }],
     fileAction: "Unstage File",
   },
 ];

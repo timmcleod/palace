@@ -4,7 +4,7 @@ A desktop Git client for Linux.
 
 - **History** — every commit with a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash.
 - **Commit details** — author, dates, refs and message, with each changed file's diff.
-- **Working copy** — stage and unstage whole files or single hunks, discard changes (the old version goes to the Trash), commit and amend.
+- **Working copy** — stage and unstage whole files or single chunks, discard changes (the old version goes to the Trash), commit and amend.
 - **Remotes** — fetch, pull and push with live progress, using your existing SSH agent and credential helpers.
 
 Palace runs the `git` command for everything that changes a repository, so your hooks, commit signing and `.gitconfig` apply exactly as they do in a terminal.

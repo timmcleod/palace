@@ -108,6 +108,20 @@ pub async fn resolve_conflict(path: String, file: String, side: String) -> Resul
     resolve(&path, &file, &side)
 }
 
+/// Resolves one conflict in a file, the `block`th (from 0), by keeping its "current"
+/// side, its "incoming" side, or "both", current first. The file is rewritten and its
+/// new contents returned; it stays conflicted until marked as resolved.
+#[tauri::command]
+pub async fn resolve_conflict_block(path: String, file: String, block: usize, side: String) -> Result<String, String> {
+    let repo = Repository::discover(&path).map_err(message)?;
+    let full = repo.workdir().ok_or("This repository has no working copy.")?.join(&file);
+    let bytes = std::fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("{file} isn't text. Open it in your editor to resolve it."))?;
+    let resolved = take_side(&text, block, &side)?;
+    std::fs::write(&full, &resolved).map_err(|e| format!("Couldn't write {file}: {e}"))?;
+    Ok(resolved)
+}
+
 #[tauri::command]
 pub async fn open_in_editor(app: tauri::AppHandle, path: String, file: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -286,9 +300,9 @@ fn hunk_patch(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk
     let index = delta_index(&diff, file).ok_or("This file no longer has those changes.")?;
     let mut patch = Patch::from_diff(&diff, index)
         .map_err(message)?
-        .ok_or("Binary files can't be changed by hunk.")?;
+        .ok_or("Binary files can't be changed by chunk.")?;
     let text = patch.to_buf().map_err(message)?;
-    single_hunk_patch(&String::from_utf8_lossy(&text), hunk).ok_or_else(|| "That hunk no longer exists.".to_string())
+    single_hunk_patch(&String::from_utf8_lossy(&text), hunk).ok_or_else(|| "That chunk no longer exists.".to_string())
 }
 
 /// Keeps a patch's file header and only its `hunk`th hunk.
@@ -401,6 +415,70 @@ fn resolve(path: &str, file: &str, side: &str) -> Result<(), String> {
         Err(e) if e.contains("does not have") => git(path, &["rm", "-q", "--", file], None).map(drop),
         Err(e) => Err(e),
     }
+}
+
+/// Replaces the `block`th conflict in `text` with the side chosen. Each conflict is
+/// git's  <<<<<<< current … [||||||| base …] ======= incoming … >>>>>>>  with the
+/// line endings left as they are.
+fn take_side(text: &str, block: usize, side: &str) -> Result<String, String> {
+    if !matches!(side, "current" | "incoming" | "both") {
+        return Err(format!("Unknown side: {side}"));
+    }
+    let mut out = String::with_capacity(text.len());
+    let (mut current, mut incoming) = (String::new(), String::new());
+    // Where we are: outside a conflict, or in one of its parts.
+    #[derive(PartialEq)]
+    enum Part {
+        Outside,
+        Current,
+        Base,
+        Incoming,
+    }
+    let mut part = Part::Outside;
+    let mut seen = 0;
+    let mut found = false;
+
+    for line in text.split_inclusive('\n') {
+        // Only the chosen conflict is changed; everything else is copied as it is.
+        let ours = seen == block + 1 && !found;
+        match part {
+            Part::Outside if line.starts_with("<<<<<<<") => {
+                seen += 1;
+                part = Part::Current;
+                if seen != block + 1 {
+                    out.push_str(line);
+                }
+            }
+            Part::Outside => out.push_str(line),
+            _ if !ours => {
+                if line.starts_with(">>>>>>>") {
+                    part = Part::Outside;
+                } else if line.starts_with("|||||||") && part == Part::Current {
+                    part = Part::Base;
+                } else if line.starts_with("=======") && part != Part::Incoming {
+                    part = Part::Incoming;
+                }
+                out.push_str(line);
+            }
+            Part::Current | Part::Base if line.starts_with("|||||||") => part = Part::Base,
+            Part::Current | Part::Base if line.starts_with("=======") => part = Part::Incoming,
+            Part::Current => current.push_str(line),
+            Part::Base => {}
+            Part::Incoming if line.starts_with(">>>>>>>") => {
+                part = Part::Outside;
+                found = true;
+                if side != "incoming" {
+                    out.push_str(&current);
+                }
+                if side != "current" {
+                    out.push_str(&incoming);
+                }
+            }
+            Part::Incoming => incoming.push_str(line),
+        }
+    }
+
+    if found { Ok(out) } else { Err("That conflict isn't in the file anymore. It may have been edited elsewhere.".into()) }
 }
 
 fn move_to_trash(file: &Path) -> Result<(), String> {
@@ -700,6 +778,33 @@ mod tests {
         resolve(t.path(), "gone.txt", "current").unwrap();
         assert_eq!(read(&t, "gone.txt").as_deref(), Some("edited\n"));
         assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
+    }
+
+    #[test]
+    fn resolving_one_conflict_at_a_time() {
+        let text = "top\n<<<<<<< HEAD\nours 1\n=======\ntheirs 1\n>>>>>>> theirs\nmiddle\n<<<<<<< HEAD\nours 2\n||||||| base\nold 2\n=======\ntheirs 2a\ntheirs 2b\n>>>>>>> theirs\nend";
+
+        let second = take_side(text, 1, "incoming").unwrap();
+        assert_eq!(
+            second,
+            "top\n<<<<<<< HEAD\nours 1\n=======\ntheirs 1\n>>>>>>> theirs\nmiddle\ntheirs 2a\ntheirs 2b\nend"
+        );
+        let both = take_side(&second, 0, "both").unwrap();
+        assert_eq!(both, "top\nours 1\ntheirs 1\nmiddle\ntheirs 2a\ntheirs 2b\nend");
+        assert_eq!(take_side(text, 1, "current").unwrap().lines().filter(|l| l.starts_with("ours")).count(), 2);
+
+        assert!(take_side(&both, 0, "current").is_err(), "no conflicts are left");
+        assert!(take_side(text, 0, "neither").is_err());
+    }
+
+    #[test]
+    fn resolving_a_conflict_block_rewrites_the_file() {
+        let t = merge_conflict("conflict-block");
+        let text = tauri::async_runtime::block_on(resolve_conflict_block(t.path().into(), "a.txt".into(), 0, "both".into())).unwrap();
+        assert_eq!(text, "ours\ntheirs\n");
+        assert_eq!(read(&t, "a.txt").as_deref(), Some("ours\ntheirs\n"));
+        // Still conflicted until it's marked as resolved.
+        assert!(read_status(&t.repo).unwrap().iter().any(|f| f.path == "a.txt" && f.conflicted));
     }
 
     #[test]
