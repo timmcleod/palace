@@ -4,7 +4,7 @@
 # with git) runs the tests, builds the .deb and AppImage with that version, and
 # publishes them as a GitHub release. Running the workflow by hand from the Actions
 # tab builds the packages without publishing anything, and attaches them to the run
-# instead.
+# instead. Once a release is published, the website shows its version.
 
 name: Release
 
@@ -92,3 +92,35 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+  website:
+    # Only after the release is out, so the website never offers a version that
+    # can't be downloaded yet.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      # Pushing to gh-pages republishes the site.
+      - name: Show the new version on the website
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          current=$(grep -oE 'Version [0-9]+\.[0-9]+\.[0-9]+' index.html | head -1 | cut -d' ' -f2)
+          if [ -z "$current" ]; then
+            echo "::error::index.html has no \"Version x.y.z\" to update."
+            exit 1
+          fi
+          # Re-running an older release's workflow doesn't take the website back.
+          if [ "$(printf '%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" ] || [ "$current" = "$version" ]; then
+            echo "The website already shows $current."
+            exit 0
+          fi
+          sed -i -E "s/Version [0-9]+\.[0-9]+\.[0-9]+/Version $version/" index.html
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Show version $version"
+          git push
