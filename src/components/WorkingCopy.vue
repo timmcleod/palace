@@ -2,9 +2,8 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { confirmDiscard } from "../lib/confirm.js";
-import { openForm, openMenu } from "../lib/overlays.js";
+import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -243,10 +242,12 @@ const canCommit = computed(
 async function commit() {
   if (!canCommit.value) return;
   if (props.draft.amend && head.value?.pushed) {
-    const ok = await ask(
-      "This commit has already been pushed. After amending it, your branch and its upstream will have diverged, and you'll need to force push to publish the change.",
-      { title: "Amend a Pushed Commit?", kind: "warning", okLabel: "Amend", cancelLabel: "Cancel" },
-    );
+    const ok = await askConfirm({
+      title: "Amend a Pushed Commit?",
+      message:
+        "This commit has already been pushed. After amending it, your branch and its upstream will have diverged, and you'll need to force push to publish the change.",
+      confirmLabel: "Amend",
+    });
     if (!ok) return;
   }
 

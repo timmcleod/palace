@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
-import { openForm, openMergeDialog, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
+import { askConfirm, openForm, openMergeDialog, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 
 // The Pull dialog's last choices, offered again next time.
@@ -16,8 +15,8 @@ export function useGitActions({ overview, run }) {
   // Git won't start a merge or rebase while another operation is waiting on the user.
   const midOperation = () => !!overview.value?.operation;
 
-  const confirm = (message, title, okLabel) =>
-    ask(message, { title, kind: "warning", okLabel, cancelLabel: "Cancel" });
+  // Most of what's confirmed can't be undone; rebasing is the exception.
+  const confirm = (message, title, confirmLabel, danger = true) => askConfirm({ title, message, confirmLabel, danger });
 
   function checkout(kind, name) {
     return run(["Checking out…", "Checked out", "Checkout failed"], "checkout", { kind, name });
@@ -90,6 +89,7 @@ export function useGitActions({ overview, run }) {
       `Rebase “${current()}” onto “${onto}”?\n\nThis replays ${current()}'s own commits on top of ${onto}, giving them new hashes. If they've already been pushed, you'll need to force push afterwards.`,
       "Rebase",
       "Rebase",
+      false,
     );
     if (ok) await run(["Rebasing…", "Rebased", "Rebase failed"], "rebase", { onto });
   }

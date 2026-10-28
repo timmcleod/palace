@@ -10,7 +10,6 @@
     "opener:default",
     "dialog:allow-open",
     "core:window:allow-set-title",
-    "dialog:allow-message",
     "core:window:allow-set-theme"
   ]
 }

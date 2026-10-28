@@ -24,6 +24,7 @@ import CommitDetails from "./components/CommitDetails.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 import FileSearch from "./components/FileSearch.vue";
 import GitHubView from "./components/GitHubView.vue";
 import GitMissing from "./components/GitMissing.vue";
@@ -51,6 +52,7 @@ import {
 import { useGitActions } from "./lib/gitActions.js";
 import {
   cloneDialog,
+  confirmDialog,
   contextMenu,
   formDialog,
   mergeDialog,
@@ -698,6 +700,7 @@ function startResize(event, pane, min, max) {
   <MergeDialog v-if="mergeDialog" :dialog="mergeDialog" />
   <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
   <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
+  <ConfirmDialog v-if="confirmDialog" :dialog="confirmDialog" />
   <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
   <RemoteStatus

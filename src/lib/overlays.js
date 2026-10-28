@@ -120,3 +120,21 @@ export function closeMergeDialog(values) {
   mergeDialog.value?.resolve(values);
   mergeDialog.value = null;
 }
+
+export const confirmDialog = shallowRef(null);
+
+/**
+ * Asks before doing something, resolving to true to go ahead. A blank line in
+ * `message` starts a new paragraph. `danger` marks something that can't be undone:
+ * the button turns red, and Enter cancels.
+ */
+export function askConfirm({ title, message, confirmLabel = "OK", danger = false }) {
+  return new Promise((resolve) => {
+    confirmDialog.value = { title, message, confirmLabel, danger, resolve };
+  });
+}
+
+export function closeConfirm(ok) {
+  confirmDialog.value?.resolve(ok);
+  confirmDialog.value = null;
+}
