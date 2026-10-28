@@ -90,6 +90,7 @@ pub fn run() {
             remote::cancel_remote,
             remote::delete_remote_branch,
             remote::push_tag,
+            remote::delete_remote_tag,
             remote::clone_repo,
             remote::add_remote,
             remote::rename_remote,

@@ -150,6 +150,26 @@ fn clone_into(url: &str, dest: &Path, running: &Running, report: Report) -> Resu
     Ok(format!("Cloned {name} into {}.", parent.display()))
 }
 
+/// Deletes a tag from the default remote. A tag that isn't there counts as done.
+#[tauri::command]
+pub async fn delete_remote_tag(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    in_background(app, move |running, report| delete_tag_on_remote(&path, &name, running, report)).await
+}
+
+fn delete_tag_on_remote(path: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
+    let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
+    let remote = default_remote(&repo)?;
+    // Servers differ on a tag that isn't there: GitHub refuses ("remote ref does not
+    // exist"), while git's own server deletes nothing and warns.
+    let missing = format!("The tag {name} wasn't on {remote}.");
+    match git_with_progress(path, &["push", "--progress", &remote, "--delete", &format!("refs/tags/{name}")], running, report) {
+        Ok(output) if output.contains("non-existent ref") => Ok(missing),
+        Ok(_) => Ok(format!("Deleted the tag {name} from {remote}.")),
+        Err(e) if e.contains("remote ref does not exist") => Ok(missing),
+        Err(e) => Err(e),
+    }
+}
+
 #[tauri::command]
 pub fn cancel_remote(running: tauri::State<'_, Running>) {
     running.cancel();
@@ -577,5 +597,22 @@ mod tests {
 
         let bad = crate::cli::git(local.path(), &["remote", "add", "has space", other.path()], None).unwrap_err();
         assert!(explain_remote_error("has space", bad).contains("isn't a valid remote name"));
+    }
+
+    #[test]
+    fn deleting_a_tag_from_the_remote() {
+        let (server, local) = setup("remote-tag");
+        crate::cli::git(local.path(), &["tag", "v1.0.0"], None).unwrap();
+        crate::cli::git(local.path(), &["push", "origin", "refs/tags/v1.0.0"], None).unwrap();
+        assert!(server.repo.find_reference("refs/tags/v1.0.0").is_ok());
+
+        let message = delete_tag_on_remote(local.path(), "v1.0.0", &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, "Deleted the tag v1.0.0 from origin.");
+        assert!(server.repo.find_reference("refs/tags/v1.0.0").is_err());
+        // The local tag stays.
+        assert!(local.repo.find_reference("refs/tags/v1.0.0").is_ok());
+
+        let again = delete_tag_on_remote(local.path(), "v1.0.0", &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(again, "The tag v1.0.0 wasn't on origin.");
     }
 }

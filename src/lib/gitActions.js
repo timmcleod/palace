@@ -234,13 +234,42 @@ export function useGitActions({ overview, run }) {
     return run(["Pushing tag…", "Pushed tag", "Couldn't push the tag"], "push_tag", { name });
   }
 
+  // The remote tags are pushed to and deleted from: origin, or the only remote.
+  function tagRemote() {
+    const names = overview.value.remotes.map((r) => r.name);
+    return names.includes("origin") ? "origin" : names.length === 1 ? names[0] : null;
+  }
+
   async function deleteTag(name) {
+    const remote = tagRemote();
+    const values = await openForm({
+      title: "Delete Tag",
+      message: `Delete the tag “${name}”?`,
+      fields: remote ? [{ key: "remote", label: `Also delete it from ${remote}`, type: "checkbox", value: false }] : [],
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!values) return;
+    const error = await run(["Deleting tag…", "Deleted tag", "Couldn't delete the tag"], "delete_tag", { name });
+    if (!error && values.remote) await deleteRemoteTag(name);
+  }
+
+  function deleteRemoteTag(name) {
+    return run(
+      ["Deleting tag from remote…", "Deleted tag from remote", "Couldn't delete the tag from the remote"],
+      "delete_remote_tag",
+      { name },
+    );
+  }
+
+  async function confirmDeleteRemoteTag(name) {
+    const remote = tagRemote();
     const ok = await confirm(
-      `Delete the tag “${name}”?\n\nIt's only deleted here. If you've pushed it, the copy on the remote stays.`,
-      "Delete Tag",
+      `Delete the tag “${name}” from ${remote}?\n\nIt's removed for everyone who uses ${remote}; your own copy stays. On GitHub, a release made from this tag becomes a draft.`,
+      "Delete Tag from Remote",
       "Delete",
     );
-    if (ok) await run(["Deleting tag…", "Deleted tag", "Couldn't delete the tag"], "delete_tag", { name });
+    if (ok) await deleteRemoteTag(name);
   }
 
   async function controlOperation(action) {
@@ -304,8 +333,10 @@ export function useGitActions({ overview, run }) {
       { separator: true },
       { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       { separator: true },
-      { label: "Push to Remote", action: () => pushTag(name), disabled: !overview.value.remotes.length },
+      { label: "Push to Remote", action: () => pushTag(name), disabled: !tagRemote() },
+      { separator: true },
       { label: "Delete…", action: () => deleteTag(name), danger: true },
+      { label: "Delete from Remote…", action: () => confirmDeleteRemoteTag(name), disabled: !tagRemote(), danger: true },
     ];
   }
 

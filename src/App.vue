@@ -220,7 +220,7 @@ const remoteOp = ref(null);
 let dismissTimer;
 
 // Only network operations report progress and can be cancelled.
-const NETWORK = new Set(["fetch", "pull", "push", "clone_repo", "add_remote"]);
+const NETWORK = new Set(["fetch", "pull", "push", "clone_repo", "add_remote", "delete_remote_tag"]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 const remoteBusy = computed(() => remoteOp.value?.state === "running");
