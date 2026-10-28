@@ -2,22 +2,38 @@
 
 use crate::cli::git;
 
-/// Stashes all staged and unstaged changes, and untracked files too when asked.
+/// Stashes all staged and unstaged changes, and untracked files too when asked. With
+/// `files`, only those files are stashed (untracked ones included) and every other
+/// change stays where it is.
 #[tauri::command]
-pub async fn stash_save(path: String, message: Option<String>, include_untracked: bool) -> Result<String, String> {
+pub async fn stash_save(
+    path: String,
+    message: Option<String>,
+    include_untracked: bool,
+    files: Option<Vec<String>>,
+) -> Result<String, String> {
+    let files = files.filter(|f| !f.is_empty());
     let mut args = vec!["stash", "push"];
-    if include_untracked {
+    if include_untracked || files.is_some() {
         args.push("--include-untracked");
     }
     let message = message.filter(|m| !m.trim().is_empty());
     if let Some(message) = &message {
         args.extend(["--message", message.as_str()]);
     }
+    if let Some(files) = &files {
+        args.push("--");
+        args.extend(files.iter().map(String::as_str));
+    }
     let output = git(&path, &args, None)?;
     if output.contains("No local changes to save") {
         return Err("There are no changes to stash.".into());
     }
-    Ok("Stashed your changes.".into())
+    Ok(match files.map(|f| f.len()) {
+        Some(1) => "Stashed 1 file.".into(),
+        Some(n) => format!("Stashed {n} files."),
+        None => "Stashed your changes.".into(),
+    })
 }
 
 /// Applies stash@{index} to the working copy. `pop` also drops the stash, which git
@@ -61,7 +77,7 @@ mod tests {
         t.commit(&[("a.txt", Some("a\n"))], "First");
         t.write(&[("a.txt", Some("changed\n")), ("new.txt", Some("new\n"))]);
 
-        run(stash_save(t.path().into(), Some("Work in progress".into()), true)).unwrap();
+        run(stash_save(t.path().into(), Some("Work in progress".into()), true, None)).unwrap();
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\n");
         assert!(!t.dir.join("new.txt").exists());
         assert!(git(t.path(), &["stash", "list"], None).unwrap().contains("Work in progress"));
@@ -77,7 +93,7 @@ mod tests {
         let t = TempRepo::new("stash-apply");
         t.commit(&[("a.txt", Some("a\n"))], "First");
         t.write(&[("a.txt", Some("changed\n"))]);
-        run(stash_save(t.path().into(), None, false)).unwrap();
+        run(stash_save(t.path().into(), None, false, None)).unwrap();
 
         run(stash_apply(t.path().into(), 0, false)).unwrap();
         assert_eq!(stash_count(&t), 1);
@@ -89,7 +105,33 @@ mod tests {
     fn stashing_nothing_says_so() {
         let t = TempRepo::new("stash-nothing");
         t.commit(&[("a.txt", Some("a\n"))], "First");
-        let error = run(stash_save(t.path().into(), None, true)).unwrap_err();
+        let error = run(stash_save(t.path().into(), None, true, None)).unwrap_err();
         assert_eq!(error, "There are no changes to stash.");
+    }
+
+    #[test]
+    fn stashing_only_chosen_files_leaves_the_rest() {
+        let t = TempRepo::new("stash-some");
+        t.commit(&[("kept.txt", Some("a\n")), ("stashed.txt", Some("b\n"))], "First");
+        t.write(&[
+            ("kept.txt", Some("edited\n")),
+            ("stashed.txt", Some("edited\n")),
+            ("new-one.txt", Some("untracked\n")),
+            ("new-two.txt", Some("untracked\n")),
+        ]);
+
+        let files = vec!["stashed.txt".into(), "new-one.txt".into(), "new-two.txt".into()];
+        let message = run(stash_save(t.path().into(), Some("Some files".into()), false, Some(files))).unwrap();
+        assert_eq!(message, "Stashed 3 files.");
+        assert_eq!(stash_count(&t), 1);
+
+        let read = |f: &str| std::fs::read_to_string(t.dir.join(f)).ok();
+        assert_eq!(read("kept.txt").as_deref(), Some("edited\n"));
+        assert_eq!(read("stashed.txt").as_deref(), Some("b\n"));
+        assert_eq!((read("new-one.txt"), read("new-two.txt")), (None, None));
+
+        run(stash_apply(t.path().into(), 0, true)).unwrap();
+        assert_eq!(read("new-one.txt").as_deref(), Some("untracked\n"));
+        assert_eq!(read("stashed.txt").as_deref(), Some("edited\n"));
     }
 }

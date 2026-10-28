@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { confirmDiscard } from "../lib/confirm.js";
+import { openForm, openMenu } from "../lib/overlays.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -21,6 +22,9 @@ const error = ref("");
 const busy = ref(false);
 const committing = ref(false);
 const commitError = ref("");
+// The selected files' paths; see "Selecting several files" below.
+const chosen = ref(new Set());
+let anchor = null;
 
 let loadSeq = 0;
 
@@ -30,6 +34,8 @@ async function load() {
     const result = await invoke("working_status", { path: props.path });
     if (seq !== loadSeq) return;
     files.value = result;
+    // Files that are no longer changed drop out of the selection.
+    chosen.value = new Set(result.filter((f) => chosen.value.has(f.path)).map((f) => f.path));
     // Hand the parent the fresh copy of the selected file, or null if it's gone.
     emit("select", result.find((f) => f.path === props.selectedPath) ?? null);
   } catch (e) {
@@ -89,6 +95,102 @@ async function discard(list) {
           "All their staged and unstaged changes will be thrown away. The current versions of the files will be moved to the Trash.",
         );
   if (ok) run("discard_files", { files: list.map((f) => f.path) });
+}
+
+// --- Selecting several files ------------------------------------------------------
+// Click selects one file, Ctrl+click adds or removes one, Shift+click selects a range,
+// Ctrl+A selects them all. The right-click menu acts on the whole selection. The
+// detail pane shows the file clicked last.
+
+// The parent can change the selected file too (or clear it).
+watch(
+  () => props.selectedPath,
+  (path) => {
+    if (!path) chosen.value = new Set();
+    else if (!chosen.value.has(path)) chosen.value = new Set([path]);
+  },
+  { immediate: true },
+);
+
+function onRowClick(file, event) {
+  const list = files.value;
+  if (event.shiftKey && anchor) {
+    const from = list.findIndex((f) => f.path === anchor);
+    const to = list.indexOf(file);
+    const [start, end] = from < to ? [from, to] : [to, from];
+    chosen.value = new Set(list.slice(Math.max(start, 0), end + 1).map((f) => f.path));
+  } else if (event.ctrlKey || event.metaKey) {
+    const next = new Set(chosen.value);
+    anchor = file.path;
+    if (next.has(file.path)) {
+      // Deselecting shows another selected file, if any are left.
+      next.delete(file.path);
+      chosen.value = next;
+      emit("select", list.find((f) => next.has(f.path)) ?? null);
+      return;
+    }
+    next.add(file.path);
+    chosen.value = next;
+  } else {
+    chosen.value = new Set([file.path]);
+    anchor = file.path;
+  }
+  emit("select", file);
+}
+
+function onListKeydown(event) {
+  if ((event.ctrlKey || event.metaKey) && event.key === "a" && files.value?.length) {
+    event.preventDefault();
+    chosen.value = new Set(files.value.map((f) => f.path));
+  }
+}
+
+const label = (list) => (list.length === 1 ? `“${list[0].path.split("/").at(-1)}”` : `${list.length} Files`);
+
+function onRowMenu(file, event) {
+  // Right-clicking outside the selection selects just that file, as a file manager does.
+  if (!chosen.value.has(file.path)) {
+    chosen.value = new Set([file.path]);
+    anchor = file.path;
+    emit("select", file);
+  }
+  const list = files.value.filter((f) => chosen.value.has(f.path));
+  const what = label(list);
+  const unstaged = list.filter((f) => f.unstaged);
+  const staged = list.filter((f) => f.staged);
+  openMenu(event, [
+    { label: `Stage ${what}`, action: () => run("stage_files", { files: unstaged.map((f) => f.path) }), disabled: busy.value || !unstaged.length },
+    { label: `Unstage ${what}`, action: () => run("unstage_files", { files: staged.flatMap(pathsOf) }), disabled: busy.value || !staged.length },
+    { separator: true },
+    {
+      label: `Stash ${what}…`,
+      action: () => stashFiles(list),
+      // Git can't stash a file in the middle of a conflict.
+      disabled: busy.value || list.some((f) => f.conflicted),
+    },
+    { label: `Discard ${what}…`, action: () => discard(list), disabled: busy.value, danger: true },
+    { separator: true },
+    list.length === 1 && { label: "Open in Editor", action: () => invoke("open_in_editor", { path: props.path, file: file.path }) },
+    {
+      label: list.length === 1 ? "Copy Path" : "Copy Paths",
+      action: () => navigator.clipboard.writeText(list.map((f) => f.path).join("\n")),
+    },
+  ]);
+}
+
+async function stashFiles(list) {
+  const count = list.length === 1 ? "1 File" : `${list.length} Files`;
+  const values = await openForm({
+    title: `Stash ${count}`,
+    message:
+      list.length === 1
+        ? `Set aside the changes to ${list[0].path}. Everything else stays as it is.`
+        : `Set aside the changes to these ${list.length} files. Everything else stays as it is.`,
+    fields: [{ key: "message", label: "Description (optional)", type: "text", optional: true }],
+    confirmLabel: "Stash",
+  });
+  if (!values) return;
+  run("stash_save", { message: values.message.trim() || null, includeUntracked: true, files: list.flatMap(pathsOf) });
 }
 
 // --- Amend -----------------------------------------------------------------------
@@ -205,13 +307,14 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
       <p>No local changes.</p>
     </div>
 
-    <div v-else class="files">
+    <div v-else class="files" tabindex="0" @keydown="onListKeydown">
       <div
         v-for="file in files"
         :key="file.path"
         class="file"
-        :class="{ selected: file.path === selectedPath }"
-        @click="emit('select', file)"
+        :class="{ selected: chosen.has(file.path), current: file.path === selectedPath && chosen.size > 1 }"
+        @click="onRowClick(file, $event)"
+        @contextmenu.prevent="onRowMenu(file, $event)"
       >
         <input
           type="checkbox"
@@ -344,6 +447,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   flex: 1;
   overflow-y: auto;
   padding: 0 8px;
+  outline: none;
 }
 
 .file {
@@ -362,6 +466,11 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 .file.selected {
   background: var(--row-selected);
+}
+
+/* Among several selected files, the one whose changes are showing. */
+.file.current .file-path {
+  font-weight: 600;
 }
 
 .discard {

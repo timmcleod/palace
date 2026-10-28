@@ -11,6 +11,8 @@ const props = defineProps({
   commit: { type: Object, required: true },
   // A file to open and scroll to, such as the one whose history is being shown.
   focusFile: { type: String, default: null },
+  // A stash: its changes are shown against the commit it was made on.
+  stash: { type: Boolean, default: false },
 });
 
 const details = shallowRef(null);
@@ -134,7 +136,7 @@ function splitPath(path) {
         </button>
         <span>{{ changeSummary }}</span>
       </div>
-      <p v-if="details.parents.length > 1" class="merge-note">
+      <p v-if="details.parents.length > 1 && !stash" class="merge-note">
         This is a merge commit; changes are shown against its first parent.
       </p>
 

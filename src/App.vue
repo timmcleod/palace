@@ -17,12 +17,14 @@ import {
   GitBranch,
   GitMerge,
   RefreshCw,
+  Search,
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import FileSearch from "./components/FileSearch.vue";
+import StashList from "./components/StashList.vue";
 import FormDialog from "./components/FormDialog.vue";
 import PullDialog from "./components/PullDialog.vue";
 import ResetDialog from "./components/ResetDialog.vue";
@@ -67,6 +69,26 @@ const detailMode = ref("changeset");
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 const isSettings = computed(() => selected.value === "workspace:settings");
+const isStashes = computed(() => selected.value === "workspace:stashes");
+
+// The Stashes view: the chosen stash (by index) and the search for one by message.
+const selectedStash = ref(null);
+const stashQuery = ref("");
+const stash = computed(() => overview.value?.stashes.find((s) => s.index === selectedStash.value) ?? null);
+
+// Opening the view, or stashes coming and going, keeps a stash chosen while there are any.
+watch(
+  () => [isStashes.value, overview.value?.stashes.length],
+  () => {
+    if (isStashes.value && !stash.value) selectedStash.value = overview.value?.stashes[0]?.index ?? null;
+  },
+);
+
+// What the detail pane shows: the chosen commit, or in the Stashes view, the stash.
+const detailCommit = computed(() => {
+  if (!isStashes.value) return selectedCommit.value;
+  return stash.value && { id: stash.value.id, short_id: stash.value.short_id, refs: [] };
+});
 
 // Picking a file in the search shows its history, with the file opened in whichever
 // view the detail pane is in.
@@ -208,6 +230,8 @@ async function loadRepository(path, { quiet = false } = {}) {
       selectedCommit.value = null;
       workingFile.value = null;
       fileFilter.value = null;
+      selectedStash.value = null;
+      stashQuery.value = "";
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
     }
     overview.value = data;
@@ -272,19 +296,24 @@ watch(
 const subtitle = computed(() => {
   const o = overview.value;
   if (!o) return "";
+  if (isStashes.value) return `Stashes (${o.stashes.length} ${o.stashes.length === 1 ? "Stash" : "Stashes"})`;
   const where = o.head.branch ?? `detached at ${o.head.short_id}`;
   if (o.commit_count == null) return `${where} (no commits yet)`;
   return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
 });
 
 // Selecting a ref in the sidebar shows its history; Workspace › History goes back to
-// HEAD. Other items (folders, Settings, …) leave the history pane as it is.
-const HISTORY_KINDS = ["branch", "remote-branch", "tag", "stash"];
+// HEAD. A stash opens in the Stashes view. Other items (folders, Settings, …) leave
+// the history pane as it is.
+const HISTORY_KINDS = ["branch", "remote-branch", "tag"];
 
 watch(selected, (key) => {
   const [kind, name] = splitKey(key);
   if (key === "workspace:history") {
     historyRef.value = null;
+  } else if (kind === "stash") {
+    selectedStash.value = Number(name);
+    selected.value = "workspace:stashes";
   } else if (HISTORY_KINDS.includes(kind)) {
     historyRef.value = { kind, name };
   }
@@ -297,7 +326,6 @@ const historyRev = computed(() => {
     branch: `refs/heads/${r.name}`,
     "remote-branch": `refs/remotes/${r.name}`,
     tag: `refs/tags/${r.name}`,
-    stash: `stash@{${r.name}}`,
   }[r.kind];
 });
 
@@ -309,9 +337,6 @@ const breadcrumb = computed(() => {
   if (r?.kind === "branch") {
     const branch = o.branches.find((b) => b.name === r.name);
     return [r.name, branch?.upstream].filter(Boolean);
-  }
-  if (r?.kind === "stash") {
-    return [`stash@{${r.name}}`];
   }
   if (r) {
     return [r.name];
@@ -380,13 +405,14 @@ function startResize(event, pane, min, max) {
 
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
+        <span v-else-if="isStashes">Stashes</span>
         <span v-else class="breadcrumb">
           <template v-for="(part, i) in breadcrumb" :key="i">
             <span v-if="i > 0" class="breadcrumb-sep">›</span>
             <span :class="{ dim: i > 0 }">{{ part }}</span>
           </template>
         </span>
-        <span v-if="fileFilter && !isWorkingCopy" class="file-filter" :title="`Only commits that changed ${fileFilter}`">
+        <span v-if="fileFilter && !isWorkingCopy && !isStashes" class="file-filter" :title="`Only commits that changed ${fileFilter}`">
           <span class="file-filter-name">{{ fileFilter.slice(fileFilter.lastIndexOf("/") + 1) }}</span>
           <button class="icon-button small" title="Show all commits" @click="fileFilter = null">
             <X :size="13" />
@@ -411,8 +437,16 @@ function startResize(event, pane, min, max) {
         @select="workingFile = $event"
         @changed="refresh"
       />
+      <StashList
+        v-else-if="isStashes"
+        :stashes="overview.stashes"
+        :selected-index="selectedStash"
+        :query="stashQuery"
+        @select="selectedStash = $event"
+        @menu="(index, event) => openMenu(event, actions.stashMenu(index))"
+      />
       <!-- Hidden rather than removed, so the history keeps its scroll position. -->
-      <div v-show="!isWorkingCopy" class="pane-body">
+      <div v-show="!isWorkingCopy && !isStashes" class="pane-body">
         <HistoryList
           :path="overview.path"
           :rev="historyRev"
@@ -494,7 +528,11 @@ function startResize(event, pane, min, max) {
         <button class="icon-button" title="Refresh" @click="refresh">
           <RefreshCw :size="17" :stroke-width="1.5" :class="{ spinning: loading }" />
         </button>
-        <FileSearch :path="overview.path" :refresh-key="refreshKey" @pick="showFileHistory" />
+        <label v-if="isStashes" class="toolbar-search stash-search">
+          <Search :size="15" :stroke-width="1.5" />
+          <input v-model="stashQuery" placeholder="Search for Stash Message" spellcheck="false" @keydown.esc="stashQuery = ''" />
+        </label>
+        <FileSearch v-else :path="overview.path" :refresh-key="refreshKey" @pick="showFileHistory" />
       </header>
 
       <template v-if="isWorkingCopy">
@@ -510,7 +548,7 @@ function startResize(event, pane, min, max) {
 
       <template v-else>
         <div class="subheader">
-          <span class="mono dim">{{ selectedCommit?.short_id }}</span>
+          <span class="mono dim">{{ detailCommit?.short_id }}</span>
           <div class="segmented">
             <button :class="{ active: detailMode === 'changeset' }" @click="detailMode = 'changeset'">Changeset</button>
             <button :class="{ active: detailMode === 'tree' }" title="Every file at this commit" @click="detailMode = 'tree'">
@@ -519,12 +557,23 @@ function startResize(event, pane, min, max) {
           </div>
         </div>
 
-        <template v-if="selectedCommit">
-          <TreeView v-if="detailMode === 'tree'" :path="overview.path" :commit="selectedCommit" :reveal="fileFilter" />
-          <CommitDetails v-else :path="overview.path" :commit="selectedCommit" :focus-file="fileFilter" />
+        <template v-if="detailCommit">
+          <TreeView
+            v-if="detailMode === 'tree'"
+            :path="overview.path"
+            :commit="detailCommit"
+            :reveal="isStashes ? null : fileFilter"
+          />
+          <CommitDetails
+            v-else
+            :path="overview.path"
+            :commit="detailCommit"
+            :stash="isStashes"
+            :focus-file="isStashes ? null : fileFilter"
+          />
         </template>
         <div v-else class="empty-state">
-          <p>Select a commit to see its details.</p>
+          <p>{{ isStashes ? "Select a stash to see its changes." : "Select a commit to see its details." }}</p>
         </div>
       </template>
     </section>
@@ -710,6 +759,12 @@ function startResize(event, pane, min, max) {
 .file-filter-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.stash-search {
+  width: 220px;
+  min-width: 120px;
+  flex-shrink: 1;
 }
 
 .settings-pane {

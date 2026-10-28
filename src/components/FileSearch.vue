@@ -116,7 +116,7 @@ function pick(result) {
 
 <template>
   <div class="file-search">
-    <label class="search">
+    <label class="toolbar-search">
       <Search :size="15" :stroke-width="1.5" />
       <input
         ref="input"
@@ -155,27 +155,6 @@ function pick(result) {
   width: 220px;
   min-width: 120px;
   flex-shrink: 1;
-}
-
-.search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: var(--toolbar-group-bg);
-  color: var(--text-tertiary);
-}
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: none;
-  font: inherit;
-  color: var(--text-primary);
 }
 
 .results {

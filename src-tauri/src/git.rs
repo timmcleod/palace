@@ -48,7 +48,15 @@ pub struct Remote {
 #[derive(Serialize)]
 pub struct Stash {
     index: usize,
+    /// Git's full description, e.g. "On main: Try a new layout".
     message: String,
+    /// The stash's commit, which holds the stashed changes.
+    id: String,
+    short_id: String,
+    time: i64,
+    /// The branch it was made on, and what it says without that prefix.
+    branch: Option<String>,
+    summary: String,
 }
 
 #[derive(Serialize)]
@@ -204,12 +212,38 @@ fn read_tags(repo: &Repository) -> Result<Vec<String>, git2::Error> {
 }
 
 fn read_stashes(repo: &mut Repository) -> Result<Vec<Stash>, git2::Error> {
-    let mut stashes = Vec::new();
-    repo.stash_foreach(|index, message, _| {
-        stashes.push(Stash { index, message: message.to_string() });
+    let mut found = Vec::new();
+    repo.stash_foreach(|index, message, oid| {
+        found.push((index, message.to_string(), *oid));
         true
     })?;
+
+    let mut stashes = Vec::new();
+    for (index, message, oid) in found {
+        let time = repo.find_commit(oid).map(|c| c.time().seconds()).unwrap_or(0);
+        let (branch, summary) = split_stash_message(&message);
+        stashes.push(Stash {
+            index,
+            id: oid.to_string(),
+            short_id: oid.to_string()[..7].to_string(),
+            time,
+            branch,
+            summary,
+            message,
+        });
+    }
     Ok(stashes)
+}
+
+/// Git describes stashes as "On <branch>: <message>" when named, or
+/// "WIP on <branch>: <commit> <summary>" when not.
+fn split_stash_message(message: &str) -> (Option<String>, String) {
+    let Some((prefix, rest)) = message.split_once(": ") else { return (None, message.to_string()) };
+    match prefix.strip_prefix("WIP on ").or_else(|| prefix.strip_prefix("On ")) {
+        Some("(no branch)") => (None, rest.to_string()),
+        Some(branch) => (Some(branch.to_string()), rest.to_string()),
+        None => (None, message.to_string()),
+    }
 }
 
 fn read_submodules(repo: &Repository) -> Vec<Submodule> {
@@ -224,4 +258,20 @@ fn read_submodules(repo: &Repository) -> Vec<Submodule> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reading_stash_messages() {
+        assert_eq!(split_stash_message("On main: Try a layout"), (Some("main".into()), "Try a layout".into()));
+        assert_eq!(
+            split_stash_message("WIP on feature/x: abc1234 Fix it"),
+            (Some("feature/x".into()), "abc1234 Fix it".into())
+        );
+        assert_eq!(split_stash_message("WIP on (no branch): abc1234 Fix"), (None, "abc1234 Fix".into()));
+        assert_eq!(split_stash_message("Custom: thing"), (None, "Custom: thing".into()));
+    }
 }
