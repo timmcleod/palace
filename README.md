@@ -1,38 +1,54 @@
-# Palace
+<p align="center">
+  <img src="src-tauri/icons/icon.svg" width="96" height="96" alt="">
+</p>
 
-A desktop Git client for Linux.
+<h1 align="center">Palace</h1>
 
-- **History** — every commit with a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash.
-- **Commit details** — author, dates, refs and message, with each changed file's diff.
-- **Working copy** — stage and unstage whole files or single chunks, discard changes (the old version goes to the Trash), commit and amend.
-- **Remotes** — fetch, pull and push with live progress, using your existing SSH agent and credential helpers.
+<p align="center">
+  A fast, beautifully simple Git client for Ubuntu and other Linux desktops.<br>
+  <a href="https://timmcleod.github.io/palace/"><strong>Website</strong></a> ·
+  <a href="https://github.com/timmcleod/palace/releases/latest"><strong>Download</strong></a> ·
+  <a href="LICENSE">MIT license</a>
+</p>
 
-Palace runs the `git` command for everything that changes a repository, so your hooks, commit signing and `.gitconfig` apply exactly as they do in a terminal.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://timmcleod.github.io/palace/assets/hero-dark.webp">
+    <img src="https://timmcleod.github.io/palace/assets/hero-light.webp" width="900" alt="Palace showing a repository's commit history with its branch graph, and the selected commit's details and diff">
+  </picture>
+</p>
+
+## Features
+
+- **History:** every commit on a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash. Search files and commits together with Ctrl+F, browse each commit's files, and blame them line by line.
+- **Working copy:** stage, unstage or discard whole files or single chunks. Discarded changes go to the Trash. Commit, amend, and stash everything or just the files you pick.
+- **Branches:** drag a branch onto HEAD to merge it, and drag commits to reorder or squash them. Rebase, cherry-pick, revert and reset from a right-click. Resolve conflicts one block at a time.
+- **Remotes:** fetch, pull and push with live progress and Cancel. Publish new branches, and manage tags, remote branches and remotes.
+- **GitHub:** sign in to clone your repositories, create new ones and manage SSH keys.
+- **Real Git underneath:** Palace runs your own `git` for every change, so your hooks, commit signing, SSH agent, credential helpers and `.gitconfig` work exactly as they do in a terminal.
+
+Palace updates itself when a new release comes out. See the [website](https://timmcleod.github.io/palace/) for a tour.
 
 ## Install
 
-Build the packages (see below) or [download](https://github.com/timmcleod/palace/releases), then install one:
+Download the latest `.deb` or AppImage from [Releases](https://github.com/timmcleod/palace/releases/latest), then:
 
 ```sh
-# Ubuntu / Debian
-sudo apt install ./Palace_0.1.0_amd64.deb
+# Ubuntu, Debian and derivatives (installs Git too if it's missing)
+sudo apt install ./Palace_*.deb
 
 # Any distribution
-chmod +x Palace_0.1.0_amd64.AppImage
-./Palace_0.1.0_amd64.AppImage
+chmod +x Palace_*.AppImage
+./Palace_*.AppImage
 ```
 
-The `.deb` installs `git` if it's missing. The AppImage needs `git` installed already, and on Ubuntu 22.04 and later, the FUSE library AppImages run with:
+Palace needs Git 2.27 or newer and checks for it at startup. The AppImage also needs `libfuse2` on Ubuntu 22.04 and later (`libfuse2t64` on 24.04 and later).
 
-```sh
-sudo apt install git libfuse2    # libfuse2t64 on Ubuntu 24.04 and later
-```
+## Development
 
-If Git is missing or older than 2.27, Palace says so when it starts and shows the command to install it.
+Palace is built with [Tauri](https://tauri.app): a Vue 3 frontend in `src/` and a Rust backend in `src-tauri/src/`. The backend reads repositories with [git2](https://crates.io/crates/git2) and runs the `git` CLI for anything that changes them.
 
-## Build
-
-You need Rust, Node.js 22+, and the system libraries Tauri uses:
+You need Rust, Node.js 22 or newer, and the system libraries Tauri uses:
 
 ```sh
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
@@ -43,25 +59,11 @@ Then:
 
 ```sh
 npm install
-npm run package
+npm run tauri dev               # run the app, reloading as you edit
+cd src-tauri && cargo test      # run the backend tests
+npm run package                 # build the .deb and AppImage into src-tauri/target/release/bundle/
 ```
-
-The packages are written to `src-tauri/target/release/bundle/deb/` and `src-tauri/target/release/bundle/appimage/`.
-
-## Develop
-
-```sh
-npm run tauri dev
-```
-
-This opens the app and reloads it as you edit. The frontend is Vue 3 (`src/`); the backend is Rust (`src-tauri/src/`), reading repositories with [git2](https://crates.io/crates/git2) and running the `git` CLI for changes. Run the backend tests with:
-
-```sh
-cd src-tauri && cargo test
-```
-
-The app icon's source is `src-tauri/icons/icon.svg`. After editing it, render a 1024×1024 PNG and regenerate the sizes with `npx tauri icon path/to/icon.png`.
 
 ## License
 
-MIT
+[MIT](LICENSE)
