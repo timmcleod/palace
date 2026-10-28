@@ -1,6 +1,9 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { loadAvatars } from "../lib/avatars.js";
+import { openForm } from "../lib/overlays.js";
 import { settings } from "../lib/settings.js";
 
 const props = defineProps({
@@ -27,6 +30,50 @@ async function loadIdentity() {
 }
 
 watch(() => props.path, loadIdentity, { immediate: true });
+
+// --- GitHub ----------------------------------------------------------------------
+
+const account = ref(null);
+const githubError = ref("");
+const signingIn = ref(false);
+
+invoke("github_account").then((a) => (account.value = a));
+
+// A new classic token with the scopes Palace needs: private repositories, workflow
+// files (pushing changes to .github/workflows), and organisations.
+const NEW_TOKEN_URL = "https://github.com/settings/tokens/new?description=Palace&scopes=repo,workflow,read:org";
+
+async function signIn() {
+  const values = await openForm({
+    title: "Sign In to GitHub",
+    message:
+      "Paste a personal access token. Palace keeps it in your system keyring and uses it to fetch, pull and push your GitHub repositories.",
+    fields: [{ key: "token", label: "Token", type: "password", placeholder: "ghp_…" }],
+    confirmLabel: "Sign In",
+  });
+  if (!values) return;
+  githubError.value = "";
+  signingIn.value = true;
+  try {
+    account.value = await invoke("github_sign_in", { token: values.token });
+    // Private repositories' authors can now be looked up too.
+    loadAvatars(props.path);
+  } catch (e) {
+    githubError.value = String(e);
+  } finally {
+    signingIn.value = false;
+  }
+}
+
+async function signOut() {
+  githubError.value = "";
+  try {
+    await invoke("github_sign_out");
+    account.value = null;
+  } catch (e) {
+    githubError.value = String(e);
+  }
+}
 
 const THEMES = [
   ["system", "System"],
@@ -130,7 +177,39 @@ const TAB_SIZES = [2, 4, 8];
 
       <section>
         <h2>GitHub</h2>
-        <label class="choice">
+        <div v-if="account" class="account">
+          <img :src="account.avatar_url" alt="" class="account-avatar" />
+          <div class="account-names">
+            <strong>{{ account.name || account.login }}</strong>
+            <span class="dim">{{ account.login }}</span>
+          </div>
+          <button class="secondary-button" @click="signOut">Sign Out</button>
+        </div>
+        <p v-if="account" class="note">
+          Palace signs in to GitHub with your token to fetch, pull and push, including private repositories. Git in
+          the terminal isn't affected.
+        </p>
+        <template v-else>
+          <p class="note">
+            Sign in so Palace can fetch, pull and push your GitHub repositories, including private ones, without setting
+            up a login for git yourself.
+          </p>
+          <ol class="steps">
+            <li>
+              <button class="link-button" @click="openUrl(NEW_TOKEN_URL)">Create a token on GitHub</button>
+              with the <strong>repo</strong>, <strong>workflow</strong> and <strong>read:org</strong> scopes (they're
+              ticked for you), and copy it.
+            </li>
+            <li>
+              <button class="secondary-button" :disabled="signingIn" @click="signIn">
+                {{ signingIn ? "Checking…" : "Sign In with Token…" }}
+              </button>
+            </li>
+          </ol>
+        </template>
+        <p v-if="githubError" class="error">{{ githubError }}</p>
+
+        <label class="choice avatars-choice">
           <input v-model="settings.githubAvatars" type="checkbox" />
           Show authors' GitHub profile pictures
         </label>
@@ -301,6 +380,52 @@ input[type="text"]:focus {
 
 .classic .removed {
   background: #e5484d;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 10px;
+}
+
+.account-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.account-names {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 6px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.steps .secondary-button {
+  padding: 4px 14px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.avatars-choice {
+  margin-top: 16px;
 }
 
 .error {

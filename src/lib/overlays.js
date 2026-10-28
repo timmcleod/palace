@@ -8,7 +8,7 @@ export const formDialog = shallowRef(null);
 /**
  * Shows a modal form and resolves to its values, or null if cancelled.
  *
- * fields: [{ key, label, type: "text" | "select" | "checkbox", value, options, placeholder }]
+ * fields: [{ key, label, type: "text" | "password" | "select" | "checkbox", value, options, placeholder }]
  */
 export function openForm({ title, message = "", fields = [], confirmLabel = "OK", danger = false }) {
   return new Promise((resolve) => {

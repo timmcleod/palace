@@ -43,7 +43,14 @@ onMounted(async () => {
               {{ option.label ?? option }}
             </option>
           </select>
-          <input v-else v-model="values[field.key]" type="text" spellcheck="false" :placeholder="field.placeholder" />
+          <input
+            v-else
+            v-model="values[field.key]"
+            :type="field.type === 'password' ? 'password' : 'text'"
+            spellcheck="false"
+            autocomplete="off"
+            :placeholder="field.placeholder"
+          />
         </label>
       </template>
 

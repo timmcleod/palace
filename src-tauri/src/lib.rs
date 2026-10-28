@@ -4,6 +4,7 @@ mod cli;
 mod commit;
 mod config;
 mod git;
+mod github;
 mod history;
 mod remote;
 mod reset;
@@ -17,6 +18,7 @@ mod working;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    github::load();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -67,6 +69,9 @@ pub fn run() {
             config::git_identity,
             config::set_git_identity,
             config::pull_mode,
+            github::github_account,
+            github::github_sign_in,
+            github::github_sign_out,
             remote::fetch,
             remote::pull,
             remote::push,
@@ -76,4 +81,9 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Runs Palace as git's credential helper instead of as the app; see `github`.
+pub fn git_credential(action: Option<&str>) -> i32 {
+    github::credential_helper(action)
 }

@@ -131,6 +131,8 @@ pub(crate) fn git_with_progress(
 pub(crate) fn command(workdir: &PathBuf, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command
+        // When signed in to GitHub in Palace, git asks Palace for github.com logins.
+        .args(crate::github::git_config_args())
         .args(args)
         .current_dir(workdir)
         // Fail instead of prompting for a password nobody can see. Credential helpers
@@ -160,3 +162,4 @@ pub(crate) fn workdir(path: &str) -> Result<PathBuf, String> {
 fn join_output(first: &str, second: &str) -> String {
     [first, second].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n")
 }
+
