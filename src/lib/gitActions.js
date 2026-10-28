@@ -336,16 +336,92 @@ export function useGitActions({ overview, run }) {
     ];
   }
 
-  // Menus for the sidebar's section headings.
+  // --- Remotes ---------------------------------------------------------------------
+
+  async function addRemote() {
+    const values = await openForm({
+      title: "Add Remote Repository",
+      message:
+        "Adds another repository to fetch from and push to, such as a teammate's fork or the original project you forked (often called upstream).",
+      fields: [
+        {
+          key: "name",
+          label: "Name",
+          type: "text",
+          value: overview.value.remotes.length ? "" : "origin",
+          placeholder: "upstream",
+        },
+        { key: "url", label: "URL", type: "text", placeholder: "https://github.com/owner/repository.git" },
+      ],
+      confirmLabel: "Add Remote",
+    });
+    if (!values) return;
+    await run(["Adding remote…", "Added remote", "Couldn't add the remote"], "add_remote", {
+      name: values.name,
+      url: values.url,
+    });
+  }
+
+  function fetchRemote(name) {
+    return run(["Fetching…", "Fetched", "Fetch failed"], "fetch", { remote: name });
+  }
+
+  async function renameRemote(name) {
+    const values = await openForm({
+      title: "Rename Remote",
+      message: `Its remote branches are renamed to match, and branches that track them keep tracking them.`,
+      fields: [{ key: "name", label: "New name", type: "text", value: name }],
+      confirmLabel: "Rename",
+    });
+    if (!values || values.name.trim() === name) return;
+    await run(["Renaming remote…", "Renamed remote", "Couldn't rename the remote"], "rename_remote", {
+      name,
+      newName: values.name,
+    });
+  }
+
+  async function removeRemote(name) {
+    const ok = await confirm(
+      `Remove the remote “${name}”?\n\nIts branches disappear from Palace. Nothing changes on the server, and your local branches stay, though any that track one of its branches lose their upstream.`,
+      "Remove Remote",
+      "Remove",
+    );
+    if (ok) await run(["Removing remote…", "Removed remote", "Couldn't remove the remote"], "remove_remote", { name });
+  }
+
+  function remoteMenu(name) {
+    const url = overview.value.remotes.find((r) => r.name === name)?.url;
+    return [
+      { label: `Fetch from “${name}”`, action: () => fetchRemote(name) },
+      url && { label: "Copy URL", action: () => navigator.clipboard.writeText(url) },
+      { separator: true },
+      { label: "Rename…", action: () => renameRemote(name) },
+      { label: "Remove…", action: () => removeRemote(name), danger: true },
+    ];
+  }
+
+  // Menus for the sidebar's section headings, and its + button.
   function sectionMenu(section) {
     if (section === "tags") return [{ label: "Create New Tag…", action: () => createTag() }];
     if (section === "branches") return [{ label: "New Branch…", action: () => newBranch() }];
+    if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];
     return null;
+  }
+
+  function addMenu() {
+    return [
+      { label: "Create New Branch…", action: () => newBranch() },
+      { label: "Create New Tag…", action: () => createTag() },
+      { separator: true },
+      { label: "Add Remote Repository…", action: addRemote },
+    ];
   }
 
   return {
     checkout,
     merge,
+    addMenu,
+    remoteMenu,
     pull,
     forcePush,
     sectionMenu,

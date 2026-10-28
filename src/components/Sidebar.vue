@@ -24,7 +24,15 @@ const props = defineProps({
   overview: { type: Object, required: true },
   selected: { type: String, default: null },
 });
-const emit = defineEmits(["update:selected", "open-repository", "menu", "activate", "section-menu", "merge-into-head"]);
+const emit = defineEmits([
+  "update:selected",
+  "open-repository",
+  "menu",
+  "activate",
+  "section-menu",
+  "merge-into-head",
+  "add-menu",
+]);
 
 const filter = ref("");
 const collapsedSections = reactive(new Set());
@@ -283,7 +291,7 @@ function onRowClick(row) {
           <X :size="13" />
         </button>
       </label>
-      <button class="icon-button" title="New branch (coming soon)" disabled>
+      <button class="icon-button" title="Create a branch or tag, or add a remote" @click="emit('add-menu', $event)">
         <Plus :size="17" :stroke-width="1.5" />
       </button>
       <button class="icon-button" title="Sidebar options (coming soon)" disabled>

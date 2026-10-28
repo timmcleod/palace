@@ -89,6 +89,9 @@ pub fn run() {
             remote::delete_remote_branch,
             remote::push_tag,
             remote::clone_repo,
+            remote::add_remote,
+            remote::rename_remote,
+            remote::remove_remote,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

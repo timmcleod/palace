@@ -13,8 +13,59 @@ struct Progress {
 }
 
 #[tauri::command]
-pub async fn fetch(app: AppHandle, path: String) -> Result<String, String> {
-    in_background(app, move |running, report| fetch_all(&path, running, report)).await
+pub async fn fetch(app: AppHandle, path: String, remote: Option<String>) -> Result<String, String> {
+    in_background(app, move |running, report| match remote {
+        Some(remote) => fetch_one(&path, &remote, running, report),
+        None => fetch_all(&path, running, report),
+    })
+    .await
+}
+
+/// Adds a remote, then fetches it so its branches show straight away. If the fetch
+/// fails (a mistyped URL, no access), the remote stays, to fix or remove.
+#[tauri::command]
+pub async fn add_remote(app: AppHandle, path: String, name: String, url: String) -> Result<String, String> {
+    let (name, url) = (name.trim().to_string(), url.trim().to_string());
+    if name.is_empty() || url.is_empty() {
+        return Err("Enter a name and a URL for the remote.".into());
+    }
+    crate::cli::git(&path, &["remote", "add", &name, &url], None).map_err(|e| explain_remote_error(&name, e))?;
+    in_background(app, move |running, report| {
+        fetch_one(&path, &name, running, report)
+            .map(|_| format!("Added {name} and fetched its branches."))
+            .map_err(|e| format!("Added {name}, but couldn't fetch from it:\n{e}"))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn rename_remote(path: String, name: String, new_name: String) -> Result<String, String> {
+    let new_name = new_name.trim();
+    crate::cli::git(&path, &["remote", "rename", &name, new_name], None).map_err(|e| explain_remote_error(new_name, e))?;
+    Ok(format!("Renamed {name} to {new_name}."))
+}
+
+/// Removes a remote and its remote-tracking branches. Local branches stay; any that
+/// tracked one of its branches no longer have an upstream.
+#[tauri::command]
+pub async fn remove_remote(path: String, name: String) -> Result<String, String> {
+    crate::cli::git(&path, &["remote", "remove", &name], None)?;
+    Ok(format!("Removed {name}."))
+}
+
+fn explain_remote_error(name: &str, error: String) -> String {
+    if error.contains("already exists") {
+        format!("There's already a remote called “{name}”.")
+    } else if error.contains("is not a valid remote name") {
+        format!("“{name}” isn't a valid remote name. Use letters, numbers, hyphens and underscores.")
+    } else {
+        error
+    }
+}
+
+fn fetch_one(path: &str, remote: &str, running: &Running, report: Report) -> Result<String, String> {
+    git_with_progress(path, &["fetch", "--progress", remote], running, report)?;
+    Ok(format!("Fetched from {remote}."))
 }
 
 #[tauri::command]
@@ -500,5 +551,31 @@ mod tests {
         assert!(again.starts_with("There's already a folder with files in it"), "{again}");
         assert!(clone_into(&url, Path::new("relative/path"), &Running::default(), &mut |_| {}).is_err());
         let _ = std::fs::remove_dir_all(dest.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn adding_renaming_and_removing_remotes() {
+        let (server, local) = setup("remotes");
+        let other = TempRepo::bare("remotes-other");
+        crate::cli::git(local.path(), &["push", other.path(), "HEAD:refs/heads/feature"], None).unwrap();
+        let _ = server;
+
+        let names = |t: &TempRepo| crate::cli::git(t.path(), &["remote"], None).unwrap();
+        crate::cli::git(local.path(), &["remote", "add", "upstream", other.path()], None).unwrap();
+        fetch_one(local.path(), "upstream", &Running::default(), &mut |_| {}).unwrap();
+        assert!(local.repo.find_reference("refs/remotes/upstream/feature").is_ok());
+
+        let taken = tauri::async_runtime::block_on(rename_remote(local.path().into(), "upstream".into(), "origin".into()));
+        assert_eq!(taken.unwrap_err(), "There's already a remote called “origin”.");
+        tauri::async_runtime::block_on(rename_remote(local.path().into(), "upstream".into(), "fork".into())).unwrap();
+        assert_eq!(names(&local), "fork\norigin");
+        assert!(local.repo.find_reference("refs/remotes/fork/feature").is_ok());
+
+        tauri::async_runtime::block_on(remove_remote(local.path().into(), "fork".into())).unwrap();
+        assert_eq!(names(&local), "origin");
+        assert!(local.repo.find_reference("refs/remotes/fork/feature").is_err());
+
+        let bad = crate::cli::git(local.path(), &["remote", "add", "has space", other.path()], None).unwrap_err();
+        assert!(explain_remote_error("has space", bad).contains("isn't a valid remote name"));
     }
 }

@@ -218,7 +218,7 @@ const remoteOp = ref(null);
 let dismissTimer;
 
 // Only network operations report progress and can be cancelled.
-const NETWORK = new Set(["fetch", "pull", "push", "clone_repo"]);
+const NETWORK = new Set(["fetch", "pull", "push", "clone_repo", "add_remote"]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 const remoteBusy = computed(() => remoteOp.value?.state === "running");
@@ -293,6 +293,11 @@ function sidebarMenu(row, event) {
     "remote-branch": () => actions.remoteBranchMenu(name),
     tag: () => actions.tagMenu(name),
     stash: () => actions.stashMenu(Number(name)),
+    // A remote's own row, not a folder of its branches ("origin/feature/").
+    remote: () => {
+      const remote = name.replace(/\/$/, "");
+      return overview.value.remotes.some((r) => r.name === remote) ? actions.remoteMenu(remote) : null;
+    },
   }[kind]?.();
   if (items) openMenu(event, items);
 }
@@ -550,6 +555,7 @@ function startResize(event, pane, min, max) {
       @activate="sidebarActivate"
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
       @merge-into-head="(name) => actions.merge(name)"
+      @add-menu="(event) => openMenu(event, actions.addMenu())"
     />
 
     <section v-if="isSettings" class="pane settings-pane">
