@@ -17,6 +17,8 @@ struct History {
     rev: String,
     /// Set when only the commits that changed this file are listed.
     file: Option<String>,
+    /// Set when only the commits matching this search are listed.
+    search: Option<String>,
     fingerprint: String,
     rows: Vec<GraphRow>,
     times: Vec<i64>,
@@ -76,27 +78,34 @@ pub struct CommitRow {
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Loads the history reachable from `rev` (HEAD when omitted), or with `file`, only
-/// the commits that changed that file. If nothing has changed since the last load of
-/// the same history, the cached walk is reused.
+/// the commits that changed that file, and with `search`, only the commits matching
+/// it. If nothing has changed since the last load of the same history, the cached
+/// walk is reused.
 #[tauri::command]
 pub async fn load_history(
     path: String,
     rev: Option<String>,
     file: Option<String>,
+    search: Option<String>,
     state: State<'_, HistoryState>,
 ) -> Result<HistorySummary, String> {
     let rev = rev.unwrap_or_else(|| "HEAD".to_string());
+    let search = search.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
     let repo = Repository::discover(&path).map_err(message)?;
     let fingerprint = fingerprint(&repo).map_err(message)?;
 
     let mut cache = state.0.lock().unwrap();
     if let Some(h) = cache.as_ref() {
-        if h.path == path && h.rev == rev && h.file == file && h.fingerprint == fingerprint {
+        if h.path == path && h.rev == rev && h.file == file && h.search == search && h.fingerprint == fingerprint {
             return Ok(summary(h));
         }
     }
 
-    let history = walk(&repo, path, rev, file, fingerprint).map_err(message)?;
+    let mut history = walk(&repo, path, rev, file, fingerprint).map_err(message)?;
+    if let Some(search) = search {
+        keep_matches(&repo, &mut history, &search).map_err(message)?;
+        history.search = Some(search);
+    }
     let result = summary(&history);
     *cache = Some(history);
     Ok(result)
@@ -125,6 +134,63 @@ pub async fn history_position(generation: u64, id: String, state: State<'_, Hist
     let Some(history) = cache.as_ref().filter(|h| h.generation == generation) else { return Ok(None) };
     let oid = Oid::from_str(&id).map_err(message)?;
     Ok(history.rows.iter().position(|row| row.oid == oid))
+}
+
+#[derive(Serialize)]
+pub struct CommitSearch {
+    /// How many commits match in all.
+    total: usize,
+    /// The newest of them, up to the limit asked for.
+    commits: Vec<FoundCommit>,
+}
+
+#[derive(Serialize)]
+pub struct FoundCommit {
+    id: String,
+    short_id: String,
+    summary: String,
+    author_name: String,
+    time: i64,
+}
+
+/// Finds the commits reachable from `rev` (HEAD when omitted), and from its upstream,
+/// that match `query`, for the toolbar's search.
+#[tauri::command]
+pub async fn search_commits(path: String, rev: Option<String>, query: String, limit: usize) -> Result<CommitSearch, String> {
+    let rev = rev.unwrap_or_else(|| "HEAD".to_string());
+    let repo = Repository::discover(&path).map_err(message)?;
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found = CommitSearch { total: 0, commits: Vec::new() };
+    if words.is_empty() {
+        return Ok(found);
+    }
+    let Ok(start) = repo.revparse_single(&rev).and_then(|o| o.peel_to_commit()) else { return Ok(found) };
+
+    let mut revwalk = repo.revwalk().map_err(message)?;
+    revwalk.set_sorting(Sort::TIME).map_err(message)?;
+    revwalk.push(start.id()).map_err(message)?;
+    if let Some(upstream) = upstream_of(&repo, &rev) {
+        revwalk.push(upstream).map_err(message)?;
+    }
+    for oid in revwalk {
+        let commit = repo.find_commit(oid.map_err(message)?).map_err(message)?;
+        if !matches(&commit, &words) {
+            continue;
+        }
+        found.total += 1;
+        if found.commits.len() < limit {
+            let author = commit.author();
+            found.commits.push(FoundCommit {
+                id: commit.id().to_string(),
+                short_id: commit.id().to_string()[..7].to_string(),
+                summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+                author_name: author.name().unwrap_or("").to_string(),
+                time: author.when().seconds(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 fn page(history: &History, offset: usize, limit: usize) -> Result<Vec<CommitRow>, git2::Error> {
@@ -192,6 +258,7 @@ fn walk(
         path,
         rev,
         file,
+        search: None,
         fingerprint,
         rows: Vec::new(),
         times: Vec::new(),
@@ -222,20 +289,11 @@ fn walk(
 
     if let Some(file) = &history.file {
         let ids = file_commits(&history.path, &starts, file).map_err(|e| git2::Error::from_str(&e))?;
-        // One commit after another, so the graph is a single straight line.
-        let last = ids.len().saturating_sub(1);
-        for (i, oid) in ids.into_iter().enumerate() {
-            let commit = repo.find_commit(oid)?;
-            let graph = Graph {
-                lane: 0,
-                pass: Vec::new(),
-                merge_in: if i > 0 { vec![0] } else { Vec::new() },
-                out: if i < last { vec![0] } else { Vec::new() },
-            };
-            history.lanes = 1;
-            history.times.push(commit.author().when().seconds());
-            history.rows.push(GraphRow { oid, graph });
+        for oid in &ids {
+            history.times.push(repo.find_commit(*oid)?.author().when().seconds());
         }
+        history.rows = straight_line(ids);
+        history.lanes = history.rows.len().min(1) as u16;
         return Ok(history);
     }
 
@@ -258,6 +316,57 @@ fn walk(
     }
 
     Ok(history)
+}
+
+/// Rows for commits listed one after another, without their real ancestry: a single
+/// straight line.
+fn straight_line(ids: Vec<Oid>) -> Vec<GraphRow> {
+    let last = ids.len().saturating_sub(1);
+    ids.into_iter()
+        .enumerate()
+        .map(|(i, oid)| GraphRow {
+            oid,
+            graph: Graph {
+                lane: 0,
+                pass: Vec::new(),
+                merge_in: if i > 0 { vec![0] } else { Vec::new() },
+                out: if i < last { vec![0] } else { Vec::new() },
+            },
+        })
+        .collect()
+}
+
+/// Narrows the history to the commits matching `search` (already lowercase). Every
+/// word must appear in the message or the author's name or email, or start the hash.
+fn keep_matches(repo: &Repository, history: &mut History, search: &str) -> Result<(), git2::Error> {
+    let words: Vec<&str> = search.split_whitespace().collect();
+    let mut ids = Vec::new();
+    let mut times = Vec::new();
+    for (row, time) in history.rows.iter().zip(&history.times) {
+        if matches(&repo.find_commit(row.oid)?, &words) {
+            ids.push(row.oid);
+            times.push(*time);
+        }
+    }
+    history.rows = straight_line(ids);
+    history.times = times;
+    history.lanes = history.rows.len().min(1) as u16;
+    Ok(())
+}
+
+/// Whether every word (lowercase) appears in the commit's message or its author's name
+/// or email, or starts its hash.
+fn matches(commit: &git2::Commit, words: &[&str]) -> bool {
+    let author = commit.author();
+    let text = format!(
+        "{}\n{}\n{}",
+        commit.message().ok().unwrap_or(""),
+        author.name().unwrap_or(""),
+        author.email().unwrap_or("")
+    )
+    .to_lowercase();
+    let hash = commit.id().to_string();
+    words.iter().all(|w| text.contains(w) || hash.starts_with(w))
 }
 
 /// Where the upstream of the branch shown by `rev` ("HEAD" or "refs/heads/…") is.
@@ -397,6 +506,40 @@ mod tests {
         assert_eq!(ids, [edited, moved, first]);
         assert_eq!(history.rows[0].graph.out, [0]);
         assert!(history.rows[2].graph.out.is_empty());
+    }
+
+    #[test]
+    fn search_keeps_commits_matching_every_word() {
+        let t = crate::test_support::TempRepo::new("history-search");
+        let login = t.commit(&[("a.txt", Some("a"))], "Fix the login form\n\nThe button was hidden.");
+        t.commit(&[("b.txt", Some("b"))], "Add a settings page");
+        let hidden = t.commit(&[("c.txt", Some("c"))], "Show hidden files");
+
+        let repo = Repository::open(t.path()).unwrap();
+        let search = |query: &str| {
+            let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, String::new()).unwrap();
+            keep_matches(&repo, &mut history, query).unwrap();
+            history.rows.iter().map(|r| r.oid).collect::<Vec<_>>()
+        };
+
+        // The body counts, not just the summary.
+        assert_eq!(search("hidden"), [hidden, login]);
+        assert_eq!(search("button hidden"), [login]);
+        assert_eq!(search(&hidden.to_string()[..7]), [hidden]);
+        assert_eq!(search("ada@example.com lovelace").len(), 3);
+        assert!(search("nothing like this").is_empty());
+
+        let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, String::new()).unwrap();
+        keep_matches(&repo, &mut history, "hidden").unwrap();
+        assert_eq!(history.times.len(), 2);
+        assert_eq!(history.rows[0].graph.out, [0]);
+        assert!(history.rows[1].graph.out.is_empty());
+
+        let found = tauri::async_runtime::block_on(search_commits(t.path().into(), None, " Hidden ".into(), 1)).unwrap();
+        assert_eq!(found.total, 2);
+        assert_eq!(found.commits.len(), 1);
+        assert_eq!(found.commits[0].summary, "Show hidden files");
+        assert_eq!(found.commits[0].id, hidden.to_string());
     }
 
     #[test]

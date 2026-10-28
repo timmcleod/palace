@@ -26,7 +26,6 @@ import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
-import FileSearch from "./components/FileSearch.vue";
 import GitHubView from "./components/GitHubView.vue";
 import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
@@ -40,6 +39,7 @@ import RemoteStatus from "./components/RemoteStatus.vue";
 import SettingsView from "./components/SettingsView.vue";
 import Sidebar from "./components/Sidebar.vue";
 import TagDialog from "./components/TagDialog.vue";
+import ToolbarSearch from "./components/ToolbarSearch.vue";
 import TreeView from "./components/TreeView.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
@@ -125,6 +125,12 @@ const isStashes = computed(() => selected.value === "workspace:stashes");
 // The Stashes view: the chosen stash (by index) and the search for one by message.
 const selectedStash = ref(null);
 const stashQuery = ref("");
+// The toolbar search's "Show all matching commits" narrows the history to this search.
+const historySearch = ref("");
+// How many commits the history lists, shown as the number of matches while searching.
+const historyCount = ref(null);
+const toolbarSearch = ref(null);
+
 const stash = computed(() => overview.value?.stashes.find((s) => s.index === selectedStash.value) ?? null);
 
 // Opening the view, or stashes coming and going, keeps a stash chosen while there are any.
@@ -145,8 +151,27 @@ const detailCommit = computed(() => {
 // view the detail pane is in.
 function showFileHistory(file) {
   fileFilter.value = file;
+  historySearch.value = "";
   selectedCommit.value = null;
   if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+}
+
+// The toolbar search looks through the history being shown, or HEAD's from elsewhere.
+const searchRev = computed(() => (isWorkingCopy.value || isStashes.value || isFullView.value ? null : historyRev.value));
+
+function showFoundCommit(commit) {
+  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  // Filters could hide the commit.
+  fileFilter.value = null;
+  historySearch.value = "";
+  selectedCommit.value = { id: commit.id, short_id: commit.short_id, refs: [] };
+  detailMode.value = "changeset";
+}
+
+function showMatchingCommits(query) {
+  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  fileFilter.value = null;
+  historySearch.value = query;
 }
 
 // --- Back and Forward --------------------------------------------------------------
@@ -230,6 +255,12 @@ function describe(place) {
 }
 
 function onNavKeydown(event) {
+  // Ctrl+F goes to the toolbar search.
+  if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f" && toolbarSearch.value) {
+    event.preventDefault();
+    toolbarSearch.value.focus();
+    return;
+  }
   if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
   event.preventDefault();
   go(event.key === "ArrowLeft" ? "back" : "forward");
@@ -395,6 +426,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       fileFilter.value = null;
       selectedStash.value = null;
       stashQuery.value = "";
+      historySearch.value = "";
       // Places belong to a repository.
       nav.back = [];
       nav.forward = [];
@@ -565,13 +597,13 @@ watch(selected, (key) => {
   }
 });
 
-// Commits can be squashed and reordered in the current branch's own full history,
+// Commits can be squashed and reordered in the current branch's own full, unsearched history,
 // while nothing else is in progress.
 const rewritable = computed(() => {
   const o = overview.value;
   const r = historyRef.value;
   const own = !r || (r.kind === "branch" && r.name === o?.head.branch);
-  return !!(o?.head.branch && own && !fileFilter.value && !o.operation);
+  return !!(o?.head.branch && own && !fileFilter.value && !historySearch.value && !o.operation);
 });
 
 const historyRev = computed(() => {
@@ -697,6 +729,18 @@ function startResize(event, pane, min, max) {
             <X :size="13" />
           </button>
         </span>
+        <span
+          v-if="historySearch && !isWorkingCopy && !isStashes"
+          class="file-filter"
+          :title="`Only commits matching “${historySearch}”`"
+        >
+          <Search :size="13" :stroke-width="1.75" />
+          <span class="file-filter-name">“{{ historySearch }}”</span>
+          <span v-if="historyCount != null" class="match-count">{{ historyCount.toLocaleString() }}</span>
+          <button class="icon-button small" title="Show all commits" @click="historySearch = ''">
+            <X :size="13" />
+          </button>
+        </span>
       </div>
 
       <OperationBanner
@@ -730,6 +774,7 @@ function startResize(event, pane, min, max) {
           :path="overview.path"
           :rev="historyRev"
           :file="fileFilter"
+          :search="historySearch"
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           :editable="rewritable"
@@ -737,6 +782,7 @@ function startResize(event, pane, min, max) {
           @menu="(commit, event) => openMenu(event, actions.commitMenu(commit))"
           @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable))"
           @move="actions.moveCommit"
+          @count="historyCount = $event"
         />
       </div>
     </section>
@@ -814,7 +860,16 @@ function startResize(event, pane, min, max) {
           <Search :size="15" :stroke-width="1.5" />
           <input v-model="stashQuery" placeholder="Search for Stash Message" spellcheck="false" @keydown.esc="stashQuery = ''" />
         </label>
-        <FileSearch v-else :path="overview.path" :refresh-key="refreshKey" @pick="showFileHistory" />
+        <ToolbarSearch
+          v-else
+          ref="toolbarSearch"
+          :path="overview.path"
+          :rev="searchRev"
+          :refresh-key="refreshKey"
+          @pick="showFileHistory"
+          @pick-commit="showFoundCommit"
+          @filter-commits="showMatchingCommits"
+        />
       </header>
 
       <template v-if="isWorkingCopy">
@@ -1056,9 +1111,21 @@ function startResize(event, pane, min, max) {
   font-size: 12.5px;
 }
 
+.file-filter > svg {
+  flex-shrink: 0;
+  margin-right: 3px;
+  color: var(--text-tertiary);
+}
+
 .file-filter-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.match-count {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .stash-search {

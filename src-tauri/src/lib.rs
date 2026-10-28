@@ -34,6 +34,7 @@ pub fn run() {
             history::load_history,
             history::history_page,
             history::history_position,
+            history::search_commits,
             commit::commit_details,
             commit::file_diff,
             working::working_status,

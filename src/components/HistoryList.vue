@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleAlert, History } from "lucide-vue-next";
+import { CircleAlert, History, Search } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
 
@@ -10,6 +10,8 @@ const props = defineProps({
   rev: { type: String, default: null },
   // Only commits that changed this file.
   file: { type: String, default: null },
+  // Only commits matching this search.
+  search: { type: String, default: "" },
   refreshKey: { type: Number, default: 0 },
   selectedId: { type: String, default: null },
   // Whether commits can be dragged to reorder them: only in the current branch's own
@@ -17,8 +19,8 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
 });
 // "menu-many" is the context menu for several selected commits; "move" asks to move a
-// dragged commit above or below another.
-const emit = defineEmits(["select", "menu", "menu-many", "move"]);
+// dragged commit above or below another; "count" reports how many commits are listed.
+const emit = defineEmits(["select", "menu", "menu-many", "move", "count"]);
 
 const ROW_HEIGHT = 46;
 const HEADER_HEIGHT = 34;
@@ -43,13 +45,19 @@ const inflight = new Set();
 async function load({ resetScroll }) {
   const seq = ++loadSeq;
   try {
-    const next = await invoke("load_history", { path: props.path, rev: props.rev, file: props.file });
+    const next = await invoke("load_history", {
+      path: props.path,
+      rev: props.rev,
+      file: props.file,
+      search: props.search || null,
+    });
     if (seq !== loadSeq) return;
     error.value = "";
     // An unchanged generation means nothing moved; keep the rows already on screen.
     if (next.generation === summary.value?.generation) return;
     pages.clear();
     summary.value = next;
+    emit("count", next.total);
     if (resetScroll && viewport.value) {
       viewport.value.scrollTop = 0;
       scrollTop.value = 0;
@@ -88,7 +96,7 @@ function commitAt(index) {
 }
 
 watch(
-  () => [props.path, props.rev, props.file],
+  () => [props.path, props.rev, props.file, props.search],
   () => load({ resetScroll: true }),
   { immediate: true },
 );
@@ -379,8 +387,14 @@ const MAX_REFS = 3;
   </div>
 
   <div v-else-if="summary && !summary.total" class="message">
-    <History :size="32" :stroke-width="1.25" />
-    <p>No commits yet.</p>
+    <template v-if="search">
+      <Search :size="32" :stroke-width="1.25" />
+      <p>No commits match “{{ search }}”.</p>
+    </template>
+    <template v-else>
+      <History :size="32" :stroke-width="1.25" />
+      <p>No commits yet.</p>
+    </template>
   </div>
 
   <div
