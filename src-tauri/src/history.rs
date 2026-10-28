@@ -1,7 +1,7 @@
 use crate::cli;
-use git2::{ErrorCode, Oid, Repository, Sort};
+use git2::{BranchType, ErrorCode, Oid, Repository, Sort};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::State;
@@ -22,6 +22,9 @@ struct History {
     times: Vec<i64>,
     lanes: u16,
     refs: HashMap<Oid, Vec<RefLabel>>,
+    /// Commits on the branch's upstream that the branch doesn't have yet: fetched,
+    /// but not pulled.
+    incoming: HashSet<Oid>,
 }
 
 struct GraphRow {
@@ -67,6 +70,7 @@ pub struct CommitRow {
     time: i64,
     refs: Vec<RefLabel>,
     graph: Graph,
+    incoming: bool,
 }
 
 static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -132,6 +136,7 @@ fn page(history: &History, offset: usize, limit: usize) -> Result<Vec<CommitRow>
                 time: author.when().seconds(),
                 refs: history.refs.get(&row.oid).cloned().unwrap_or_default(),
                 graph: row.graph.clone(),
+                incoming: history.incoming.contains(&row.oid),
             })
         })
         .collect()
@@ -182,6 +187,7 @@ fn walk(
         times: Vec::new(),
         lanes: 0,
         refs: ref_labels(repo)?,
+        incoming: HashSet::new(),
     };
 
     let start = match repo.revparse_single(&history.rev).and_then(|o| o.peel_to_commit()) {
@@ -193,8 +199,19 @@ fn walk(
         Err(e) => return Err(e),
     };
 
+    // A branch's history includes what's been fetched for it but not pulled yet, so new
+    // commits on the remote show up as soon as they're fetched.
+    let mut starts = vec![start];
+    if let Some(upstream) = upstream_of(repo, &history.rev).filter(|u| *u != start) {
+        let mut ahead = repo.revwalk()?;
+        ahead.push(upstream)?;
+        ahead.hide(start)?;
+        history.incoming = ahead.collect::<Result<_, _>>()?;
+        starts.push(upstream);
+    }
+
     if let Some(file) = &history.file {
-        let ids = file_commits(&history.path, start, file).map_err(|e| git2::Error::from_str(&e))?;
+        let ids = file_commits(&history.path, &starts, file).map_err(|e| git2::Error::from_str(&e))?;
         // One commit after another, so the graph is a single straight line.
         let last = ids.len().saturating_sub(1);
         for (i, oid) in ids.into_iter().enumerate() {
@@ -214,7 +231,9 @@ fn walk(
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    revwalk.push(start)?;
+    for oid in &starts {
+        revwalk.push(*oid)?;
+    }
 
     let mut lanes = Vec::new();
     for oid in revwalk {
@@ -231,10 +250,24 @@ fn walk(
     Ok(history)
 }
 
-/// The commits from `start` back that changed `file`, newest first. Git follows the
+/// Where the upstream of the branch shown by `rev` ("HEAD" or "refs/heads/…") is.
+fn upstream_of(repo: &Repository, rev: &str) -> Option<Oid> {
+    let name = match rev.strip_prefix("refs/heads/") {
+        Some(name) => name.to_string(),
+        None if rev == "HEAD" => repo.head().ok().filter(|h| h.is_branch())?.shorthand().ok()?.to_string(),
+        None => return None,
+    };
+    repo.find_branch(&name, BranchType::Local).ok()?.upstream().ok()?.get().target()
+}
+
+/// The commits from `starts` back that changed `file`, newest first. Git follows the
 /// file through renames, which a plain revwalk can't do cheaply.
-fn file_commits(path: &str, start: Oid, file: &str) -> Result<Vec<Oid>, String> {
-    let output = cli::git(path, &["log", "--format=%H", "--follow", &start.to_string(), "--", file], None)?;
+fn file_commits(path: &str, starts: &[Oid], file: &str) -> Result<Vec<Oid>, String> {
+    let starts: Vec<String> = starts.iter().map(Oid::to_string).collect();
+    let mut args = vec!["log", "--format=%H", "--follow"];
+    args.extend(starts.iter().map(String::as_str));
+    args.extend(["--", file]);
+    let output = cli::git(path, &args, None)?;
     Ok(output.lines().filter_map(|line| Oid::from_str(line.trim()).ok()).collect())
 }
 
@@ -354,6 +387,30 @@ mod tests {
         assert_eq!(ids, [edited, moved, first]);
         assert_eq!(history.rows[0].graph.out, [0]);
         assert!(history.rows[2].graph.out.is_empty());
+    }
+
+    #[test]
+    fn fetched_commits_show_in_the_branch_history() {
+        use crate::test_support::TempRepo;
+        let remote = TempRepo::bare("incoming-remote");
+        let mine = TempRepo::clone_of("incoming-mine", &remote);
+        mine.commit(&[("a.txt", Some("1"))], "First");
+        crate::cli::git(mine.path(), &["push", "-u", "origin", "HEAD"], None).unwrap();
+
+        let theirs = TempRepo::clone_of("incoming-theirs", &remote);
+        let pushed = theirs.commit(&[("b.txt", Some("2"))], "Theirs");
+        crate::cli::git(theirs.path(), &["push"], None).unwrap();
+        let local = mine.commit(&[("c.txt", Some("3"))], "Mine");
+        crate::cli::git(mine.path(), &["fetch"], None).unwrap();
+
+        let history = walk(&mine.repo, mine.path().into(), "HEAD".into(), None, String::new()).unwrap();
+        let ids: HashSet<Oid> = history.rows.iter().map(|r| r.oid).collect();
+        assert!(ids.contains(&pushed) && ids.contains(&local));
+        assert_eq!(history.incoming, HashSet::from([pushed]));
+
+        // A remote branch's own history has nothing "incoming".
+        let remote_history = walk(&mine.repo, mine.path().into(), "refs/remotes/origin/main".into(), None, String::new());
+        assert!(remote_history.map(|h| h.incoming.is_empty()).unwrap_or(true));
     }
 
     #[test]

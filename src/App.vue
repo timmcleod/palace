@@ -24,6 +24,7 @@ import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import FileSearch from "./components/FileSearch.vue";
 import FormDialog from "./components/FormDialog.vue";
+import PullDialog from "./components/PullDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
@@ -41,7 +42,7 @@ import {
   writeJson,
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
-import { contextMenu, formDialog, openMenu, tagDialog } from "./lib/overlays.js";
+import { contextMenu, formDialog, openMenu, pullDialog, tagDialog } from "./lib/overlays.js";
 import { loadAvatars } from "./lib/avatars.js";
 
 const overview = ref(null);
@@ -442,7 +443,7 @@ function startResize(event, pane, min, max) {
             :class="{ active: remoteOp?.kind === 'pull' && remoteBusy }"
             :title="headBranch?.upstream ? `Pull from ${headBranch.upstream}` : 'Pull'"
             :disabled="remoteBusy"
-            @click="runRemote('pull')"
+            @click="actions.pull()"
           >
             <ArrowDownToLine :size="18" :stroke-width="1.5" />
             <span v-if="headBranch?.behind" class="count-badge">{{ headBranch.behind }}</span>
@@ -529,6 +530,7 @@ function startResize(event, pane, min, max) {
 
     <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
     <TagDialog v-if="tagDialog" :dialog="tagDialog" />
+    <PullDialog v-if="pullDialog" :dialog="pullDialog" />
     <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
     <RemoteStatus

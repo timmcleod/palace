@@ -131,7 +131,7 @@ pub async fn control_operation(path: String, action: String) -> Result<String, S
 
 /// When a merge or rebase stops for conflicts, git exits with an error, but the
 /// operation is under way and waiting for the user. Say that instead of failing.
-fn stopped_or(path: &str, error: String) -> String {
+pub(crate) fn stopped_or(path: &str, error: String) -> String {
     let Ok(repo) = open(path) else { return error };
     let Some(operation) = operation(&repo) else { return error };
     let conflicts = repo.index().map(|i| i.conflicts().map(|c| c.count()).unwrap_or(0)).unwrap_or(0);

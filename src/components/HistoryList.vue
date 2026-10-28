@@ -236,7 +236,8 @@ const MAX_REFS = 3;
         <div
           v-else
           class="commit"
-          :class="{ selected: item.commit && item.commit.id === selectedId }"
+          :class="{ selected: item.commit && item.commit.id === selectedId, incoming: item.commit?.incoming }"
+          :title="item.commit?.incoming ? 'Fetched, not pulled yet' : null"
           :style="{ top: `${item.top}px`, height: `${ROW_HEIGHT}px` }"
           @click="select(item.index)"
           @contextmenu.prevent="
@@ -320,6 +321,14 @@ const MAX_REFS = 3;
 
 .commit.selected {
   background: var(--row-selected);
+}
+
+/* Fetched from the remote but not pulled into the branch yet. */
+.commit.incoming .avatar,
+.commit.incoming .author,
+.commit.incoming .hash,
+.commit.incoming .summary {
+  opacity: 0.55;
 }
 
 .graph {

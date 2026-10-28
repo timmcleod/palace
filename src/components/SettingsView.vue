@@ -28,31 +28,6 @@ async function loadIdentity() {
 
 watch(() => props.path, loadIdentity, { immediate: true });
 
-const globalChanged = computed(
-  () => identity.global_name !== saved.value.global_name || identity.global_email !== saved.value.global_email,
-);
-const localChanged = computed(
-  () => identity.local_name !== saved.value.local_name || identity.local_email !== saved.value.local_email,
-);
-
-async function saveIdentity(global) {
-  identityError.value = "";
-  savedNote.value = "";
-  const prefix = global ? "global" : "local";
-  try {
-    await invoke("set_git_identity", {
-      path: props.path,
-      global,
-      name: identity[`${prefix}_name`],
-      email: identity[`${prefix}_email`],
-    });
-    await loadIdentity();
-    savedNote.value = prefix;
-  } catch (e) {
-    identityError.value = String(e);
-  }
-}
-
 const THEMES = [
   ["system", "System"],
   ["light", "Light"],

@@ -52,3 +52,20 @@ export function closeTagDialog(values) {
   tagDialog.value?.resolve(values);
   tagDialog.value = null;
 }
+
+export const pullDialog = shallowRef(null);
+
+/**
+ * Shows the Pull dialog and resolves to { from, rebase, autostash }, or null if
+ * cancelled. options: { branch, from, remotes: [{ name, branches }], rebase, autostash }
+ */
+export function openPullDialog(options) {
+  return new Promise((resolve) => {
+    pullDialog.value = { ...options, resolve };
+  });
+}
+
+export function closePullDialog(values) {
+  pullDialog.value?.resolve(values);
+  pullDialog.value = null;
+}

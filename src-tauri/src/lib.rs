@@ -2,9 +2,9 @@ mod avatars;
 mod branch;
 mod cli;
 mod commit;
+mod config;
 mod git;
 mod history;
-mod identity;
 mod remote;
 mod stash;
 mod tag;
@@ -59,8 +59,9 @@ pub fn run() {
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,
-            identity::git_identity,
-            identity::set_git_identity,
+            config::git_identity,
+            config::set_git_identity,
+            config::pull_mode,
             remote::fetch,
             remote::pull,
             remote::push,

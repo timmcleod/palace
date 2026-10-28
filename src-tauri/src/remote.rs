@@ -3,7 +3,7 @@
 
 use crate::cli::{Running, git_with_progress};
 use git2::Repository;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Serialize, Clone)]
@@ -17,8 +17,27 @@ pub async fn fetch(app: AppHandle, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn pull(app: AppHandle, path: String) -> Result<String, String> {
-    in_background(app, move |running, report| pull_current(&path, running, report)).await
+pub async fn pull(app: AppHandle, path: String, options: Option<PullOptions>) -> Result<String, String> {
+    let options = options.unwrap_or_default();
+    in_background(app, move |running, report| pull_current(&path, &options, running, report)).await
+}
+
+/// Choices from the Pull dialog.
+#[derive(Deserialize, Debug)]
+#[serde(default)]
+pub struct PullOptions {
+    /// The remote branch to pull, e.g. "origin/main"; the upstream when omitted.
+    from: Option<String>,
+    /// Rebase instead of merging; when omitted, whatever git is configured to do.
+    rebase: Option<bool>,
+    /// Set uncommitted changes aside while pulling and put them back after.
+    autostash: bool,
+}
+
+impl Default for PullOptions {
+    fn default() -> Self {
+        PullOptions { from: None, rebase: None, autostash: true }
+    }
 }
 
 /// Pushes the current branch. With `force`, overwrites the remote branch, but only if
@@ -81,10 +100,10 @@ fn fetch_all(path: &str, running: &Running, report: Report) -> Result<String, St
     Ok("Fetched from all remotes.".to_string())
 }
 
-fn pull_current(path: &str, running: &Running, report: Report) -> Result<String, String> {
-    let plan = pull_plan(path)?;
+fn pull_current(path: &str, options: &PullOptions, running: &Running, report: Report) -> Result<String, String> {
+    let plan = pull_plan(path, options)?;
     let args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
-    let output = git_with_progress(path, &args, running, report)?;
+    let output = git_with_progress(path, &args, running, report).map_err(|e| crate::branch::stopped_or(path, e))?;
     Ok(if output.contains("Already up to date") {
         format!("{} is already up to date.", plan.branch)
     } else {
@@ -169,23 +188,36 @@ fn upstream_of(repo: &Repository, branch: &str) -> Option<(String, String)> {
     Some((remote, merge))
 }
 
-fn pull_plan(path: &str) -> Result<Plan, String> {
+fn pull_plan(path: &str, options: &PullOptions) -> Result<Plan, String> {
     let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
     let branch = current_branch(&repo)?;
-    let (remote, merge) = upstream_of(&repo, &branch)
-        .ok_or_else(|| format!("{branch} has no upstream branch to pull from. Push it first to create one."))?;
+    let (remote, merge) = match &options.from {
+        Some(from) => split_remote_branch(path, from)?,
+        None => upstream_of(&repo, &branch)
+            .ok_or_else(|| format!("{branch} has no upstream branch to pull from. Push it first to create one."))?,
+    };
 
     let mut args = vec!["pull".to_string(), "--progress".to_string()];
-    // Recent git refuses to pull diverged branches until told whether to merge or
-    // rebase. Respect any choice the user has configured; otherwise merge, git's
-    // long-standing default.
-    let config = repo.config().map_err(|e| e.message().to_string())?;
-    let configured = ["pull.rebase", "pull.ff", &format!("branch.{branch}.rebase")]
-        .iter()
-        .any(|key| config.get_string(key).is_ok());
-    if !configured {
-        args.push("--no-rebase".into());
+    // Rebasing refuses to start with uncommitted changes unless they're set aside.
+    args.push(if options.autostash { "--autostash" } else { "--no-autostash" }.into());
+    match options.rebase {
+        Some(true) => args.push("--rebase".into()),
+        Some(false) => args.push("--no-rebase".into()),
+        None => {
+            // Recent git refuses to pull diverged branches until told whether to merge
+            // or rebase. Respect any choice the user has configured; otherwise merge,
+            // git's long-standing default.
+            let config = repo.config().map_err(|e| e.message().to_string())?;
+            let configured = ["pull.rebase", "pull.ff", &format!("branch.{branch}.rebase")]
+                .iter()
+                .any(|key| config.get_string(key).is_ok());
+            if !configured {
+                args.push("--no-rebase".into());
+            }
+        }
     }
+    args.push(remote.clone());
+    args.push(merge.clone());
 
     Ok(Plan { args, branch, upstream: format!("{remote}/{merge}"), sets_upstream: false })
 }
@@ -255,12 +287,12 @@ mod tests {
         other.commit(&[("b.txt", Some("b\n"))], "From elsewhere");
         push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
 
-        let message = pull_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
+        let message = pull_current(local.path(), &PullOptions::default(), &Running::default(), &mut |_| {}).unwrap();
         let branch = local.branch();
         assert_eq!(message, format!("Pulled origin/{branch} into {branch}."));
         assert_eq!(local.head(), other.head());
 
-        let again = pull_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
+        let again = pull_current(local.path(), &PullOptions::default(), &Running::default(), &mut |_| {}).unwrap();
         assert_eq!(again, format!("{branch} is already up to date."));
     }
 
@@ -290,7 +322,7 @@ mod tests {
 
         // Merging is the fallback only when the user hasn't chosen a pull strategy.
         let configured = local.repo.config().unwrap().get_string("pull.rebase").is_ok();
-        pull_current(local.path(), &Running::default(), &mut |_| {}).unwrap();
+        pull_current(local.path(), &PullOptions::default(), &Running::default(), &mut |_| {}).unwrap();
         if !configured {
             let head = local.repo.head().unwrap().peel_to_commit().unwrap();
             assert_eq!(head.parent_count(), 2);
@@ -373,7 +405,54 @@ mod tests {
     fn pulling_a_branch_without_upstream_explains_why_not() {
         let local = TempRepo::new("no-upstream");
         local.commit(&[("a.txt", Some("a\n"))], "First");
-        let error = pull_current(local.path(), &Running::default(), &mut |_| {}).unwrap_err();
+        let error = pull_current(local.path(), &PullOptions::default(), &Running::default(), &mut |_| {}).unwrap_err();
         assert!(error.contains("has no upstream branch"), "{error}");
+    }
+
+    #[test]
+    fn pulling_with_rebase_keeps_history_straight_and_changes_in_place() {
+        let (server, local) = setup("pull-rebase");
+        let other = TempRepo::clone_of("pull-rebase-other", &server);
+        let theirs = other.commit(&[("b.txt", Some("b\n"))], "Theirs");
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
+        local.commit(&[("c.txt", Some("c\n"))], "Ours");
+        // An uncommitted edit, which a rebasing pull would otherwise refuse to work with.
+        local.write(&[("a.txt", Some("edited\n"))]);
+
+        let rebase = PullOptions { rebase: Some(true), ..PullOptions::default() };
+        pull_current(local.path(), &rebase, &Running::default(), &mut |_| {}).unwrap();
+        let head = local.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 1);
+        assert_eq!(head.parent_id(0).unwrap(), theirs);
+        assert_eq!(head.summary().unwrap(), Some("Ours"));
+        assert_eq!(std::fs::read_to_string(local.dir.join("a.txt")).unwrap(), "edited\n");
+    }
+
+    #[test]
+    fn a_pull_that_conflicts_waits_for_the_user() {
+        let (server, local) = setup("pull-conflict");
+        let other = TempRepo::clone_of("pull-conflict-other", &server);
+        other.commit(&[("a.txt", Some("theirs\n"))], "Theirs");
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
+        local.commit(&[("a.txt", Some("ours\n"))], "Ours");
+
+        let rebase = PullOptions { rebase: Some(true), ..PullOptions::default() };
+        let stopped = pull_current(local.path(), &rebase, &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(stopped.starts_with("CONFLICT: The rebase stopped because 1 file conflicted"), "{stopped}");
+    }
+
+    #[test]
+    fn pulling_another_remote_branch() {
+        let (server, local) = setup("pull-other-branch");
+        let other = TempRepo::clone_of("pull-other-branch-other", &server);
+        crate::cli::git(other.path(), &["checkout", "-b", "feature"], None).unwrap();
+        let feature = other.commit(&[("f.txt", Some("f\n"))], "Feature");
+        crate::cli::git(other.path(), &["push", "origin", "feature"], None).unwrap();
+        fetch_all(local.path(), &Running::default(), &mut |_| {}).unwrap();
+
+        let from = PullOptions { from: Some("origin/feature".into()), rebase: Some(false), ..PullOptions::default() };
+        let message = pull_current(local.path(), &from, &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, format!("Pulled origin/feature into {}.", local.branch()));
+        assert_eq!(local.head(), feature);
     }
 }

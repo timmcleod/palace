@@ -1,5 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { openForm, openTagDialog } from "./overlays.js";
+import { openForm, openPullDialog, openTagDialog } from "./overlays.js";
+import { readJson, writeJson } from "./storage.js";
+
+// The Pull dialog's last choices, offered again next time.
+const PULL_CHOICES_KEY = "palace.pullChoices";
 
 // Branch, merge, rebase and stash actions, and the context menus that offer them.
 // `run(titles, command, args, options)` performs a backend command with progress and
@@ -145,6 +150,31 @@ export function useGitActions({ overview, run }) {
 
   // Opens the Create New Tag dialog on `revision` (the current branch when omitted).
   // Pushing a version tag is how releases are published.
+  // Asks which remote branch to pull into the current branch, and how.
+  async function pull(from = null) {
+    const titles = ["Pulling…", "Pulled", "Pull failed"];
+    const o = overview.value;
+    const head = headBranchInfo();
+    const remotes = o.remotes.filter((r) => r.branches.length).map((r) => ({ name: r.name, branches: r.branches }));
+    // Nothing to choose from (a detached HEAD, no remotes): the backend explains why.
+    if (!head || !remotes.length) return run(titles, "pull");
+
+    const choices = remotes.flatMap((r) => r.branches.map((b) => `${r.name}/${b}`));
+    const saved = readJson(PULL_CHOICES_KEY, {});
+    // Until a choice has been made here, start with what git is configured to do.
+    const rebase = saved.rebase ?? (await invoke("pull_mode", { path: o.path }).catch(() => "merge")) === "rebase";
+    const values = await openPullDialog({
+      branch: head.name,
+      from: [from, head.upstream].find((b) => choices.includes(b)) ?? choices[0],
+      remotes,
+      rebase,
+      autostash: saved.autostash ?? true,
+    });
+    if (!values) return;
+    writeJson(PULL_CHOICES_KEY, { rebase: values.rebase, autostash: values.autostash });
+    return run(titles, "pull", { options: values });
+  }
+
   async function createTag(revision = null) {
     const o = overview.value;
     const head = o.branches.find((b) => b.is_head)?.name;
@@ -224,6 +254,8 @@ export function useGitActions({ overview, run }) {
       { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
       { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       { separator: true },
+      { label: `Pull into “${head}”…`, action: () => pull(name), disabled: !head || midOperation() },
+      { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
       { label: "Delete from Remote…", action: () => deleteRemoteBranch(name), danger: true },
@@ -271,6 +303,7 @@ export function useGitActions({ overview, run }) {
 
   return {
     checkout,
+    pull,
     forcePush,
     sectionMenu,
     newBranch,
