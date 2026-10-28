@@ -14,7 +14,6 @@ import {
   Plus,
   Github,
   Settings,
-  SlidersHorizontal,
   Tag,
   X,
 } from "lucide-vue-next";
@@ -293,9 +292,6 @@ function onRowClick(row) {
       </label>
       <button class="icon-button" title="Create a branch or tag, or add a remote" @click="emit('add-menu', $event)">
         <Plus :size="17" :stroke-width="1.5" />
-      </button>
-      <button class="icon-button" title="Sidebar options (coming soon)" disabled>
-        <SlidersHorizontal :size="16" :stroke-width="1.5" />
       </button>
     </footer>
   </aside>
