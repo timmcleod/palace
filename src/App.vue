@@ -257,7 +257,7 @@ const remoteOp = ref(null);
 let dismissTimer;
 
 // Only network operations report progress and can be cancelled.
-const NETWORK = new Set(["fetch", "pull", "push", "clone_repo", "add_remote", "delete_remote_tag"]);
+const NETWORK = new Set(["fetch", "pull", "push", "publish_branch", "clone_repo", "add_remote", "delete_remote_tag"]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 const remoteBusy = computed(() => remoteOp.value?.state === "running");
@@ -317,7 +317,6 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
 const REMOTE_TITLES = {
   fetch: ["Fetching…", "Fetched", "Fetch failed"],
   pull: ["Pulling…", "Pulled", "Pull failed"],
-  push: ["Pushing…", "Pushed", "Push failed"],
 };
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
@@ -749,7 +748,7 @@ function startResize(event, pane, min, max) {
         <div class="action-group">
           <button
             class="icon-button"
-            :class="{ active: remoteOp?.kind === 'fetch' && remoteBusy }"
+            :class="{ active: remoteOp?.command === 'fetch' && remoteBusy }"
             title="Fetch from all remotes"
             :disabled="remoteBusy"
             @click="runRemote('fetch')"
@@ -758,7 +757,7 @@ function startResize(event, pane, min, max) {
           </button>
           <button
             class="icon-button"
-            :class="{ active: remoteOp?.kind === 'pull' && remoteBusy }"
+            :class="{ active: remoteOp?.command === 'pull' && remoteBusy }"
             :title="headBranch?.upstream ? `Pull from ${headBranch.upstream}` : 'Pull'"
             :disabled="remoteBusy"
             @click="actions.pull()"
@@ -768,10 +767,10 @@ function startResize(event, pane, min, max) {
           </button>
           <button
             class="icon-button"
-            :class="{ active: remoteOp?.kind === 'push' && remoteBusy }"
-            :title="headBranch?.upstream ? `Push to ${headBranch.upstream}` : 'Publish this branch'"
+            :class="{ active: ['push', 'publish_branch'].includes(remoteOp?.command) && remoteBusy }"
+            :title="headBranch?.upstream ? `Push to ${headBranch.upstream}` : 'Publish this branch…'"
             :disabled="remoteBusy"
-            @click="runRemote('push')"
+            @click="actions.push()"
           >
             <ArrowUpFromLine :size="18" :stroke-width="1.5" />
             <span v-if="headBranch?.ahead" class="count-badge">{{ headBranch.ahead }}</span>

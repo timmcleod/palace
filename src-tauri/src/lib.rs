@@ -91,6 +91,7 @@ pub fn run() {
             remote::fetch,
             remote::pull,
             remote::push,
+            remote::publish_branch,
             remote::cancel_remote,
             remote::delete_remote_branch,
             remote::push_tag,

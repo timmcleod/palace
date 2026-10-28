@@ -4,6 +4,8 @@ import { readJson, writeJson } from "./storage.js";
 
 // The Pull dialog's last choices, offered again next time.
 const PULL_CHOICES_KEY = "palace.pullChoices";
+// Whether the New Branch dialog last published the branch, offered again next time.
+const PUBLISH_KEY = "palace.publishNewBranches";
 
 // Branch, merge, rebase and stash actions, and the context menus that offer them.
 // `run(titles, command, args, options)` performs a backend command with progress and
@@ -23,21 +25,60 @@ export function useGitActions({ overview, run }) {
   }
 
   async function newBranch(start = null, startLabel = null) {
+    const remote = tagRemote();
     const values = await openForm({
       title: "New Branch",
       message: startLabel ? `The branch will start at ${startLabel}.` : `The branch will start at ${current() ?? "HEAD"}.`,
       fields: [
         { key: "name", label: "Name", type: "text", placeholder: "feature/my-change" },
         { key: "checkout", label: "Check out the new branch", type: "checkbox", value: true },
-      ],
+        remote && { key: "publish", label: `Publish it to ${remote}`, type: "checkbox", value: readJson(PUBLISH_KEY, false) },
+      ].filter(Boolean),
       confirmLabel: "Create Branch",
     });
     if (!values) return;
-    await run(["Creating branch…", "Created branch", "Couldn't create the branch"], "create_branch", {
-      name: values.name.trim(),
+    const name = values.name.trim();
+    if (remote) writeJson(PUBLISH_KEY, values.publish);
+    const error = await run(["Creating branch…", "Created branch", "Couldn't create the branch"], "create_branch", {
+      name,
       start,
       checkout: values.checkout,
     });
+    if (!error && values.publish) await publish(name, remote, name);
+  }
+
+  function publish(branch, remote, name) {
+    return run(["Publishing…", "Published", "Couldn't publish the branch"], "publish_branch", { branch, remote, name });
+  }
+
+  // Pushes a branch that has no upstream yet, choosing the remote and the name there.
+  async function publishBranch(branch) {
+    const remotes = overview.value.remotes.map((r) => r.name);
+    if (!remotes.length) {
+      await tell("No Remote", "This repository has no remote to publish to. Add one from the + menu or the Remotes section first.");
+      return;
+    }
+    const preferred = tagRemote() ?? remotes[0];
+    const values = await openForm({
+      title: "Publish Branch",
+      message:
+        remotes.length > 1
+          ? `Push “${branch}” to a remote and track it there.`
+          : `Push “${branch}” to ${preferred} and track it there.`,
+      fields: [
+        remotes.length > 1 && { key: "remote", label: "Remote", type: "select", options: remotes, value: preferred },
+        { key: "name", label: "Name on the remote", type: "text", value: branch },
+      ].filter(Boolean),
+      confirmLabel: "Publish",
+    });
+    if (values) await publish(branch, values.remote ?? preferred, values.name.trim());
+  }
+
+  // The toolbar's push: publishes a branch the first time, pushes it after that.
+  function push() {
+    const head = headBranchInfo();
+    if (head && !head.upstream && overview.value.remotes.length) return publishBranch(head.name);
+    return run(["Pushing…", "Pushed", "Push failed"], "push");
   }
 
   async function renameBranch(name) {
@@ -378,8 +419,10 @@ export function useGitActions({ overview, run }) {
   function branchMenu(name) {
     const head = current();
     const isCurrent = name === head;
+    const upstream = overview.value.branches.find((b) => b.name === name)?.upstream;
     return [
       { label: "Check Out", action: () => checkout("branch", name), disabled: isCurrent },
+      !upstream && { label: `Publish “${name}”…`, action: () => publishBranch(name), disabled: !overview.value.remotes.length },
       { separator: true },
       // Merging or rebasing a branch onto itself means nothing, so the current branch
       // doesn't offer it.
@@ -544,6 +587,8 @@ export function useGitActions({ overview, run }) {
     remoteMenu,
     pull,
     forcePush,
+    publishBranch,
+    push,
     sectionMenu,
     newBranch,
     mergeInto,

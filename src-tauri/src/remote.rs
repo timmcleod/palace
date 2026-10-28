@@ -101,6 +101,13 @@ pub async fn push(app: AppHandle, path: String, force: Option<bool>) -> Result<S
     in_background(app, move |running, report| push_current(&path, force, running, report)).await
 }
 
+/// Publishes a local branch: pushes it to `remote` as `name` and makes that its
+/// upstream branch, so later pushes and pulls go there.
+#[tauri::command]
+pub async fn publish_branch(app: AppHandle, path: String, branch: String, remote: String, name: String) -> Result<String, String> {
+    in_background(app, move |running, report| publish(&path, &branch, &remote, &name, running, report)).await
+}
+
 /// Deletes a branch on its remote. `name` is the remote branch, e.g. "origin/feature".
 #[tauri::command]
 pub async fn delete_remote_branch(app: AppHandle, path: String, name: String) -> Result<String, String> {
@@ -226,6 +233,16 @@ fn push_current(path: &str, force: bool, running: &Running, report: Report) -> R
     } else {
         format!("Pushed {} to {}.", plan.branch, plan.upstream)
     })
+}
+
+fn publish(path: &str, branch: &str, remote: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give the branch a name to publish it under.".into());
+    }
+    let refspec = format!("refs/heads/{branch}:refs/heads/{name}");
+    git_with_progress(path, &["push", "--progress", "--set-upstream", remote, &refspec], running, report)?;
+    Ok(format!("Published {branch} to {remote}/{name}."))
 }
 
 struct Plan {
@@ -377,6 +394,18 @@ mod tests {
         assert_eq!(server.repo.refname_to_id(&format!("refs/heads/{branch}")).unwrap(), local.head());
         assert_eq!(upstream_of(&local.repo, &branch), Some(("origin".into(), branch.clone())));
         assert!(!progress.is_empty(), "git's progress should be reported");
+    }
+
+    #[test]
+    fn publishing_a_branch_that_isnt_checked_out() {
+        let (server, local) = setup("publish-other");
+        local.repo.branch("feature", &local.repo.head().unwrap().peel_to_commit().unwrap(), false).unwrap();
+
+        let message = publish(local.path(), "feature", "origin", "feature/renamed", &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, "Published feature to origin/feature/renamed.");
+        assert_eq!(server.repo.refname_to_id("refs/heads/feature/renamed").unwrap(), local.head());
+        assert_eq!(upstream_of(&local.repo, "feature"), Some(("origin".into(), "feature/renamed".into())));
+        assert_eq!(upstream_of(&local.repo, &local.branch()).map(|u| u.1), Some(local.branch()));
     }
 
     #[test]
