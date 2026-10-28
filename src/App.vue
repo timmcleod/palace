@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -119,6 +119,97 @@ function showFileHistory(file) {
   selectedCommit.value = null;
   if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
 }
+
+// --- Back and Forward --------------------------------------------------------------
+// Like a browser: each place is a sidebar item with the commit, stash and file filter
+// chosen there. Choosing something new starts a new place; Back and Forward return to
+// them. Places quickly replaced by others in the same view (arrowing through the
+// history, say) aren't kept, so Back doesn't step through every one.
+
+const MAX_PLACES = 100;
+const QUICK_CHANGE = 800;
+const nav = reactive({ back: [], forward: [] });
+let here = null;
+let hereSince = 0;
+let restoring = false;
+
+const placeHere = () => ({
+  selected: selected.value,
+  commit: selectedCommit.value,
+  stash: selectedStash.value,
+  fileFilter: fileFilter.value,
+});
+
+const samePlace = (a, b) =>
+  a.selected === b.selected && a.commit?.id === b.commit?.id && a.stash === b.stash && a.fileFilter === b.fileFilter;
+
+watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter], () => {
+  if (restoring || !overview.value) return;
+  const place = placeHere();
+  if (here && samePlace(here, place)) return;
+  const quick = here && here.selected === place.selected && Date.now() - hereSince < QUICK_CHANGE;
+  if (here && !quick) {
+    nav.back.push(here);
+    if (nav.back.length > MAX_PLACES) nav.back.shift();
+  }
+  here = place;
+  hereSince = Date.now();
+  nav.forward = [];
+});
+
+async function go(direction) {
+  const [from, to] = direction === "back" ? [nav.back, nav.forward] : [nav.forward, nav.back];
+  const place = from.pop();
+  if (!place) return;
+  if (here) to.push(here);
+  here = place;
+  hereSince = 0;
+  restoring = true;
+  selected.value = place.selected;
+  selectedCommit.value = place.commit;
+  selectedStash.value = place.stash;
+  fileFilter.value = place.fileFilter;
+  // Let the views settle (opening a stash's view picks one, say) before recording again.
+  await nextTick();
+  await nextTick();
+  restoring = false;
+}
+
+// A short description of a place, for the buttons' tooltips.
+function describe(place) {
+  if (!place) return "";
+  const [kind, name] = splitKey(place.selected);
+  const view = {
+    "workspace:working-copy": "Working Copy",
+    "workspace:stashes": "Stashes",
+    "workspace:github": "GitHub",
+    "workspace:settings": "Settings",
+    "workspace:history": "History",
+  }[place.selected] ?? name ?? kind;
+  const detail = place.commit?.short_id ?? (place.selected === "workspace:stashes" && place.stash != null ? `stash@{${place.stash}}` : "");
+  return [view, detail].filter(Boolean).join(" › ");
+}
+
+function onNavKeydown(event) {
+  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+  event.preventDefault();
+  go(event.key === "ArrowLeft" ? "back" : "forward");
+}
+
+// Mice with back and forward buttons report them as buttons 3 and 4.
+function onNavMouseup(event) {
+  if (event.button === 3 || event.button === 4) {
+    event.preventDefault();
+    go(event.button === 3 ? "back" : "forward");
+  }
+}
+
+window.addEventListener("keydown", onNavKeydown);
+window.addEventListener("mouseup", onNavMouseup);
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onNavKeydown);
+  window.removeEventListener("mouseup", onNavMouseup);
+});
 
 // --- Running git operations ------------------------------------------------------
 
@@ -256,6 +347,10 @@ async function loadRepository(path, { quiet = false } = {}) {
       fileFilter.value = null;
       selectedStash.value = null;
       stashQuery.value = "";
+      // Places belong to a repository.
+      nav.back = [];
+      nav.forward = [];
+      here = null;
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
     }
     overview.value = data;
@@ -472,8 +567,22 @@ function startResize(event, pane, min, max) {
 
       <header class="toolbar">
         <div class="nav-buttons">
-          <button class="icon-button" title="Back" disabled><ChevronLeft :size="20" :stroke-width="1.5" /></button>
-          <button class="icon-button" title="Forward" disabled><ChevronRight :size="20" :stroke-width="1.5" /></button>
+          <button
+            class="icon-button"
+            :title="nav.back.length ? `Back to ${describe(nav.back.at(-1))} (Alt+←)` : 'Back'"
+            :disabled="!nav.back.length"
+            @click="go('back')"
+          >
+            <ChevronLeft :size="20" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :title="nav.forward.length ? `Forward to ${describe(nav.forward.at(-1))} (Alt+→)` : 'Forward'"
+            :disabled="!nav.forward.length"
+            @click="go('forward')"
+          >
+            <ChevronRight :size="20" :stroke-width="1.5" />
+          </button>
         </div>
         <div class="repo-title">
           <div class="repo-name">{{ overview.name }}</div>

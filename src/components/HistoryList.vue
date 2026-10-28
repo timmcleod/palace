@@ -48,6 +48,8 @@ async function load({ resetScroll }) {
     if (resetScroll && viewport.value) {
       viewport.value.scrollTop = 0;
       scrollTop.value = 0;
+      // Showing another branch's history keeps the selected commit in view, if it's there.
+      pendingReveal = props.selectedId;
     }
     selectedIndex = -1;
   } catch (e) {
@@ -158,7 +160,35 @@ function select(index) {
   const commit = commitAt(index);
   if (!commit) return;
   selectedIndex = index;
+  pickedHere = commit.id;
   emit("select", commit);
+}
+
+// A commit selected from outside the list, by going back to it say, is scrolled into
+// view: straight away, or once the history it's in has loaded.
+let pickedHere = null;
+let pendingReveal = null;
+
+watch(
+  () => props.selectedId,
+  (id) => {
+    pendingReveal = id && id !== pickedHere ? id : null;
+    pickedHere = null;
+    reveal();
+  },
+);
+watch(() => summary.value?.generation, reveal);
+
+async function reveal() {
+  const id = pendingReveal;
+  const generation = summary.value?.generation;
+  if (!id || !generation) return;
+  pendingReveal = null;
+  const index = await invoke("history_position", { generation, id }).catch(() => null);
+  if (index == null || summary.value?.generation !== generation || props.selectedId !== id) return;
+  selectedIndex = index;
+  await nextTick();
+  scrollIntoView(index, { center: true });
 }
 
 function onKeydown(event) {
@@ -173,9 +203,15 @@ function onKeydown(event) {
   nextTick(() => select(next));
 }
 
-function scrollIntoView(index) {
+function scrollIntoView(index, { center = false } = {}) {
   const el = viewport.value;
   const top = layout.value.offsets[layout.value.itemOfCommit[index]];
+  if (center) {
+    if (top < el.scrollTop || top + ROW_HEIGHT > el.scrollTop + el.clientHeight) {
+      el.scrollTop = Math.max(0, top - (el.clientHeight - ROW_HEIGHT) / 2);
+    }
+    return;
+  }
   // Keep a commit's month header visible when moving up onto the first commit of a month.
   const headerAbove = layout.value.items[layout.value.itemOfCommit[index] - 1]?.header ? HEADER_HEIGHT : 0;
   if (top - headerAbove < el.scrollTop) {

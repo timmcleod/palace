@@ -30,6 +30,7 @@ pub fn run() {
             git::repo_overview,
             history::load_history,
             history::history_page,
+            history::history_position,
             commit::commit_details,
             commit::file_diff,
             working::working_status,

@@ -117,6 +117,16 @@ pub async fn history_page(
     page(history, offset, limit).map_err(message)
 }
 
+/// Where commit `id` is in the loaded history, so the list can scroll to it; None if
+/// it isn't there (or the history has since been reloaded).
+#[tauri::command]
+pub async fn history_position(generation: u64, id: String, state: State<'_, HistoryState>) -> Result<Option<usize>, String> {
+    let cache = state.0.lock().unwrap();
+    let Some(history) = cache.as_ref().filter(|h| h.generation == generation) else { return Ok(None) };
+    let oid = Oid::from_str(&id).map_err(message)?;
+    Ok(history.rows.iter().position(|row| row.oid == oid))
+}
+
 fn page(history: &History, offset: usize, limit: usize) -> Result<Vec<CommitRow>, git2::Error> {
     let repo = Repository::discover(&history.path)?;
 
