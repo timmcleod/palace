@@ -4,6 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowLeft, CircleAlert, ExternalLink, Folder, GitFork, Github, Lock, Search } from "lucide-vue-next";
 import { githubAccount, NEW_TOKEN_URL, signInWithToken } from "../lib/github.js";
+import { openForm } from "../lib/overlays.js";
+import GitHubAccount from "./GitHubAccount.vue";
+import GitHubKeys from "./GitHubKeys.vue";
 
 // Your GitHub account, organisations and collaborators on the left, the chosen one's
 // repositories on the right, each ready to clone.
@@ -19,6 +22,14 @@ const selected = ref(null);
 const query = ref("");
 // Repositories by owner login, once loaded: { repos } or { error }.
 const listings = shallowReactive(new Map());
+// Your own account has tabs: "repositories", "keys" and "account".
+const tab = ref("repositories");
+// What the token may do, for the Public Keys and Account tabs; undefined until known.
+const scopes = ref(undefined);
+
+async function loadScopes() {
+  scopes.value = await invoke("github_scopes").catch(() => null);
+}
 
 async function loadOwners() {
   ownersError.value = "";
@@ -36,22 +47,66 @@ watch(
   (login) => {
     listings.clear();
     selected.value = null;
-    if (login) loadOwners();
+    tab.value = "repositories";
+    scopes.value = undefined;
+    if (login) {
+      loadOwners();
+      loadScopes();
+    }
   },
   { immediate: true },
 );
 
 const owner = computed(() => owners.value?.find((o) => o.login === selected.value) ?? null);
 
-watch(owner, async (o) => {
-  query.value = "";
-  if (!o || listings.has(o.login)) return;
+async function loadRepos(o) {
   try {
     listings.set(o.login, { repos: await invoke("github_repos", { owner: o.login, kind: o.kind }) });
   } catch (e) {
     listings.set(o.login, { error: String(e) });
   }
+}
+
+watch(owner, (o) => {
+  query.value = "";
+  if (o?.kind !== "me") tab.value = "repositories";
+  if (o && !listings.has(o.login)) loadRepos(o);
 });
+
+// Repositories can be created for yourself and in organisations, not for collaborators.
+const createError = ref("");
+
+async function createRepository() {
+  const o = owner.value;
+  const values = await openForm({
+    title: `Create Repository${o.kind === "org" ? ` in ${o.login}` : ""}`,
+    message: "Creates an empty repository on GitHub. Names can use letters, numbers, hyphens, underscores and dots.",
+    fields: [
+      { key: "name", label: "Name", type: "text", placeholder: "my-project" },
+      { key: "description", label: "Description (optional)", type: "text", optional: true },
+      { key: "private", label: "Private: only people you choose can see it", type: "checkbox", value: true },
+      { key: "readme", label: "Add a README, so it starts with a first commit", type: "checkbox", value: true },
+      { key: "clone", label: "Clone it to this computer", type: "checkbox", value: true },
+    ],
+    confirmLabel: "Create Repository",
+  });
+  if (!values) return;
+  createError.value = "";
+  try {
+    const repo = await invoke("github_create_repo", {
+      owner: o.login,
+      kind: o.kind,
+      name: values.name,
+      description: values.description,
+      private: values.private,
+      readme: values.readme,
+    });
+    await loadRepos(o);
+    if (values.clone) emit("clone", repo.clone_url);
+  } catch (e) {
+    createError.value = String(e);
+  }
+}
 
 const listing = computed(() => (owner.value ? listings.get(owner.value.login) : null));
 const repos = computed(() => {
@@ -139,12 +194,30 @@ async function signIn() {
               }}{{ listing?.repos ? `${listing.repos.length} ${listing.repos.length === 1 ? "repository" : "repositories"}` : "" }}
             </span>
           </div>
+          <div v-if="owner.kind === 'me'" class="segmented">
+            <button :class="{ active: tab === 'repositories' }" @click="tab = 'repositories'">Repositories</button>
+            <button :class="{ active: tab === 'keys' }" @click="tab = 'keys'">Public Keys</button>
+            <button :class="{ active: tab === 'account' }" @click="tab = 'account'">Account</button>
+          </div>
+        </header>
+
+        <GitHubKeys v-if="tab === 'keys' && scopes !== undefined" :scopes="scopes" />
+        <GitHubAccount v-else-if="tab === 'account' && scopes !== undefined" :scopes="scopes" @token-changed="loadScopes" />
+        <p v-else-if="tab !== 'repositories'" class="message dim">Loading…</p>
+
+        <template v-else>
+        <div class="list-bar">
+          <span>REPOSITORIES</span>
+          <button v-if="owner.kind !== 'collaborator'" class="secondary-button" @click="createRepository">
+            Create Repository…
+          </button>
           <label class="toolbar-search filter">
             <Search :size="15" :stroke-width="1.5" />
             <input v-model="query" placeholder="Filter Repositories" spellcheck="false" @keydown.esc="query = ''" />
           </label>
-        </header>
+        </div>
 
+        <p v-if="createError" class="message error"><CircleAlert :size="15" /> {{ createError }}</p>
         <p v-if="listing?.error" class="message error"><CircleAlert :size="15" /> {{ listing.error }}</p>
         <p v-else-if="!listing" class="message dim">Loading repositories…</p>
         <p v-else-if="!repos.length" class="message dim">
@@ -168,6 +241,7 @@ async function signIn() {
             <button class="secondary-button clone" @click="emit('clone', repo.clone_url)">Clone</button>
           </div>
         </div>
+        </template>
       </template>
     </section>
   </div>
@@ -291,6 +365,49 @@ async function signIn() {
   width: 220px;
   flex-shrink: 1;
   min-width: 120px;
+  margin-left: auto;
+}
+
+.list-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.list-bar .secondary-button {
+  padding: 3px 12px;
+  letter-spacing: normal;
+}
+
+.list-bar .filter {
+  height: 30px;
+  letter-spacing: normal;
+}
+
+.segmented {
+  display: flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--toolbar-group-bg);
+}
+
+.segmented button {
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.segmented button.active {
+  background: var(--row-selected);
 }
 
 .repo-list {

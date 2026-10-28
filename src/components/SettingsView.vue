@@ -205,8 +205,7 @@ const TAB_SIZES = [2, 4, 8];
           <ol class="steps">
             <li>
               <button class="link-button" @click="openUrl(NEW_TOKEN_URL)">Create a token on GitHub</button>
-              with the <strong>repo</strong>, <strong>workflow</strong> and <strong>read:org</strong> scopes (they're
-              ticked for you), and copy it.
+              with the scopes Palace needs (they're ticked for you), and copy it.
             </li>
             <li>
               <button class="secondary-button" :disabled="signingIn" @click="signIn">

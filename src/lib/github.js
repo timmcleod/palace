@@ -9,9 +9,18 @@ invoke("github_account")
   .then((account) => (githubAccount.value = account))
   .catch(() => {});
 
-// A new classic token with the scopes Palace needs: private repositories, workflow
-// files (pushing changes to .github/workflows), and organisations.
-export const NEW_TOKEN_URL = "https://github.com/settings/tokens/new?description=Palace&scopes=repo,workflow,read:org";
+// A new classic token with the scopes Palace uses: private repositories, workflow
+// files (pushing changes to .github/workflows), organisations, and SSH keys.
+export const NEW_TOKEN_URL =
+  "https://github.com/settings/tokens/new?description=Palace&scopes=repo,workflow,read:org,admin:public_key";
+
+// What each scope lets Palace do, for the Account tab.
+export const SCOPES = [
+  { name: "repo", use: "Fetch, pull and push your repositories, private ones included, and create new ones" },
+  { name: "workflow", use: "Push changes to GitHub Actions workflows (.github/workflows)" },
+  { name: "read:org", use: "List your organizations and their repositories" },
+  { name: "admin:public_key", use: "See, add and remove the SSH keys on your account" },
+];
 
 /**
  * Asks for a personal access token and signs in with it. Resolves to an error
