@@ -54,28 +54,29 @@
 }
 
 /* The theme is resolved in settings.js, which follows the system unless Settings
-   chooses light or dark. */
+   chooses light or dark. Dark is a deep indigo-violet: an aubergine palette moved a
+   little towards blue. */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --accent: #3b8ff6;
   --danger: #ff6b61;
 
-  --text-primary: #e6e6e6;
-  --text-secondary: #b8b8b8;
-  --text-tertiary: #8a8a8a;
-  --icon: #a5a5a5;
+  --text-primary: #f1e6f7;
+  --text-secondary: #c2aecf;
+  --text-tertiary: #a99dba;
+  --icon: #bfb5c8;
 
-  --sidebar-bg: #262626;
-  --content-bg: #1e1e1e;
-  --input-bg: #1a1a1a;
-  --border: #363636;
-  --row-hover: rgba(255, 255, 255, 0.05);
-  --row-selected: rgba(255, 255, 255, 0.1);
+  --sidebar-bg: #2e1b40;
+  --content-bg: #160629;
+  --input-bg: #443354;
+  --border: #463656;
+  --row-hover: rgba(255, 255, 255, 0.06);
+  --row-selected: rgba(255, 255, 255, 0.14);
   --pill-bg: rgba(255, 255, 255, 0.12);
   --toolbar-group-bg: rgba(255, 255, 255, 0.06);
   --button-hover: rgba(255, 255, 255, 0.09);
 
-  --ref-remote: #6b6b6b;
+  --ref-remote: #675c78;
   --ref-tag: #a07524;
   --lane-1: #3b8ff6;
   --lane-2: #a875e0;
@@ -84,8 +85,8 @@
   --lane-5: #ff8b3d;
   --lane-6: #2bb3a6;
 
-  --diff-gutter-bg: #232323;
-  --diff-hunk-bg: #1f2633;
+  --diff-gutter-bg: #21172a;
+  --diff-hunk-bg: #281b36;
   --diff-added-bg: #12304f;
   --diff-added-gutter: #173f6b;
   --diff-added-text: #58a6ff;
