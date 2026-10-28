@@ -4,7 +4,6 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
-  ChevronDown,
   ChevronRight,
   Cloud,
   Folder,
@@ -231,11 +230,11 @@ function onRowClick(row) {
 <template>
   <aside class="sidebar">
     <header class="sidebar-toolbar">
+      <button class="repo-name" :title="`${overview.path}\nSwitch to another repository`" @click="emit('recent-menu', below($event))">
+        {{ overview.name }}
+      </button>
       <button class="icon-button" title="Open Repository…" @click="emit('open-repository')">
         <FolderOpen :size="18" :stroke-width="1.5" />
-      </button>
-      <button class="icon-button recent-button" title="Recent Repositories" @click="emit('recent-menu', below($event))">
-        <ChevronDown :size="15" :stroke-width="1.75" />
       </button>
     </header>
 
@@ -316,15 +315,33 @@ function onRowClick(row) {
   background: var(--sidebar-bg);
 }
 
-.recent-button {
-  width: 22px;
-  margin-left: -6px;
+/* The open repository's name; clicking it lists the recent ones to switch to. */
+.repo-name {
+  flex: 1;
+  min-width: 0;
+  margin-right: 6px;
+  padding: 4px 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.repo-name:hover {
+  background: var(--button-hover);
 }
 
 .sidebar-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  gap: 2px;
   height: var(--toolbar-height);
   padding: 0 12px;
   flex-shrink: 0;

@@ -967,7 +967,10 @@ function startResize(event, pane, min, max) {
 }
 
 .repo-name {
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-secondary);
 }
 
