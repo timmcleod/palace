@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { openForm, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
+import { openForm, openMergeDialog, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 
 // The Pull dialog's last choices, offered again next time.
@@ -69,9 +69,20 @@ export function useGitActions({ overview, run }) {
     }
   }
 
-  async function merge(name, { confirmFirst = true } = {}) {
-    if (confirmFirst && !(await confirm(`Merge “${name}” into “${current()}”?`, "Merge", "Merge"))) return;
-    await run(["Merging…", "Merged", "Merge failed"], "merge", { branch: name });
+  // Asks how to merge `name` (or a branch to choose) into the current branch.
+  async function merge(name = null) {
+    const head = current();
+    const choices = revisionChoices();
+    const branches = choices.branches.filter((b) => b !== head);
+    const values = await openMergeDialog({
+      head,
+      branch: name ?? branches[0] ?? choices.remoteBranches[0] ?? null,
+      branches,
+      remoteBranches: choices.remoteBranches,
+      tags: choices.tags,
+    });
+    if (!values) return;
+    await run(["Merging…", "Merged", "Merge failed"], "merge", { branch: values.branch, options: values.options });
   }
 
   async function rebase(onto) {
@@ -83,19 +94,9 @@ export function useGitActions({ overview, run }) {
     if (ok) await run(["Rebasing…", "Rebased", "Rebase failed"], "rebase", { onto });
   }
 
-  // The toolbar's Merge button: pick a branch to merge into the current one.
-  async function mergeInto() {
-    const o = overview.value;
-    const options = [
-      ...o.branches.filter((b) => !b.is_head).map((b) => b.name),
-      ...o.remotes.flatMap((r) => r.branches.map((b) => `${r.name}/${b}`)),
-    ];
-    const values = await openForm({
-      title: `Merge into ${current()}`,
-      fields: [{ key: "branch", label: "Branch to merge", type: "select", options, value: options[0] }],
-      confirmLabel: "Merge",
-    });
-    if (values) await merge(values.branch, { confirmFirst: false });
+  // The toolbar's Merge button: the Merge dialog, with a branch to choose.
+  function mergeInto() {
+    return merge();
   }
 
   async function stashSave() {
@@ -266,7 +267,7 @@ export function useGitActions({ overview, run }) {
       { separator: true },
       // Merging or rebasing a branch onto itself means nothing, so the current branch
       // doesn't offer it.
-      !isCurrent && { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
+      !isCurrent && { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       !isCurrent && { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       !isCurrent && { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
@@ -284,7 +285,7 @@ export function useGitActions({ overview, run }) {
     return [
       { label: "Check Out as Local Branch", action: () => checkout("remote-branch", name) },
       { separator: true },
-      { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
+      { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       { separator: true },
       { label: `Pull into “${head}”…`, action: () => pull(name), disabled: !head || midOperation() },
@@ -301,7 +302,7 @@ export function useGitActions({ overview, run }) {
       { label: "Check Out", action: () => checkout("tag", name) },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
-      { label: `Merge “${name}” into “${head}”`, action: () => merge(name), disabled: !head || midOperation() },
+      { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       { separator: true },
       { label: "Push to Remote", action: () => pushTag(name), disabled: !overview.value.remotes.length },
       { label: "Delete…", action: () => deleteTag(name), danger: true },
@@ -344,6 +345,7 @@ export function useGitActions({ overview, run }) {
 
   return {
     checkout,
+    merge,
     pull,
     forcePush,
     sectionMenu,

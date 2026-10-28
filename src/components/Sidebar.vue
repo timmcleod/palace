@@ -24,7 +24,7 @@ const props = defineProps({
   overview: { type: Object, required: true },
   selected: { type: String, default: null },
 });
-const emit = defineEmits(["update:selected", "open-repository", "menu", "activate", "section-menu"]);
+const emit = defineEmits(["update:selected", "open-repository", "menu", "activate", "section-menu", "merge-into-head"]);
 
 const filter = ref("");
 const collapsedSections = reactive(new Set());
@@ -150,6 +150,61 @@ function toggleSection(id) {
   collapsedSections.has(id) ? collapsedSections.delete(id) : collapsedSections.add(id);
 }
 
+// --- Dragging a branch onto the HEAD branch merges it --------------------------------
+
+// The name of the branch being dragged, and whether it's over the HEAD branch.
+const dragging = ref(null);
+const overHead = ref(false);
+
+const canDrag = (row) =>
+  !row.folder && ((row.key.startsWith("branch:") && !row.head) || row.key.startsWith("remote-branch:"));
+
+// What follows the pointer: the row's icon and name, rather than the web view's
+// snapshot of the whole row. It has to be on the page while dragging, so it sits
+// off-screen until the drag ends.
+let dragImage = null;
+
+function onDragStart(row, event) {
+  dragging.value = row.key.slice(row.key.indexOf(":") + 1);
+  event.dataTransfer.setData("text/plain", dragging.value);
+  event.dataTransfer.effectAllowed = "copy";
+
+  dragImage = document.createElement("div");
+  dragImage.className = "drag-image";
+  const icon = event.currentTarget.querySelector(".row-icon")?.cloneNode(true);
+  if (icon) dragImage.append(icon);
+  dragImage.append(row.label);
+  document.body.append(dragImage);
+  event.dataTransfer.setDragImage(dragImage, 14, dragImage.offsetHeight / 2);
+}
+
+function onDragEnd() {
+  dragging.value = null;
+  overHead.value = false;
+  dragImage?.remove();
+  dragImage = null;
+}
+
+// Only the HEAD branch accepts a drop, and not while a merge or rebase is waiting.
+function onDragOver(row, event) {
+  if (!row.head || !dragging.value || props.overview.operation) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  overHead.value = true;
+}
+
+function onDragLeave(row, event) {
+  if (row.head && !event.currentTarget.contains(event.relatedTarget)) overHead.value = false;
+}
+
+function onDrop(row, event) {
+  if (!row.head || !dragging.value) return;
+  event.preventDefault();
+  const name = dragging.value;
+  onDragEnd();
+  emit("merge-into-head", name);
+}
+
 function onRowClick(row) {
   if (row.folder && !query.value) {
     collapsedFolders.has(row.key) ? collapsedFolders.delete(row.key) : collapsedFolders.add(row.key);
@@ -182,9 +237,15 @@ function onRowClick(row) {
             v-for="row in section.rows"
             :key="row.key"
             class="row"
-            :class="{ selected: row.key === selected, current: row.current }"
+            :class="{ selected: row.key === selected, current: row.current, 'drop-target': row.head && overHead }"
             :style="{ paddingLeft: `${8 + row.depth * 18}px` }"
-            :title="row.title"
+            :title="row.head && dragging ? `Merge ${dragging} into ${row.label}` : row.title"
+            :draggable="canDrag(row)"
+            @dragstart="onDragStart(row, $event)"
+            @dragend="onDragEnd"
+            @dragover="onDragOver(row, $event)"
+            @dragleave="onDragLeave(row, $event)"
+            @drop="onDrop(row, $event)"
             @click="onRowClick(row)"
             @dblclick="emit('activate', row)"
             @contextmenu.prevent="
@@ -293,6 +354,17 @@ function onRowClick(row) {
   color: var(--text-primary);
   white-space: nowrap;
   cursor: default;
+}
+
+.row[draggable="true"] {
+  -webkit-user-drag: element;
+}
+
+/* The HEAD branch while a branch is dragged over it, ready to merge. */
+.row.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .row:hover {

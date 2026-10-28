@@ -84,13 +84,70 @@ pub async fn delete_branch(path: String, name: String, force: bool) -> Result<St
 
 /// Merges `branch` into the current branch.
 #[tauri::command]
-pub async fn merge(path: String, branch: String) -> Result<String, String> {
-    let output = git(&path, &["merge", "--no-edit", &branch], None).map_err(|e| stopped_or(&path, e))?;
-    Ok(if output.contains("Already up to date") {
-        format!("Already up to date with {branch}.")
+pub async fn merge(path: String, branch: String, options: Option<MergeOptions>) -> Result<String, String> {
+    let options = options.unwrap_or_default();
+    let mut args = vec!["merge"];
+    if options.autostash {
+        args.push("--autostash");
+    }
+    if options.squash {
+        args.push("--squash");
     } else {
-        format!("Merged {branch}.")
-    })
+        args.push("--no-edit");
+        if options.no_ff {
+            args.push("--no-ff");
+        }
+    }
+    args.push(&branch);
+
+    let output = git(&path, &args, None).map_err(|e| {
+        if options.squash { squash_conflict_or(&path, &branch, e) } else { stopped_or(&path, e) }
+    })?;
+    if output.contains("Already up to date") {
+        return Ok(format!("Already up to date with {branch}."));
+    }
+    if !options.squash {
+        return Ok(if output.contains("Fast-forward") {
+            format!("Fast-forwarded to {branch}.")
+        } else {
+            format!("Merged {branch}.")
+        });
+    }
+    if !options.commit.unwrap_or(true) {
+        return Ok(format!("Staged the changes from {branch}. Commit them when you're ready."));
+    }
+    // Git has written a message listing the squashed commits; commit with it.
+    git(&path, &["commit", "--no-edit"], None)?;
+    Ok(format!("Squashed {branch} into one commit."))
+}
+
+/// Choices from the Merge dialog. Without them, a plain `git merge`.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+pub struct MergeOptions {
+    /// Apply the branch's changes as one set of changes, not a merge.
+    squash: bool,
+    /// Make a merge commit even when the branch could simply move forward.
+    no_ff: bool,
+    /// With `squash`, whether to commit the changes too (the default) or only stage them.
+    commit: Option<bool>,
+    /// Set uncommitted changes aside while merging and put them back after.
+    autostash: bool,
+}
+
+/// A squash isn't a merge git tracks, so a conflicted one doesn't count as an
+/// operation in progress: there's nothing to continue or abort, just files to fix
+/// and commit.
+fn squash_conflict_or(path: &str, branch: &str, error: String) -> String {
+    let conflicts = open(path)
+        .and_then(|repo| repo.index().map_err(|e| e.message().to_string()))
+        .map(|index| index.conflicts().map(|c| c.count()).unwrap_or(0))
+        .unwrap_or(0);
+    match conflicts {
+        0 => error,
+        1 => format!("CONFLICT: Squashing {branch} conflicted in 1 file. Resolve it in the working copy, then commit."),
+        n => format!("CONFLICT: Squashing {branch} conflicted in {n} files. Resolve them in the working copy, then commit."),
+    }
 }
 
 /// Rebases the current branch onto `onto`.
@@ -310,7 +367,7 @@ mod tests {
         t.commit(&[("b.txt", Some("b\n"))], "Feature");
         run(checkout(t.path().into(), "branch".into(), main)).unwrap();
 
-        assert_eq!(run(merge(t.path().into(), "feature".into())).unwrap(), "Merged feature.");
+        assert_eq!(run(merge(t.path().into(), "feature".into(), None)).unwrap(), "Fast-forwarded to feature.");
         assert!(t.dir.join("b.txt").exists());
         assert_eq!(operation(&t.repo), None);
     }
@@ -319,7 +376,7 @@ mod tests {
     fn a_conflicted_merge_waits_and_can_be_aborted_or_finished() {
         let (t, _) = conflicting("merge-conflict");
 
-        let stopped = run(merge(t.path().into(), "theirs".into())).unwrap_err();
+        let stopped = run(merge(t.path().into(), "theirs".into(), None)).unwrap_err();
         assert!(stopped.starts_with("CONFLICT: The merge stopped because 1 file conflicted"), "{stopped}");
         assert_eq!(operation(&t.repo), Some("merge"));
 
@@ -327,7 +384,7 @@ mod tests {
         assert_eq!(operation(&t.repo), None);
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "ours\n");
 
-        run(merge(t.path().into(), "theirs".into())).unwrap_err();
+        run(merge(t.path().into(), "theirs".into(), None)).unwrap_err();
         std::fs::write(t.dir.join("a.txt"), "both\n").unwrap();
         git(t.path(), &["add", "a.txt"], None).unwrap();
         let finished = run(control_operation(t.path().into(), "continue".into())).unwrap();
@@ -420,5 +477,77 @@ mod tests {
         run(revert(t.path().into(), merge)).unwrap();
         assert!(!t.dir.join("f.txt").exists());
         assert!(t.dir.join("m.txt").exists());
+    }
+
+    /// A main branch with one commit and a "feature" branch one commit ahead of it.
+    fn feature_ahead(name: &str) -> (TempRepo, String) {
+        let t = TempRepo::new(name);
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        t.commit(&[("f.txt", Some("f\n"))], "Feature one");
+        t.commit(&[("g.txt", Some("g\n"))], "Feature two");
+        git(t.path(), &["switch", &main], None).unwrap();
+        (t, main)
+    }
+
+    fn options(json: &str) -> Option<MergeOptions> {
+        Some(serde_json::from_str(json).unwrap())
+    }
+
+    #[test]
+    fn merging_can_fast_forward_or_always_make_a_merge_commit() {
+        let (t, _) = feature_ahead("merge-ff");
+        assert_eq!(run(merge(t.path().into(), "feature".into(), None)).unwrap(), "Fast-forwarded to feature.");
+
+        let (t, _) = feature_ahead("merge-no-ff");
+        let message = run(merge(t.path().into(), "feature".into(), options(r#"{"no_ff":true}"#))).unwrap();
+        assert_eq!(message, "Merged feature.");
+        assert_eq!(t.repo.head().unwrap().peel_to_commit().unwrap().parent_count(), 2);
+    }
+
+    #[test]
+    fn squashing_makes_one_commit_or_stages_the_changes() {
+        let (t, _) = feature_ahead("merge-squash");
+        let before = t.head();
+        let message = run(merge(t.path().into(), "feature".into(), options(r#"{"squash":true}"#))).unwrap();
+        assert_eq!(message, "Squashed feature into one commit.");
+        let head = t.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!((head.parent_count(), head.parent_id(0).unwrap()), (1, before));
+        assert!(t.dir.join("f.txt").exists() && t.dir.join("g.txt").exists());
+
+        let (t, _) = feature_ahead("merge-squash-staged");
+        let before = t.head();
+        let message = run(merge(t.path().into(), "feature".into(), options(r#"{"squash":true,"commit":false}"#))).unwrap();
+        assert!(message.starts_with("Staged the changes from feature"), "{message}");
+        assert_eq!(t.head(), before);
+        let staged = git(t.path(), &["diff", "--cached", "--name-only"], None).unwrap();
+        assert_eq!(staged, "f.txt\ng.txt");
+        assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn a_conflicting_squash_leaves_files_to_resolve() {
+        let (t, _) = feature_ahead("merge-squash-conflict");
+        t.commit(&[("f.txt", Some("mine\n"))], "Mine");
+        let stopped = run(merge(t.path().into(), "feature".into(), options(r#"{"squash":true}"#))).unwrap_err();
+        assert!(stopped.starts_with("CONFLICT: Squashing feature conflicted in 1 file."), "{stopped}");
+    }
+
+    #[test]
+    fn merging_with_uncommitted_changes_set_aside() {
+        let t = TempRepo::new("merge-autostash");
+        t.commit(&[("a.txt", Some("1\n2\n3\n4\n5\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        t.commit(&[("a.txt", Some("one\n2\n3\n4\n5\n"))], "Feature");
+        git(t.path(), &["switch", &main], None).unwrap();
+        // An uncommitted edit to the same file, on a different line.
+        t.write(&[("a.txt", Some("1\n2\n3\n4\nfive\n"))]);
+
+        let refused = run(merge(t.path().into(), "feature".into(), None)).unwrap_err();
+        assert!(refused.contains("would be overwritten"), "{refused}");
+        run(merge(t.path().into(), "feature".into(), options(r#"{"autostash":true}"#))).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "one\n2\n3\n4\nfive\n");
     }
 }

@@ -103,3 +103,20 @@ export function closeCloneDialog(values) {
   cloneDialog.value?.resolve(values);
   cloneDialog.value = null;
 }
+
+export const mergeDialog = shallowRef(null);
+
+/**
+ * Shows the Merge dialog and resolves to { branch, options }, or null if cancelled.
+ * options: { head, branch, branches, remoteBranches, tags }
+ */
+export function openMergeDialog(options) {
+  return new Promise((resolve) => {
+    mergeDialog.value = { ...options, resolve };
+  });
+}
+
+export function closeMergeDialog(values) {
+  mergeDialog.value?.resolve(values);
+  mergeDialog.value = null;
+}

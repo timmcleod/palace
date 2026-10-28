@@ -238,6 +238,29 @@ textarea,
   color: var(--text-primary);
 }
 
+/* The image that follows the pointer while dragging a branch (see Sidebar.vue). */
+.drag-image {
+  position: fixed;
+  top: -100px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--content-bg);
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.drag-image svg {
+  flex-shrink: 0;
+  color: var(--icon);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
 }

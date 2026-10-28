@@ -29,6 +29,7 @@ import GitHubView from "./components/GitHubView.vue";
 import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
 import FormDialog from "./components/FormDialog.vue";
+import MergeDialog from "./components/MergeDialog.vue";
 import PullDialog from "./components/PullDialog.vue";
 import ResetDialog from "./components/ResetDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
@@ -52,6 +53,7 @@ import {
   cloneDialog,
   contextMenu,
   formDialog,
+  mergeDialog,
   openCloneDialog,
   openMenu,
   pullDialog,
@@ -450,6 +452,7 @@ function startResize(event, pane, min, max) {
       @menu="sidebarMenu"
       @activate="sidebarActivate"
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
+      @merge-into-head="(name) => actions.merge(name)"
     />
 
     <section v-if="isSettings" class="pane settings-pane">
@@ -692,6 +695,7 @@ function startResize(event, pane, min, max) {
   <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
   <TagDialog v-if="tagDialog" :dialog="tagDialog" />
   <PullDialog v-if="pullDialog" :dialog="pullDialog" />
+  <MergeDialog v-if="mergeDialog" :dialog="mergeDialog" />
   <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
   <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
   <ContextMenu v-if="contextMenu" :menu="contextMenu" />
