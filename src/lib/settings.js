@@ -15,6 +15,8 @@ const DEFAULTS = {
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).
   cloneFolder: null,
+  // Look for new versions of Palace on GitHub at startup and daily.
+  checkForUpdates: true,
 };
 
 export const settings = reactive({ ...DEFAULTS, ...readJson(KEY, {}) });

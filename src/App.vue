@@ -41,6 +41,7 @@ import SettingsView from "./components/SettingsView.vue";
 import Sidebar from "./components/Sidebar.vue";
 import TagDialog from "./components/TagDialog.vue";
 import TreeView from "./components/TreeView.vue";
+import UpdateNotice from "./components/UpdateNotice.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import {
@@ -856,6 +857,7 @@ function startResize(event, pane, min, max) {
   <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
   <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
   <ConfirmDialog v-if="confirmDialog" :dialog="confirmDialog" />
+  <UpdateNotice />
   <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
   <RemoteStatus

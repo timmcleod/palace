@@ -6,6 +6,7 @@ import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
 import { cloneFolder } from "../lib/clone.js";
+import { checkForUpdates, updates } from "../lib/updates.js";
 import { open } from "@tauri-apps/plugin-dialog";
 
 const props = defineProps({
@@ -64,6 +65,30 @@ watch(() => settings.cloneFolder, async () => (cloneInto.value = await cloneFold
 async function chooseCloneFolder() {
   const folder = await open({ directory: true, multiple: false, title: "Clone Into", defaultPath: cloneInto.value });
   if (folder) settings.cloneFolder = folder;
+}
+
+// --- Updates ---------------------------------------------------------------------
+
+const updateStatus = computed(() => {
+  switch (updates.state) {
+    case "checking":
+      return "Checking…";
+    case "none":
+      return "Palace is up to date.";
+    case "available":
+      return `Palace ${updates.version} is available.`;
+    case "installing":
+      return `Installing Palace ${updates.version}…`;
+    case "error":
+      return `Couldn't check for updates: ${updates.error}`;
+    default:
+      return "";
+  }
+});
+
+function checkNow() {
+  updates.dismissed = false;
+  checkForUpdates();
 }
 
 const THEMES = [
@@ -132,6 +157,22 @@ const TAB_SIZES = [2, 4, 8];
               each clone.
             </span>
           </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Updates</h2>
+        <p class="note">You have Palace {{ updates.current || "…" }}.</p>
+        <label class="choice">
+          <input v-model="settings.checkForUpdates" type="checkbox" />
+          Check for updates automatically
+        </label>
+        <p class="note indent">When Palace starts, then once a day. Updates are installed only when you say so.</p>
+        <div class="row update-row">
+          <button class="secondary-button" :disabled="updates.state === 'checking' || updates.state === 'installing'" @click="checkNow">
+            Check Now
+          </button>
+          <span :class="updates.state === 'error' ? 'update-error' : 'dim'">{{ updateStatus }}</span>
         </div>
       </section>
 
@@ -401,6 +442,16 @@ input[type="text"]:focus {
 
 .small-note {
   font-size: 12.5px;
+}
+
+.update-row {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.update-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .account {

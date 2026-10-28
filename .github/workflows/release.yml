@@ -55,12 +55,19 @@ jobs:
         if: env.IS_RELEASE == 'true'
         run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
 
+      # Releases also carry signed update files and a latest.json describing them,
+      # which installed copies of Palace check for updates. The signing key lives in
+      # the repository's secrets; Palace only installs updates signed with it.
       - name: Build and publish the release
         if: env.IS_RELEASE == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          args: --config src-tauri/tauri.release.conf.json
+          includeUpdaterJson: true
           tagName: ${{ github.ref_name }}
           releaseName: Palace ${{ github.ref_name }}
           releaseBody: |

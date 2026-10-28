@@ -50,5 +50,13 @@
         ]
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxRDQwNTZEQkYyNkRCQTYKUldTbTJ5YS9iUVhVc2E0RlhRcEVqNjdZbEhCalpCRlROa0tweFZRajN2WmpCbmw1RDZSY0JoRWsK",
+      "endpoints": [
+        "https://github.com/timmcleod/palace/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
