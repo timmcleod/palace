@@ -26,7 +26,12 @@ let files = null;
 const loaded = ref(0);
 watch(
   () => [props.path, props.refreshKey],
-  () => (files = null),
+  () => {
+    files = null;
+    loaded.value++;
+    // Mid-search, load the new list straight away rather than on the next focus.
+    if (open.value) ensureFiles();
+  },
 );
 
 async function ensureFiles() {
@@ -73,7 +78,7 @@ function inOrder(text, letters) {
 watch(results, () => (active.value = 0));
 
 function place() {
-  const rect = input.value.closest(".search").getBoundingClientRect();
+  const rect = input.value.closest(".toolbar-search").getBoundingClientRect();
   position.value = { top: `${rect.bottom + 6}px`, right: `${window.innerWidth - rect.right}px` };
 }
 
@@ -81,6 +86,13 @@ async function onFocus() {
   place();
   open.value = true;
   await ensureFiles();
+}
+
+// Typing loads the list too, in case focus arrived without a focus event.
+function onInput() {
+  if (!open.value) place();
+  open.value = true;
+  ensureFiles();
 }
 
 function onKeydown(event) {
@@ -125,7 +137,7 @@ function pick(result) {
         spellcheck="false"
         @focus="onFocus"
         @blur="open = false"
-        @input="open = true"
+        @input="onInput"
         @keydown="onKeydown"
       />
     </label>

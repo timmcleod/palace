@@ -9,7 +9,6 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
-  History,
   ListFilter,
   Package,
   Plus,
@@ -43,7 +42,6 @@ const workspaceRows = computed(() => [
     depth: 0,
     count: props.overview.changes || null,
   },
-  { key: "workspace:history", label: "History", icon: History, depth: 0 },
   {
     key: "workspace:stashes",
     label: "Stashes",

@@ -95,7 +95,7 @@ const detailCommit = computed(() => {
 function showFileHistory(file) {
   fileFilter.value = file;
   selectedCommit.value = null;
-  if (isWorkingCopy.value || isSettings.value) selected.value = "workspace:history";
+  if (isWorkingCopy.value || isSettings.value || isStashes.value) selected.value = headHistoryKey(overview.value);
 }
 
 // --- Running git operations ------------------------------------------------------
@@ -225,7 +225,7 @@ async function loadRepository(path, { quiet = false } = {}) {
     const data = await invoke("repo_overview", { path });
     if (seq !== loadSeq) return;
     if (data.path !== overview.value?.path) {
-      selected.value = "workspace:history";
+      selected.value = headHistoryKey(data);
       historyRef.value = null;
       selectedCommit.value = null;
       workingFile.value = null;
@@ -306,6 +306,20 @@ const subtitle = computed(() => {
 // HEAD. A stash opens in the Stashes view. Other items (folders, Settings, …) leave
 // the history pane as it is.
 const HISTORY_KINDS = ["branch", "remote-branch", "tag"];
+
+// The current branch's history is shown by selecting that branch in the sidebar.
+// "workspace:history" is HEAD's history without a sidebar row, for a detached HEAD.
+function headHistoryKey(o) {
+  return o?.head.branch ? `branch:${o.head.branch}` : "workspace:history";
+}
+
+// Checking out another branch while looking at the current one follows it there.
+watch(
+  () => overview.value?.head.branch,
+  (branch, previous) => {
+    if (previous && selected.value === `branch:${previous}`) selected.value = headHistoryKey(overview.value);
+  },
+);
 
 watch(selected, (key) => {
   const [kind, name] = splitKey(key);
