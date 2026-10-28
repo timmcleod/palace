@@ -6,6 +6,7 @@ mod config;
 mod git;
 mod history;
 mod remote;
+mod reset;
 mod stash;
 mod tag;
 mod tree;
@@ -48,6 +49,8 @@ pub fn run() {
             branch::merge,
             branch::rebase,
             branch::control_operation,
+            reset::reset,
+            reset::reset_preview,
             stash::stash_save,
             stash::stash_apply,
             stash::stash_drop,

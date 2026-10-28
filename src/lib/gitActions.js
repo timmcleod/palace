@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { openForm, openPullDialog, openTagDialog } from "./overlays.js";
+import { openForm, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 
 // The Pull dialog's last choices, offered again next time.
@@ -175,16 +175,23 @@ export function useGitActions({ overview, run }) {
     return run(titles, "pull", { options: values });
   }
 
-  async function createTag(revision = null) {
+  // Everything a revision field can offer, the current branch first.
+  function revisionChoices() {
     const o = overview.value;
-    const head = o.branches.find((b) => b.is_head)?.name;
-    const values = await openTagDialog({
-      path: o.path,
-      revision: revision ?? head ?? "HEAD",
-      // The current branch first, since it's the usual thing to tag.
+    const head = current();
+    return {
       branches: [head, ...o.branches.map((b) => b.name).filter((n) => n !== head)].filter(Boolean),
       remoteBranches: o.remotes.flatMap((r) => r.branches.map((b) => `${r.name}/${b}`)),
       tags: o.tags,
+    };
+  }
+
+  async function createTag(revision = null) {
+    const o = overview.value;
+    const values = await openTagDialog({
+      path: o.path,
+      revision: revision ?? current() ?? "HEAD",
+      ...revisionChoices(),
       hasRemote: o.remotes.length > 0,
     });
     if (!values) return;
@@ -194,6 +201,22 @@ export function useGitActions({ overview, run }) {
       message: values.message || null,
     });
     if (!error && values.push) await pushTag(values.name);
+  }
+
+  // Moves HEAD, and the branch it's on, to another commit.
+  async function resetTo(revision) {
+    const values = await openResetDialog({
+      path: overview.value.path,
+      revision,
+      branch: current(),
+      upstream: headBranchInfo()?.upstream ?? null,
+      ...revisionChoices(),
+    });
+    if (!values) return;
+    return run(["Resetting…", "Reset", "Couldn't reset"], "reset", {
+      revision: values.revision,
+      keepChanges: values.keepChanges,
+    });
   }
 
   function pushTag(name) {
@@ -289,6 +312,8 @@ export function useGitActions({ overview, run }) {
       { label: "Check Out This Commit", action: () => checkout("commit", commit.id) },
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
       { label: "New Tag Here…", action: () => createTag(commit.short_id) },
+      { separator: true },
+      { label: `Reset HEAD to “${commit.short_id}”…`, action: () => resetTo(commit.id), disabled: midOperation() },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },
     ];

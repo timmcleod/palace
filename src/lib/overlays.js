@@ -69,3 +69,20 @@ export function closePullDialog(values) {
   pullDialog.value?.resolve(values);
   pullDialog.value = null;
 }
+
+export const resetDialog = shallowRef(null);
+
+/**
+ * Shows the Reset dialog and resolves to { revision, keepChanges }, or null if
+ * cancelled. options: { path, revision, branch, upstream, branches, tags, remoteBranches }
+ */
+export function openResetDialog(options) {
+  return new Promise((resolve) => {
+    resetDialog.value = { ...options, resolve };
+  });
+}
+
+export function closeResetDialog(values) {
+  resetDialog.value?.resolve(values);
+  resetDialog.value = null;
+}
