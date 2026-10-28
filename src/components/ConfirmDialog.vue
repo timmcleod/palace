@@ -16,7 +16,7 @@ const confirmButton = ref(null);
 // For something that can't be undone, Enter cancels rather than going ahead.
 onMounted(async () => {
   await nextTick();
-  (props.dialog.danger ? cancelButton : confirmButton).value?.focus();
+  (props.dialog.danger && cancelButton.value ? cancelButton : confirmButton).value?.focus();
 });
 
 function onKeydown(event) {
@@ -36,7 +36,9 @@ function onKeydown(event) {
       </header>
 
       <div class="buttons">
-        <button ref="cancelButton" type="button" class="secondary-button" @click="closeConfirm(false)">Cancel</button>
+        <button v-if="dialog.cancel !== false" ref="cancelButton" type="button" class="secondary-button" @click="closeConfirm(false)">
+          Cancel
+        </button>
         <button ref="confirmButton" type="submit" class="primary-button" :class="{ danger: dialog.danger }">
           {{ dialog.confirmLabel }}
         </button>

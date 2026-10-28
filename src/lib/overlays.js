@@ -8,7 +8,7 @@ export const formDialog = shallowRef(null);
 /**
  * Shows a modal form and resolves to its values, or null if cancelled.
  *
- * fields: [{ key, label, type: "text" | "password" | "select" | "checkbox", value, options, placeholder }]
+ * fields: [{ key, label, type: "text" | "password" | "textarea" | "select" | "checkbox", value, options, placeholder }]
  */
 export function openForm({ title, message = "", fields = [], confirmLabel = "OK", danger = false }) {
   return new Promise((resolve) => {
@@ -129,10 +129,15 @@ export const confirmDialog = shallowRef(null);
  * `message` starts a new paragraph. `danger` marks something that can't be undone:
  * the button turns red, and Enter cancels.
  */
-export function askConfirm({ title, message, confirmLabel = "OK", danger = false }) {
+export function askConfirm({ title, message, confirmLabel = "OK", danger = false, cancel = true }) {
   return new Promise((resolve) => {
-    confirmDialog.value = { title, message, confirmLabel, danger, resolve };
+    confirmDialog.value = { title, message, confirmLabel, danger, cancel, resolve };
   });
+}
+
+/** Says something, with only an OK button. */
+export function tell(title, message) {
+  return askConfirm({ title, message, cancel: false });
 }
 
 export function closeConfirm(ok) {

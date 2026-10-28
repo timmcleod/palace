@@ -566,6 +566,15 @@ watch(selected, (key) => {
   }
 });
 
+// Commits can be squashed and reordered in the current branch's own full history,
+// while nothing else is in progress.
+const rewritable = computed(() => {
+  const o = overview.value;
+  const r = historyRef.value;
+  const own = !r || (r.kind === "branch" && r.name === o?.head.branch);
+  return !!(o?.head.branch && own && !fileFilter.value && !o.operation);
+});
+
 const historyRev = computed(() => {
   const r = historyRef.value;
   if (!r) return null;
@@ -724,8 +733,11 @@ function startResize(event, pane, min, max) {
           :file="fileFilter"
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
+          :editable="rewritable"
           @select="selectedCommit = $event"
           @menu="(commit, event) => openMenu(event, actions.commitMenu(commit))"
+          @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable))"
+          @move="actions.moveCommit"
         />
       </div>
     </section>

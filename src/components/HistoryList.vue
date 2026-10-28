@@ -12,8 +12,13 @@ const props = defineProps({
   file: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
   selectedId: { type: String, default: null },
+  // Whether commits can be dragged to reorder them: only in the current branch's own
+  // history.
+  editable: { type: Boolean, default: false },
 });
-const emit = defineEmits(["select", "menu"]);
+// "menu-many" is the context menu for several selected commits; "move" asks to move a
+// dragged commit above or below another.
+const emit = defineEmits(["select", "menu", "menu-many", "move"]);
 
 const ROW_HEIGHT = 46;
 const HEADER_HEIGHT = 34;
@@ -50,6 +55,7 @@ async function load({ resetScroll }) {
       scrollTop.value = 0;
       // Showing another branch's history keeps the selected commit in view, if it's there.
       pendingReveal = props.selectedId;
+      chosen.clear();
     }
     selectedIndex = -1;
   } catch (e) {
@@ -164,6 +170,127 @@ function select(index) {
   emit("select", commit);
 }
 
+// --- Selecting several commits ---------------------------------------------------
+// Ctrl+click adds or removes a commit, Shift+click selects a range. The details show
+// the commit clicked last; right-clicking the selection offers what works on several.
+
+// Selected commits beyond the one shown, by id, with their places in the list.
+const chosen = shallowReactive(new Map());
+
+function onClick(index, event) {
+  const commit = commitAt(index);
+  if (!commit) return;
+  if (event.shiftKey && selectedIndex >= 0) {
+    const [from, to] = selectedIndex < index ? [selectedIndex, index] : [index, selectedIndex];
+    chosen.clear();
+    for (let i = from; i <= to; i++) {
+      const c = commitAt(i);
+      if (c) chosen.set(c.id, { commit: c, index: i });
+    }
+    return;
+  }
+  if (event.ctrlKey || event.metaKey) {
+    // The commit shown so far joins the selection the first time.
+    const shown = commitAt(selectedIndex);
+    if (!chosen.size && shown && shown.id !== commit.id) chosen.set(shown.id, { commit: shown, index: selectedIndex });
+    if (chosen.has(commit.id)) {
+      chosen.delete(commit.id);
+      return;
+    }
+    chosen.set(commit.id, { commit, index });
+    select(index);
+    return;
+  }
+  chosen.clear();
+  select(index);
+}
+
+const isChosen = (commit) => commit && (commit.id === props.selectedId || chosen.has(commit.id));
+
+function onContextMenu(index, event) {
+  const commit = commitAt(index);
+  if (!commit) return;
+  if (chosen.size > 1 && chosen.has(commit.id)) {
+    // Newest first, as listed.
+    const many = [...chosen.values()].sort((a, b) => a.index - b.index);
+    emit("menu-many", many, event);
+    return;
+  }
+  chosen.clear();
+  select(index);
+  emit("menu", commit, event);
+}
+
+// --- Dragging to reorder ---------------------------------------------------------
+
+const DRAG_EDGE = 40;
+let dragged = null;
+// Where a dropped commit would go: { index, above }.
+const dropAt = ref(null);
+
+const canDrag = (commit) => props.editable && commit && !commit.incoming;
+
+function onDragStart(index, event) {
+  const commit = commitAt(index);
+  if (!canDrag(commit)) {
+    event.preventDefault();
+    return;
+  }
+  dragged = { commit, index };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", commit.short_id);
+  // A compact image of what's being moved, like a branch dragged in the sidebar.
+  const image = document.createElement("div");
+  image.className = "drag-image";
+  image.textContent = `${commit.short_id}  ${commit.summary}`;
+  document.body.append(image);
+  event.dataTransfer.setDragImage(image, 14, image.offsetHeight / 2);
+  dragged.image = image;
+}
+
+function onDragOver(index, event) {
+  const target = commitAt(index);
+  if (!dragged || !canDrag(target)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  const rect = event.currentTarget.getBoundingClientRect();
+  const above = event.clientY < rect.top + rect.height / 2;
+  // Dropping a commit right where it is changes nothing.
+  const same = target.id === dragged.commit.id || (above ? index === dragged.index + 1 : index === dragged.index - 1);
+  dropAt.value = same ? null : { index, above };
+}
+
+// While dragging near the top or bottom of the list, it scrolls.
+function onViewportDragOver(event) {
+  if (!dragged) return;
+  const rect = viewport.value.getBoundingClientRect();
+  if (event.clientY < rect.top + DRAG_EDGE) viewport.value.scrollTop -= 12;
+  else if (event.clientY > rect.bottom - DRAG_EDGE) viewport.value.scrollTop += 12;
+}
+
+function onDrop(index, event) {
+  if (!dragged || !dropAt.value) return onDragEnd();
+  event.preventDefault();
+  const target = { commit: commitAt(index), index };
+  const move = { commit: dragged.commit, index: dragged.index };
+  const above = dropAt.value.above;
+  onDragEnd();
+  emit("move", move, target, above ? "above" : "below");
+}
+
+function onDragEnd() {
+  dragged?.image?.remove();
+  dragged = null;
+  dropAt.value = null;
+}
+
+// The line showing where a dragged commit would land.
+const dropLine = computed(() => {
+  if (!dropAt.value) return null;
+  const top = layout.value.offsets[layout.value.itemOfCommit[dropAt.value.index]];
+  return top + (dropAt.value.above ? 0 : ROW_HEIGHT);
+});
+
 // A commit selected from outside the list, by going back to it say, is scrolled into
 // view: straight away, or once the history it's in has loaded.
 let pickedHere = null;
@@ -196,6 +323,7 @@ function onKeydown(event) {
   if (!total || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
   event.preventDefault();
 
+  chosen.clear();
   const current = selectedIndex >= 0 ? selectedIndex : -1;
   const next = Math.min(total - 1, Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)));
   scrollIntoView(next);
@@ -255,8 +383,17 @@ const MAX_REFS = 3;
     <p>No commits yet.</p>
   </div>
 
-  <div v-show="!error && summary?.total" ref="viewport" class="viewport" tabindex="0" @scroll="onScroll" @keydown="onKeydown">
+  <div
+    v-show="!error && summary?.total"
+    ref="viewport"
+    class="viewport"
+    tabindex="0"
+    @scroll="onScroll"
+    @keydown="onKeydown"
+    @dragover="onViewportDragOver"
+  >
     <div class="spacer" :style="{ height: `${layout.height}px` }">
+      <div v-if="dropLine != null" class="drop-line" :style="{ top: `${dropLine - 1}px` }" />
       <template v-for="item in visible" :key="item.key">
         <div v-if="item.header" class="month" :style="{ top: `${item.top}px`, height: `${HEADER_HEIGHT}px` }">
           <CommitGraph
@@ -272,14 +409,16 @@ const MAX_REFS = 3;
         <div
           v-else
           class="commit"
-          :class="{ selected: item.commit && item.commit.id === selectedId, incoming: item.commit?.incoming }"
+          :class="{ selected: isChosen(item.commit), incoming: item.commit?.incoming }"
           :title="item.commit?.incoming ? 'Fetched, not pulled yet' : null"
           :style="{ top: `${item.top}px`, height: `${ROW_HEIGHT}px` }"
-          @click="select(item.index)"
-          @contextmenu.prevent="
-            select(item.index);
-            item.commit && emit('menu', item.commit, $event);
-          "
+          :draggable="canDrag(item.commit)"
+          @click="onClick(item.index, $event)"
+          @contextmenu.prevent="onContextMenu(item.index, $event)"
+          @dragstart="onDragStart(item.index, $event)"
+          @dragover="onDragOver(item.index, $event)"
+          @drop="onDrop(item.index, $event)"
+          @dragend="onDragEnd"
         >
           <template v-if="item.commit">
             <CommitGraph class="graph" :graph="item.commit.graph" :width="graphWidth" :height="ROW_HEIGHT" />
@@ -357,6 +496,22 @@ const MAX_REFS = 3;
 
 .commit.selected {
   background: var(--row-selected);
+}
+
+.commit[draggable="true"] {
+  -webkit-user-drag: element;
+}
+
+/* Where a dragged commit would land. */
+.drop-line {
+  position: absolute;
+  z-index: 2;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* Fetched from the remote but not pulled into the branch yet. */

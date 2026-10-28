@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm, openForm, openMergeDialog, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
+import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 
 // The Pull dialog's last choices, offered again next time.
@@ -218,6 +218,93 @@ export function useGitActions({ overview, run }) {
       revision: values.revision,
       keepChanges: values.keepChanges,
     });
+  }
+
+  // --- Rewriting the current branch ---------------------------------------------------
+  // Squashing and moving commits rebase the branch from the oldest commit involved.
+  // `entries` are { commit, index } from the history list, where a larger index is older.
+
+  async function rewritePlan(entries, title) {
+    const oldest = entries.reduce((a, b) => (b.index > a.index ? b : a));
+    try {
+      return await invoke("rebase_plan", { path: overview.value.path, from: oldest.commit.id });
+    } catch (e) {
+      await tell(title, String(e));
+      return null;
+    }
+  }
+
+  const pushedNote = (plan) =>
+    plan.pushed ? `\n\nSome of these commits are already on ${plan.upstream}, so you'll need to force push afterwards.` : "";
+
+  // Combines several commits into one, with a message made from theirs.
+  async function squashCommits(entries) {
+    const title = `Squash ${entries.length} Commits`;
+    const plan = await rewritePlan(entries, "Can't Squash These Commits");
+    if (!plan) return;
+    const ids = new Set(entries.map((e) => e.commit.id));
+    const squashed = plan.commits.filter((c) => ids.has(c.id));
+    if (squashed.length !== ids.size) {
+      await tell("Can't Squash These Commits", `Only commits on ${plan.branch} can be squashed here.`);
+      return;
+    }
+
+    const values = await openForm({
+      title,
+      message: `They become one commit, where the oldest of them is now.${pushedNote(plan)}`,
+      fields: [{ key: "message", label: "Message", type: "textarea", value: squashed.map((c) => c.message).join("\n\n") }],
+      confirmLabel: "Squash",
+    });
+    if (!values) return;
+
+    // The oldest keeps its place with the new message; the others fold into it, and
+    // every other commit keeps its order.
+    const [first, ...rest] = squashed;
+    const steps = [
+      ...plan.commits
+        .filter((c) => c.id === first.id)
+        .map((c) => ({ id: c.id, action: "pick", message: values.message })),
+      ...rest.map((c) => ({ id: c.id, action: "fixup", message: null })),
+      ...plan.commits.filter((c) => !ids.has(c.id)).map((c) => ({ id: c.id, action: "pick", message: null })),
+    ];
+    await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps });
+  }
+
+  // Moves a commit to just above (newer than) or below (older than) another.
+  async function moveCommit(moving, target, position) {
+    const plan = await rewritePlan([moving, target], "Can't Move This Commit");
+    if (!plan) return;
+    const order = plan.commits.map((c) => c.id).filter((id) => id !== moving.commit.id);
+    const at = order.indexOf(target.commit.id);
+    if (at < 0 || !plan.commits.some((c) => c.id === moving.commit.id)) {
+      await tell("Can't Move This Commit", `Only commits on ${plan.branch} can be moved here.`);
+      return;
+    }
+    // The list is oldest first: above in the history means after.
+    order.splice(position === "above" ? at + 1 : at, 0, moving.commit.id);
+
+    const subject = (commit) => `“${commit.summary}”`;
+    const ok = await askConfirm({
+      title: "Move Commit",
+      message: `Move ${subject(moving.commit)} ${position} ${subject(target.commit)}?\n\nThis rewrites ${plan.commits.length} commits on ${plan.branch}, giving them new hashes. If the changes depend on each other, git may stop for you to resolve conflicts.${pushedNote(plan)}`,
+      confirmLabel: "Move",
+    });
+    if (!ok) return;
+    const steps = order.map((id) => ({ id, action: "pick", message: null }));
+    await run(["Moving commit…", "Moved commit", "Couldn't move the commit"], "rebase_interactive", { base: plan.base, steps });
+  }
+
+  // The menu for several selected commits.
+  function commitsMenu(entries, rewritable) {
+    return [
+      {
+        label: `Squash ${entries.length} Commits…`,
+        action: () => squashCommits(entries),
+        disabled: !rewritable || midOperation(),
+      },
+      { separator: true },
+      { label: "Copy Commit Hashes", action: () => navigator.clipboard.writeText(entries.map((e) => e.commit.id).join("\n")) },
+    ];
   }
 
   // Copies a commit's changes onto the current branch as a new commit.
@@ -451,6 +538,8 @@ export function useGitActions({ overview, run }) {
   return {
     checkout,
     merge,
+    commitsMenu,
+    moveCommit,
     addMenu,
     remoteMenu,
     pull,

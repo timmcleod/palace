@@ -43,6 +43,7 @@ onMounted(async () => {
               {{ option.label ?? option }}
             </option>
           </select>
+          <textarea v-else-if="field.type === 'textarea'" v-model="values[field.key]" rows="8" spellcheck="true" />
           <input
             v-else
             v-model="values[field.key]"
@@ -109,6 +110,7 @@ h2 {
 }
 
 .field input,
+.field textarea,
 .field select {
   padding: 7px 10px;
   border: 1px solid var(--border);
@@ -121,6 +123,7 @@ h2 {
 }
 
 .field input:focus,
+.field textarea:focus,
 .field select:focus {
   border-color: var(--accent);
 }
@@ -145,5 +148,11 @@ h2 {
 
 .danger {
   background: var(--danger);
+}
+
+.field textarea {
+  font-family: ui-monospace, "Ubuntu Mono", monospace;
+  font-size: 13px;
+  resize: vertical;
 }
 </style>
