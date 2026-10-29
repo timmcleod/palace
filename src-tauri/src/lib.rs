@@ -7,6 +7,7 @@ mod config;
 mod git;
 mod github;
 mod history;
+mod open;
 mod rebase;
 mod remote;
 mod reset;
@@ -77,6 +78,9 @@ pub fn run() {
             tag::describe_revision,
             undo::ref_snapshot,
             undo::restore_refs,
+            open::open_folder,
+            open::show_in_folder,
+            open::open_terminal,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,

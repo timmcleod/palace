@@ -3,7 +3,7 @@ import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { confirmDiscard } from "../lib/confirm.js";
-import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
+import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -196,6 +196,10 @@ function onRowMenu(file, event) {
     { label: `Discard ${what}…`, action: () => discard(list), disabled: busy.value, danger: true },
     { separator: true },
     list.length === 1 && { label: "Open in Editor", action: () => invoke("open_in_editor", { path: props.path, file: file.path }) },
+    list.length === 1 && {
+      label: "Show in Files",
+      action: () => invoke("show_in_folder", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Show the File", String(e))),
+    },
     {
       label: list.length === 1 ? "Copy Path" : "Copy Paths",
       action: () => navigator.clipboard.writeText(list.map((f) => f.path).join("\n")),

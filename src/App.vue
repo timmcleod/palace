@@ -65,6 +65,7 @@ import {
   pullDialog,
   resetDialog,
   tagDialog,
+  tell,
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
@@ -316,6 +317,12 @@ function onNavKeydown(event) {
     event.preventDefault();
     if (key === "y" || event.shiftKey) redo();
     else undo();
+    return;
+  }
+  // Ctrl+Shift+O opens the repository's folder.
+  if (event.ctrlKey && event.shiftKey && !event.altKey && key === "o" && overview.value && !dialogOpen()) {
+    event.preventDefault();
+    openOutside("open_folder", "Couldn't Open the Folder");
     return;
   }
   // Ctrl+F goes to the toolbar search.
@@ -642,10 +649,18 @@ homeDir()
   .then((dir) => (home.value = dir))
   .catch(() => {});
 
+// Opens the repository in the file manager or a terminal, saying why if it can't.
+function openOutside(command, failed) {
+  invoke(command, { path: overview.value.path }).catch((e) => tell(failed, String(e)));
+}
+
 function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
+    current && { label: "Open in Files", detail: "Ctrl+Shift+O", action: () => openOutside("open_folder", "Couldn't Open the Folder") },
+    current && { label: "Open in Terminal", action: () => openOutside("open_terminal", "Couldn't Open a Terminal") },
+    current && { separator: true },
     ...recents.value.map((repo) => ({
       label: repo.name,
       detail: tidy(repo.path),
