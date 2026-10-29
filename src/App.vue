@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -546,16 +545,6 @@ async function checkGit() {
 }
 
 onMounted(checkGit);
-
-watch(
-  () => overview.value?.name,
-  (name) => {
-    getCurrentWindow()
-      .setTitle(name ? `${name} — Palace` : "Palace")
-      .catch(() => {});
-  },
-  { immediate: true },
-);
 
 const subtitle = computed(() => {
   const o = overview.value;
