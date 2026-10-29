@@ -363,6 +363,11 @@ function onRowClick(row, event) {
   flex-shrink: 0;
 }
 
+/* The macOS window buttons sit at its left end. */
+:root[data-title-bar="overlay"] .sidebar-toolbar {
+  padding-left: 82px;
+}
+
 .sidebar-scroll {
   flex: 1;
   overflow-y: auto;

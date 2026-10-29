@@ -70,7 +70,7 @@ import {
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
-import { commandKey, fileManager, shortcut } from "./lib/platform.js";
+import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -882,6 +882,7 @@ function startResize(event, pane, min, max) {
 </script>
 
 <template>
+  <div v-if="isMac && (gitMissing || !overview)" class="title-strip" />
   <GitMissing v-if="gitMissing" :status="gitStatus" :checking="checkingGit" @recheck="checkGit" />
 
   <div
@@ -1474,6 +1475,21 @@ function startResize(event, pane, min, max) {
 .github-page {
   display: flex;
   height: 100vh;
+}
+
+/* Below the macOS window buttons and the strip that drags the window. */
+:root[data-title-bar="overlay"] .github-page {
+  box-sizing: border-box;
+  padding-top: 28px;
+}
+
+.title-strip {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 28px;
 }
 
 .welcome-icon {

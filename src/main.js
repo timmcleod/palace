@@ -3,6 +3,7 @@ import App from "./App.vue";
 import "./styles.css";
 // Applies the theme before the first paint.
 import "./lib/settings.js";
+import "./lib/titleBar.js";
 
 // Right-clicking where Palace has no menu of its own would show the web view's (Back,
 // Reload, Inspect Element). Keep it only where it's useful: in text fields, for Cut,
