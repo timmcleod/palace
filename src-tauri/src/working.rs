@@ -5,7 +5,7 @@
 //! so hooks, signing and the user's git config apply exactly as they do in a terminal.
 
 use crate::cli::git;
-use crate::commit::{FileDiff, file_diff_from_patch};
+use crate::commit::{FileDiff, file_diff_at};
 use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Patch, Repository, StatusOptions, Tree};
 use serde::Serialize;
 use std::path::Path;
@@ -223,7 +223,7 @@ fn read_working_diff(
     let repo = Repository::discover(path)?;
     let diff = file_diff(&repo, file, old_path, staged)?;
     match delta_index(&diff, file) {
-        Some(index) => file_diff_from_patch(Patch::from_diff(&diff, index)?, max_lines),
+        Some(index) => file_diff_at(&repo, &diff, index, max_lines),
         None => Ok(FileDiff::unchanged()),
     }
 }
@@ -588,6 +588,23 @@ mod tests {
 
     fn statuses(t: &TempRepo) -> Vec<(String, Option<&'static str>, Option<&'static str>)> {
         read_status(&t.repo).unwrap().into_iter().map(|f| (f.path, f.staged, f.unstaged)).collect()
+    }
+
+    #[test]
+    fn image_diffs_carry_both_versions() {
+        let t = TempRepo::new("image-diff");
+        t.commit(&[("logo.png", Some("old\0")), ("notes.txt", Some("a\n"))], "First");
+        t.write(&[("logo.png", Some("new\0")), ("notes.txt", Some("b\n")), ("icon.svg", Some("<svg/>\n"))]);
+
+        let url = |image: &Option<crate::commit::Image>| image.as_ref().and_then(|i| i.url.clone());
+        let images = read_working_diff(t.path(), "logo.png", None, false, None).unwrap().images.unwrap();
+        assert_eq!(url(&images.old).as_deref(), Some("data:image/png;base64,b2xkAA=="));
+        assert_eq!(url(&images.new).as_deref(), Some("data:image/png;base64,bmV3AA=="));
+
+        // A new image has no old side, and other files have no images at all.
+        let images = read_working_diff(t.path(), "icon.svg", None, false, None).unwrap().images.unwrap();
+        assert!(images.old.is_none() && url(&images.new).unwrap().starts_with("data:image/svg+xml;base64,"));
+        assert!(read_working_diff(t.path(), "notes.txt", None, false, None).unwrap().images.is_none());
     }
 
     #[test]

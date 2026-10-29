@@ -9,6 +9,7 @@ const showBlame = ref(false);
 <script setup>
 import { computed, reactive, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { formatSize } from "../lib/format.js";
 import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen, UserRoundSearch } from "lucide-vue-next";
 
 // Every file as it was at a commit: a folder tree on top, the chosen file below.
@@ -154,12 +155,6 @@ const lines = computed(() => {
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   return { text: body, numbers: Array.from({ length: body.split("\n").length }, (_, i) => i + 1).join("\n") };
 });
-
-function formatSize(bytes) {
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
 </script>
 
 <template>

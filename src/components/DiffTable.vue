@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { wordHighlights } from "../lib/wordDiff.js";
+import ImageDiff from "./ImageDiff.vue";
 
 // Renders one file's diff. Loading it is up to the parent.
 const props = defineProps({
@@ -82,14 +83,15 @@ function runAction(action, h) {
 
 <template>
   <div class="diff-table">
-    <p v-if="diff.binary" class="notice">Binary file not shown.</p>
+    <ImageDiff v-if="diff.images" :images="diff.images" />
+    <p v-if="diff.binary" v-show="!diff.images" class="notice">Binary file not shown.</p>
     <p v-else-if="diff.truncated" class="notice">
       This diff is large ({{ diff.total_lines.toLocaleString() }} lines).
       <button class="link-button" :disabled="loadingAll" @click="emit('show-all')">
         {{ loadingAll ? "Loading…" : "Show Diff" }}
       </button>
     </p>
-    <p v-else-if="!diff.hunks.length" class="notice">No content changes.</p>
+    <p v-else-if="!diff.hunks.length" v-show="!diff.images" class="notice">No content changes.</p>
 
     <div v-else class="scroller">
       <table class="mono">

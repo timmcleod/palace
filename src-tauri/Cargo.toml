@@ -33,6 +33,7 @@ ureq = { version = "3", features = ["json"] }
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+base64 = "0.23"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

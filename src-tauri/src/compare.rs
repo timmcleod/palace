@@ -5,8 +5,8 @@
 //! `base` (`git diff base...head`), so work that landed on `base` meanwhile doesn't
 //! show up as being undone.
 
-use crate::commit::{ChangedFile, FileDiff, changed_files, file_diff_from_patch, tree_diff};
-use git2::{Commit, Diff, Patch, Repository};
+use crate::commit::{ChangedFile, FileDiff, changed_files, file_diff_at, tree_diff};
+use git2::{Commit, Diff, Repository};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -64,7 +64,7 @@ fn read_file_diff(path: &str, base: &str, head: &str, index: usize, max_lines: O
     let repo = Repository::discover(path)?;
     let (base, head) = (resolve(&repo, base)?, resolve(&repo, head)?);
     let diff = changes(&repo, &base, &head)?;
-    file_diff_from_patch(Patch::from_diff(&diff, index)?, max_lines)
+    file_diff_at(&repo, &diff, index, max_lines)
 }
 
 fn resolve<'r>(repo: &'r Repository, rev: &str) -> Result<Commit<'r>, git2::Error> {

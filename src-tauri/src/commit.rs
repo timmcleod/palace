@@ -1,4 +1,5 @@
-use git2::{Commit, Delta, Diff, DiffFindOptions, Oid, Patch, Repository, Signature, Tree};
+use base64::Engine;
+use git2::{Commit, Delta, Diff, DiffFile, DiffFindOptions, Oid, Patch, Repository, Signature, Tree};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -41,13 +42,30 @@ pub struct FileDiff {
     /// True when the diff was longer than `max_lines` and its hunks were left out.
     truncated: bool,
     pub(crate) hunks: Vec<Hunk>,
+    /// Both versions of an image, to show next to each other. None for other files.
+    pub(crate) images: Option<Images>,
 }
 
 impl FileDiff {
     /// A diff for a file with no changes on the side asked about.
     pub(crate) fn unchanged() -> Self {
-        FileDiff { binary: false, total_lines: 0, truncated: false, hunks: Vec::new() }
+        FileDiff { binary: false, total_lines: 0, truncated: false, hunks: Vec::new(), images: None }
     }
+}
+
+#[derive(Serialize)]
+pub struct Images {
+    /// None when the image was added.
+    pub(crate) old: Option<Image>,
+    /// None when the image was deleted.
+    pub(crate) new: Option<Image>,
+}
+
+#[derive(Serialize)]
+pub struct Image {
+    size: usize,
+    /// The image as a data: URL, or None when it's too large to show.
+    pub(crate) url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -139,13 +157,58 @@ fn read_file_diff(path: &str, id: &str, index: usize, max_lines: Option<usize>) 
     let repo = Repository::discover(path)?;
     let commit = repo.find_commit(Oid::from_str(id)?)?;
     let diff = commit_diff(&repo, &commit)?;
-    file_diff_from_patch(Patch::from_diff(&diff, index)?, max_lines)
+    file_diff_at(&repo, &diff, index, max_lines)
+}
+
+/// The diff of the `index`th file in `diff`, with both versions of it if it's an image.
+pub(crate) fn file_diff_at(repo: &Repository, diff: &Diff, index: usize, max_lines: Option<usize>) -> Result<FileDiff, git2::Error> {
+    let mut file_diff = file_diff_from_patch(Patch::from_diff(diff, index)?, max_lines)?;
+    if let Some(delta) = diff.get_delta(index) {
+        let (old, new) = (image(repo, &delta.old_file()), image(repo, &delta.new_file()));
+        if old.is_some() || new.is_some() {
+            file_diff.images = Some(Images { old, new });
+        }
+    }
+    Ok(file_diff)
+}
+
+const IMAGE_TYPES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("avif", "image/avif"),
+    ("bmp", "image/bmp"),
+    ("ico", "image/x-icon"),
+    ("svg", "image/svg+xml"),
+];
+
+/// Larger images are described but not shown.
+const MAX_IMAGE: usize = 10 * 1024 * 1024;
+
+/// One side of a diff as an image, if it's a file with an image's extension.
+fn image(repo: &Repository, file: &DiffFile) -> Option<Image> {
+    if !file.exists() {
+        return None;
+    }
+    let path = file.path()?;
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let (_, mime) = IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension)?;
+    // The working copy's side of a diff isn't in the object database.
+    let bytes = match repo.find_blob(file.id()) {
+        Ok(blob) => blob.content().to_vec(),
+        Err(_) => std::fs::read(repo.workdir()?.join(path)).ok()?,
+    };
+    let url = (bytes.len() <= MAX_IMAGE)
+        .then(|| format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)));
+    Some(Image { size: bytes.len(), url })
 }
 
 /// Converts one file's patch into lines the UI can render. `None` is what git2 returns
 /// for a binary file.
 pub(crate) fn file_diff_from_patch(patch: Option<Patch>, max_lines: Option<usize>) -> Result<FileDiff, git2::Error> {
-    let binary = FileDiff { binary: true, total_lines: 0, truncated: false, hunks: Vec::new() };
+    let binary = FileDiff { binary: true, ..FileDiff::unchanged() };
     let Some(patch) = patch else { return Ok(binary) };
     if patch.delta().flags().is_binary() {
         return Ok(binary);
@@ -156,7 +219,7 @@ pub(crate) fn file_diff_from_patch(patch: Option<Patch>, max_lines: Option<usize
         total_lines += patch.num_lines_in_hunk(h)?;
     }
     if max_lines.is_some_and(|max| total_lines > max) {
-        return Ok(FileDiff { binary: false, total_lines, truncated: true, hunks: Vec::new() });
+        return Ok(FileDiff { total_lines, truncated: true, ..FileDiff::unchanged() });
     }
 
     let mut hunks = Vec::new();
@@ -188,7 +251,7 @@ pub(crate) fn file_diff_from_patch(patch: Option<Patch>, max_lines: Option<usize
         });
     }
 
-    Ok(FileDiff { binary: false, total_lines, truncated: false, hunks })
+    Ok(FileDiff { total_lines, hunks, ..FileDiff::unchanged() })
 }
 
 /// The changes a commit introduced: against its first parent, or against an empty
