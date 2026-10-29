@@ -308,7 +308,7 @@ export function useGitActions({ overview, run, compare }) {
       ...rest.map((c) => ({ id: c.id, action: "fixup", message: null })),
       ...plan.commits.filter((c) => !ids.has(c.id)).map((c) => ({ id: c.id, action: "pick", message: null })),
     ];
-    await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps });
+    await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps }, { undo: "Squash" });
   }
 
   // Moves a commit to just above (newer than) or below (older than) another.
@@ -332,7 +332,9 @@ export function useGitActions({ overview, run, compare }) {
     });
     if (!ok) return;
     const steps = order.map((id) => ({ id, action: "pick", message: null }));
-    await run(["Moving commit…", "Moved commit", "Couldn't move the commit"], "rebase_interactive", { base: plan.base, steps });
+    await run(["Moving commit…", "Moved commit", "Couldn't move the commit"], "rebase_interactive", { base: plan.base, steps }, {
+      undo: "Move Commit",
+    });
   }
 
   // The menu for several selected commits.

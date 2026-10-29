@@ -13,6 +13,8 @@ const props = defineProps({
   // The commit being written: { subject, body, amend, saved }. Owned by the parent so
   // it survives switching views; this component edits its fields.
   draft: { type: Object, required: true },
+  // undoable(step, work): runs `work`, remembering how to undo it.
+  undoable: { type: Function, default: (step, work) => work() },
 });
 const emit = defineEmits(["select", "changed"]);
 
@@ -279,7 +281,8 @@ async function commit() {
   commitError.value = "";
   const message = [props.draft.subject.trim(), props.draft.body.trim()].filter(Boolean).join("\n\n");
   try {
-    await invoke("commit_changes", { path: props.path, message, amend: props.draft.amend });
+    const step = props.draft.amend ? { label: "Amend", mode: "soft" } : { label: "Commit", mode: "soft", message };
+    await props.undoable(step, () => invoke("commit_changes", { path: props.path, message, amend: props.draft.amend }));
     Object.assign(props.draft, { subject: "", body: "", amend: false, saved: null });
     head.value = null;
   } catch (e) {

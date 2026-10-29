@@ -13,6 +13,7 @@ mod reset;
 mod stash;
 mod tag;
 mod tree;
+mod undo;
 mod watch;
 #[cfg(test)]
 mod test_support;
@@ -74,6 +75,8 @@ pub fn run() {
             tag::create_tag,
             tag::delete_tag,
             tag::describe_revision,
+            undo::ref_snapshot,
+            undo::restore_refs,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,

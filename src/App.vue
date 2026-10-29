@@ -16,8 +16,10 @@ import {
   FolderGit2,
   GitBranch,
   GitMerge,
+  Redo2,
   RefreshCw,
   Search,
+  Undo2,
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
@@ -307,6 +309,15 @@ function describe(place) {
 }
 
 function onNavKeydown(event) {
+  // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
+  // dialogs, which keep their own.
+  const key = event.key.toLowerCase();
+  if (event.ctrlKey && !event.altKey && (key === "z" || key === "y") && !inTextField(event.target) && !dialogOpen()) {
+    event.preventDefault();
+    if (key === "y" || event.shiftKey) redo();
+    else undo();
+    return;
+  }
   // Ctrl+F goes to the toolbar search.
   if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f" && toolbarSearch.value) {
     event.preventDefault();
@@ -352,8 +363,9 @@ const remoteBusy = computed(() => remoteOp.value?.state === "running");
  * titles: [while running, on success, on failure]. options.quietError(message)
  * returning true hides that failure, for callers that handle it themselves.
  * options.path runs it somewhere other than the open repository, or with none open.
+ * Commands in UNDOABLE can be undone afterwards; options.undo names the step.
  */
-async function runGit([running, done, failed], command, args = {}, { quietError, path } = {}) {
+async function runGit([running, done, failed], command, args = {}, { quietError, path, undo: undoLabel } = {}) {
   if (remoteBusy.value) return "Another operation is still running.";
   if (!overview.value && !path) return "No repository is open.";
   clearTimeout(dismissTimer);
@@ -361,9 +373,14 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
   remoteOp.value = op;
 
   try {
-    op.message = await invoke(command, { path: path ?? overview.value.path, ...args });
+    const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
+    const label = !path && (undoLabel ?? UNDOABLE[command]);
+    const mode = command === "reset" && args.keepChanges ? "mixed" : "keep";
+    const undone = undoStack.value.at(-1);
+    op.message = await (label ? undoable({ label, mode }, work) : work());
     op.state = "done";
     op.title = done;
+    if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") loadAvatars(overview.value.path);
     // Successes get out of the way; failures stay until dismissed.
@@ -403,6 +420,87 @@ const REMOTE_TITLES = {
 };
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
+
+// --- Undo and redo -----------------------------------------------------------------
+
+// Operations that can be undone, and what Undo calls them. Committing is undoable
+// too, from the working copy. Network operations other than pull can't be: what they
+// changed is on the remote.
+const UNDOABLE = {
+  checkout: "Checkout",
+  create_branch: "New Branch",
+  delete_branch: "Delete Branch",
+  rename_branch: "Rename Branch",
+  merge: "Merge",
+  rebase: "Rebase",
+  rebase_interactive: "Rebase",
+  cherry_pick: "Cherry-pick",
+  revert: "Revert",
+  reset: "Reset",
+  pull: "Pull",
+  create_tag: "New Tag",
+  delete_tag: "Delete Tag",
+};
+const MAX_UNDO = 50;
+
+// The open repository's steps, oldest first: { label, mode, before, after, message },
+// where before and after are ref_snapshot's snapshots and mode is restore_refs's.
+const undoStack = ref([]);
+const redoStack = ref([]);
+
+/**
+ * Runs `work`, and if it moved HEAD or any branch or tag, remembers how to undo it.
+ * `step` is { label, mode } and, for a commit, its message.
+ */
+async function undoable(step, work) {
+  const path = overview.value.path;
+  const snapshot = () => invoke("ref_snapshot", { path }).catch(() => null);
+  const before = await snapshot();
+  const result = await work();
+  const after = before && (await snapshot());
+  if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
+    undoStack.value = [...undoStack.value.slice(1 - MAX_UNDO), { ...step, before, after }];
+    redoStack.value = [];
+  }
+  return result;
+}
+
+const undo = () => replay(undoStack, redoStack, true);
+const redo = () => replay(redoStack, undoStack, false);
+
+// Undoes the newest step on `stack`, or redoes it, moving it to the other stack.
+async function replay(stack, other, undoing) {
+  const step = stack.value.at(-1);
+  if (!step || remoteBusy.value) return;
+  const [verb, did] = undoing ? ["undo", "Undid"] : ["redo", "Redid"];
+  const error = await runGit(
+    [undoing ? "Undoing…" : "Redoing…", `${did} “${step.label}”`, `Couldn't ${verb} “${step.label}”`],
+    "restore_refs",
+    undoing ? { from: step.after, to: step.before, mode: step.mode } : { from: step.before, to: step.after, mode: step.mode },
+  );
+  if (error) {
+    // Something else has moved what it changed, so it can never be replayed.
+    if (error.includes("changed since") || error.includes("moved since")) stack.value = stack.value.slice(0, -1);
+    return;
+  }
+  stack.value = stack.value.slice(0, -1);
+  other.value = [...other.value, step];
+  // An undone commit's message comes back, ready to commit again, and goes away
+  // when the commit is redone.
+  if (step.message) {
+    const [subject, ...rest] = step.message.split("\n");
+    const body = rest.join("\n").trim();
+    if (undoing && !draft.subject && !draft.body) Object.assign(draft, { subject, body });
+    if (!undoing && draft.subject === subject && draft.body === body) Object.assign(draft, { subject: "", body: "" });
+  }
+  if (remoteOp.value?.state === "done") {
+    remoteOp.value.actions = [{ label: undoing ? "Redo" : "Undo", run: undoing ? redo : undo }];
+  }
+}
+
+const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
+const dialogOpen = () =>
+  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value);
 
 const actions = useGitActions({ overview, run: runGit, compare: openComparison });
 
@@ -485,6 +583,8 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       nav.forward = [];
       here = null;
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
+      undoStack.value = [];
+      redoStack.value = [];
     }
     overview.value = data;
     error.value = "";
@@ -814,6 +914,7 @@ function startResize(event, pane, min, max) {
         :path="overview.path"
         :refresh-key="refreshKey"
         :selected-path="workingFile?.path"
+        :undoable="undoable"
         @select="workingFile = $event"
         @changed="refresh"
       />
@@ -909,6 +1010,24 @@ function startResize(event, pane, min, max) {
             @click="actions.stashApply(0, true)"
           >
             <ArchiveRestore :size="18" :stroke-width="1.5" />
+          </button>
+        </div>
+        <div class="action-group">
+          <button
+            class="icon-button"
+            :title="undoStack.length ? `Undo ${undoStack.at(-1).label} (Ctrl+Z)` : 'Nothing to undo'"
+            :disabled="remoteBusy || !undoStack.length"
+            @click="undo"
+          >
+            <Undo2 :size="18" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :title="redoStack.length ? `Redo ${redoStack.at(-1).label} (Ctrl+Shift+Z)` : 'Nothing to redo'"
+            :disabled="remoteBusy || !redoStack.length"
+            @click="redo"
+          >
+            <Redo2 :size="18" :stroke-width="1.5" />
           </button>
         </div>
         <button class="icon-button" title="Refresh" @click="refresh">
