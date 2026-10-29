@@ -1,6 +1,7 @@
 <script setup>
 import { nextTick, onMounted, reactive, ref } from "vue";
 import { closeForm } from "../lib/overlays.js";
+import { focusDialog, submitOnEnter } from "../lib/dialogKeys.js";
 
 const props = defineProps({
   dialog: { type: Object, required: true },
@@ -19,15 +20,17 @@ function submit() {
 
 onMounted(async () => {
   await nextTick();
-  const first = form.value?.querySelector("input:not([type=checkbox]), select");
+  const first = form.value?.querySelector("input:not([type=checkbox]), select, textarea");
   first?.focus();
-  first?.select?.();
+  // A one-line value is selected, ready to replace; a message is edited in place.
+  if (first?.tagName === "INPUT") first.select();
+  focusDialog(form.value);
 });
 </script>
 
 <template>
   <div class="backdrop" @mousedown.self="closeForm(null)" @keydown.esc="closeForm(null)">
-    <form ref="form" class="dialog" @submit.prevent="submit">
+    <form ref="form" class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <h2>{{ dialog.title }}</h2>
       <p v-if="dialog.message" class="message">{{ dialog.message }}</p>
 

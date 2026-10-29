@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { repoFromUrl, suggestedLocation } from "../lib/clone.js";
 import { closeCloneDialog } from "../lib/overlays.js";
+import { submitOnEnter } from "../lib/dialogKeys.js";
 
 // The Clone dialog: a repository's URL, and the folder to clone it into.
 const props = defineProps({
@@ -50,7 +51,7 @@ function onKeydown(event) {
 
 <template>
   <div class="backdrop" @mousedown.self="closeCloneDialog(null)" @keydown="onKeydown">
-    <form class="dialog" @submit.prevent="submit">
+    <form class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>

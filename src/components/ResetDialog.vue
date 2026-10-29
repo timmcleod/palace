@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { closeResetDialog } from "../lib/overlays.js";
 import RevisionInput from "./RevisionInput.vue";
+import { submitOnEnter } from "../lib/dialogKeys.js";
 
 // The Reset dialog: move HEAD, and the branch it's on, to another revision.
 const props = defineProps({
@@ -72,7 +73,7 @@ function onKeydown(event) {
 
 <template>
   <div class="backdrop" @mousedown.self="closeResetDialog(null)" @keydown="onKeydown">
-    <form class="dialog" @submit.prevent="submit">
+    <form class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>

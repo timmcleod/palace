@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ChevronRight } from "lucide-vue-next";
 import { closePullDialog } from "../lib/overlays.js";
+import { focusDialog, submitOnEnter } from "../lib/dialogKeys.js";
 
 // The Pull dialog: which remote branch to pull into the current branch, and whether
 // to rebase onto it or merge it.
@@ -17,6 +18,9 @@ const showOptions = ref(!props.dialog.autostash);
 
 const ready = computed(() => !!from.value);
 
+const form = ref(null);
+onMounted(() => focusDialog(form.value));
+
 function submit() {
   if (!ready.value) return;
   closePullDialog({ from: from.value, rebase: rebase.value, autostash: autostash.value });
@@ -29,7 +33,7 @@ function onKeydown(event) {
 
 <template>
   <div class="backdrop" @mousedown.self="closePullDialog(null)" @keydown="onKeydown">
-    <form class="dialog" @submit.prevent="submit">
+    <form ref="form" class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>

@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ChevronRight } from "lucide-vue-next";
 import { closeMergeDialog } from "../lib/overlays.js";
+import { focusDialog, submitOnEnter } from "../lib/dialogKeys.js";
 
 // The Merge dialog: which branch to merge into the current one, and how.
 const props = defineProps({
@@ -18,6 +19,9 @@ const showOptions = ref(false);
 
 const ready = computed(() => !!branch.value);
 
+const form = ref(null);
+onMounted(() => focusDialog(form.value));
+
 function submit() {
   if (!ready.value) return;
   closeMergeDialog({
@@ -33,7 +37,7 @@ function onKeydown(event) {
 
 <template>
   <div class="backdrop" @mousedown.self="closeMergeDialog(null)" @keydown="onKeydown">
-    <form class="dialog" @submit.prevent="submit">
+    <form ref="form" class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>

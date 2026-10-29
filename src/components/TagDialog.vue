@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { closeTagDialog } from "../lib/overlays.js";
 import RevisionInput from "./RevisionInput.vue";
+import { submitOnEnter } from "../lib/dialogKeys.js";
 
 // The Create New Tag dialog: a name, the revision to tag (typed, or picked from the
 // repository's branches and tags), an optional message, and whether to push it.
@@ -84,7 +85,7 @@ function onKeydown(event) {
 
 <template>
   <div class="backdrop" @mousedown.self="closeTagDialog(null)" @keydown="onKeydown">
-    <form class="dialog" @submit.prevent="submit">
+    <form class="dialog" @keydown="submitOnEnter" @submit.prevent="submit">
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>
