@@ -48,8 +48,16 @@ export async function checkForUpdates({ quiet = false } = {}) {
     }
   } catch (e) {
     updates.state = quiet ? "idle" : "error";
-    updates.error = String(e);
+    updates.error = explain(String(e));
   }
+}
+
+// The updater's own wording, in Palace's where it's unclear.
+function explain(message) {
+  // The newest release has no download for this kind of computer, such as a Linux-only
+  // release checked from a Mac.
+  if (message.includes("platforms")) return "the newest release doesn't include a version for this computer yet.";
+  return message;
 }
 
 /** Downloads and installs the update, then restarts Palace into it. */
