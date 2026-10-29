@@ -19,9 +19,11 @@ export function buildTree(items, nameOf) {
 }
 
 // Flattens the visible part of a tree into rows so the sidebar can render it with a
-// single v-for. Folders come first, then leaves.
-export function flattenTree(node, { depth = 0, keyPrefix, path = "", isOpen, leafRow }) {
-  const rows = [];
+// single v-for. Folders come first, then leaves, unless `order` (a list of row keys)
+// says otherwise: rows in it come first, in its order. `extraRows`, such as dividers,
+// join the top level. Each row's `parent` is the path of the folder it's in.
+export function flattenTree(node, { depth = 0, keyPrefix, path = "", isOpen, leafRow, order = null, extraRows = [] }) {
+  const entries = [];
 
   const folders = [...node.folders.entries()].sort(([a], [b]) =>
     a.localeCompare(b, undefined, { sensitivity: "base" }),
@@ -30,15 +32,29 @@ export function flattenTree(node, { depth = 0, keyPrefix, path = "", isOpen, lea
     const folderPath = `${path}${name}/`;
     const key = keyPrefix + folderPath;
     const open = isOpen(key);
-    rows.push({ key, label: name, depth, folder: true, open });
-    if (open) {
-      rows.push(...flattenTree(child, { depth: depth + 1, keyPrefix, path: folderPath, isOpen, leafRow }));
-    }
+    entries.push({
+      key,
+      rows: () => [
+        { key, label: name, depth, parent: path, folder: true, open },
+        ...(open ? flattenTree(child, { depth: depth + 1, keyPrefix, path: folderPath, isOpen, leafRow, order }) : []),
+      ],
+    });
   }
 
   for (const leaf of node.leaves) {
-    rows.push({ ...leafRow(leaf.item), label: leaf.label, depth });
+    const row = { ...leafRow(leaf.item), label: leaf.label, depth, parent: path };
+    entries.push({ key: row.key, rows: () => [row] });
   }
 
-  return rows;
+  for (const extra of extraRows) {
+    entries.push({ key: extra.key, rows: () => [{ ...extra, depth, parent: path }] });
+  }
+
+  if (order?.length) {
+    const rank = new Map(order.map((key, i) => [key, i]));
+    const rankOf = (key) => rank.get(key) ?? order.length;
+    entries.sort((a, b) => rankOf(a.key) - rankOf(b.key));
+  }
+
+  return entries.flatMap((entry) => entry.rows());
 }

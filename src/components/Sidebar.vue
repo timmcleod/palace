@@ -19,6 +19,7 @@ import {
 } from "lucide-vue-next";
 import { buildTree, flattenTree } from "../lib/tree.js";
 import { commandKey } from "../lib/platform.js";
+import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -72,6 +73,8 @@ const workspaceRows = computed(() => [
   { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
 ]);
 
+// In the order they've been dragged into, with their dividers, though those stay
+// hidden while filtering.
 const branchRows = computed(() =>
   flattenTree(
     buildTree(
@@ -81,6 +84,8 @@ const branchRows = computed(() =>
     {
       keyPrefix: "branch-folder:",
       isOpen,
+      order: branchOrder(props.overview.path),
+      extraRows: query.value ? [] : dividerRows(props.overview.path),
       leafRow: (b) => ({
         key: `branch:${b.name}`,
         icon: GitBranch,
@@ -168,14 +173,23 @@ function toggleSection(id) {
   collapsedSections.has(id) ? collapsedSections.delete(id) : collapsedSections.add(id);
 }
 
-// --- Dragging a branch onto the HEAD branch merges it --------------------------------
+// --- Dragging branches -----------------------------------------------------------------
 
-// The name of the branch being dragged, and whether it's over the HEAD branch.
+// Dragging a branch onto the HEAD branch merges it. Dragging a branch, folder or
+// divider elsewhere in Branches moves it among the rows in the same folder, except
+// while filtering. On the HEAD branch, the middle of the row merges and its edges
+// move.
+
+// The name of the branch being dragged, if it can be merged; the row being dragged;
+// and where it would land: { key, merge } or { key, after }.
 const dragging = ref(null);
-const overHead = ref(false);
+const dragRow = ref(null);
+const dropAt = ref(null);
 
-const canDrag = (row) =>
-  !row.folder && ((row.key.startsWith("branch:") && !row.head) || row.key.startsWith("remote-branch:"));
+const ARRANGEABLE = /^branch(-folder|-divider)?:/;
+const canMerge = (row) => !row.folder && !row.divider && (row.key.startsWith("branch:") || row.key.startsWith("remote-branch:"));
+const canMove = (row) => !query.value && ARRANGEABLE.test(row.key);
+const canDrag = (row) => (canMerge(row) && !row.head) || canMove(row);
 
 // What follows the pointer: the row's icon and name, rather than the web view's
 // snapshot of the whole row. It has to be on the page while dragging, so it sits
@@ -183,49 +197,81 @@ const canDrag = (row) =>
 let dragImage = null;
 
 function onDragStart(row, event) {
-  dragging.value = row.key.slice(row.key.indexOf(":") + 1);
-  event.dataTransfer.setData("text/plain", dragging.value);
-  event.dataTransfer.effectAllowed = "copy";
+  dragRow.value = row;
+  dragging.value = canMerge(row) && !row.head ? row.key.slice(row.key.indexOf(":") + 1) : null;
+  event.dataTransfer.setData("text/plain", row.key);
+  event.dataTransfer.effectAllowed = "copyMove";
 
   dragImage = document.createElement("div");
   dragImage.className = "drag-image";
   const icon = event.currentTarget.querySelector(".row-icon")?.cloneNode(true);
   if (icon) dragImage.append(icon);
-  dragImage.append(row.label);
+  dragImage.append(row.divider ? row.label || "Divider" : row.label);
   document.body.append(dragImage);
   event.dataTransfer.setDragImage(dragImage, 14, dragImage.offsetHeight / 2);
 }
 
 function onDragEnd() {
   dragging.value = null;
-  overHead.value = false;
+  dragRow.value = null;
+  dropAt.value = null;
   dragImage?.remove();
   dragImage = null;
 }
 
-// Only the HEAD branch accepts a drop, and not while a merge or rebase is waiting.
+// Where a drop on `row` would land, from how far down the row the pointer is.
+function landing(row, event) {
+  const dragged = dragRow.value;
+  if (!dragged) return null;
+  const rect = event.currentTarget.getBoundingClientRect();
+  const y = (event.clientY - rect.top) / rect.height;
+  // Not while a merge or rebase is waiting.
+  const merges = row.head && dragging.value && !props.overview.operation;
+  const moves =
+    canMove(dragged) && ARRANGEABLE.test(row.key) && row.key !== dragged.key && row.parent === dragged.parent;
+  if (merges && (!moves || (y > 0.25 && y < 0.75))) return { key: row.key, merge: true };
+  // Below an open folder's row are its own rows, so a row can't land straight after it.
+  if (moves) return { key: row.key, after: y >= 0.5 && !(row.folder && row.open) };
+  return null;
+}
+
 function onDragOver(row, event) {
-  if (!row.head || !dragging.value || props.overview.operation) return;
+  const at = landing(row, event);
+  if (!at) return;
   event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-  overHead.value = true;
+  event.dataTransfer.dropEffect = at.merge ? "copy" : "move";
+  dropAt.value = at;
 }
 
 function onDragLeave(row, event) {
-  if (row.head && !event.currentTarget.contains(event.relatedTarget)) overHead.value = false;
+  if (dropAt.value?.key === row.key && !event.currentTarget.contains(event.relatedTarget)) dropAt.value = null;
 }
 
 function onDrop(row, event) {
-  if (!row.head || !dragging.value) return;
+  const at = landing(row, event);
+  if (!at) return;
   event.preventDefault();
   const name = dragging.value;
+  const dragged = dragRow.value;
   onDragEnd();
-  emit("merge-into-head", name);
+  if (at.merge) {
+    emit("merge-into-head", name);
+    return;
+  }
+  const siblings = branchRows.value.filter((r) => r.parent === dragged.parent).map((r) => r.key);
+  moveKey(props.overview.path, dragged.key, row.key, at.after, siblings);
 }
+
+const dropClass = (row) => {
+  const at = dropAt.value;
+  if (at?.key !== row.key) return null;
+  return at.merge ? "drop-target" : at.after ? "drop-after" : "drop-before";
+};
 
 const COMPARABLE = ["branch", "remote-branch", "tag"];
 
 function onRowClick(row, event) {
+  if (row.divider) return;
   // Ctrl- (Cmd- on a Mac) or Shift-clicking a second branch or tag compares it with
   // the first.
   if ((commandKey(event) || event.shiftKey) && !row.folder && COMPARABLE.includes(row.key.split(":")[0])) {
@@ -266,12 +312,12 @@ function onRowClick(row, event) {
             v-for="row in section.rows"
             :key="row.key"
             class="row"
-            :class="{
+            :class="[dropClass(row), {
               selected: row.key === selected || compared.includes(row.key),
               current: row.current,
-              'drop-target': row.head && overHead,
-            }"
-            :style="{ paddingLeft: `${8 + row.depth * 18}px` }"
+              divider: row.divider,
+            }]"
+            :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
             :title="row.head && dragging ? `Merge ${dragging} into ${row.label}` : row.title"
             :draggable="canDrag(row)"
             @dragstart="onDragStart(row, $event)"
@@ -282,27 +328,33 @@ function onRowClick(row, event) {
             @click="onRowClick(row, $event)"
             @dblclick="emit('activate', row)"
             @contextmenu.prevent="
-              emit('update:selected', row.key);
+              row.divider || emit('update:selected', row.key);
               emit('menu', row, $event);
             "
           >
-            <span class="chevron">
-              <ChevronRight v-if="row.folder" :size="14" :class="{ open: row.open }" />
-            </span>
-            <component :is="row.icon ?? Folder" class="row-icon" :size="17" :stroke-width="1.5" />
-            <span class="row-label">{{ row.label }}</span>
+            <template v-if="row.divider">
+              <span v-if="row.label" class="divider-label">{{ row.label }}</span>
+              <span class="divider-line" />
+            </template>
+            <template v-else>
+              <span class="chevron">
+                <ChevronRight v-if="row.folder" :size="14" :class="{ open: row.open }" />
+              </span>
+              <component :is="row.icon ?? Folder" class="row-icon" :size="17" :stroke-width="1.5" />
+              <span class="row-label">{{ row.label }}</span>
 
-            <span v-if="row.head || row.ahead || row.behind" class="pill">
-              <span v-if="row.head">HEAD</span>
-              <span v-if="row.head && (row.ahead || row.behind)" class="pill-divider" />
-              <span v-if="row.ahead" class="pill-count" :title="`${row.ahead} ahead of upstream`">
-                <ArrowUp :size="12" :stroke-width="2.25" />{{ row.ahead }}
+              <span v-if="row.head || row.ahead || row.behind" class="pill">
+                <span v-if="row.head">HEAD</span>
+                <span v-if="row.head && (row.ahead || row.behind)" class="pill-divider" />
+                <span v-if="row.ahead" class="pill-count" :title="`${row.ahead} ahead of upstream`">
+                  <ArrowUp :size="12" :stroke-width="2.25" />{{ row.ahead }}
+                </span>
+                <span v-if="row.behind" class="pill-count" :title="`${row.behind} behind upstream`">
+                  <ArrowDown :size="12" :stroke-width="2.25" />{{ row.behind }}
+                </span>
               </span>
-              <span v-if="row.behind" class="pill-count" :title="`${row.behind} behind upstream`">
-                <ArrowDown :size="12" :stroke-width="2.25" />{{ row.behind }}
-              </span>
-            </span>
-            <span v-else-if="row.count" class="count">{{ row.count }}</span>
+              <span v-else-if="row.count" class="count">{{ row.count }}</span>
+            </template>
           </div>
         </template>
       </section>
@@ -419,6 +471,59 @@ function onRowClick(row, event) {
 
 .row[draggable="true"] {
   -webkit-user-drag: element;
+}
+
+.row {
+  position: relative;
+}
+
+/* Where a dragged row would land. */
+.row.drop-before::before,
+.row.drop-after::before {
+  content: "";
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.row.drop-before::before {
+  top: -1px;
+}
+
+.row.drop-after::before {
+  bottom: -1px;
+}
+
+/* A line between groups of branches, after an optional label, both lined up with
+   the branches' icons (see the row's padding). */
+.row.divider {
+  gap: 8px;
+  height: 22px;
+  padding-right: 8px;
+}
+
+.row.divider:hover,
+.row.divider.selected {
+  background: none;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.divider-label {
+  max-width: 75%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
 }
 
 /* The HEAD branch while a branch is dragged over it, ready to merge. */

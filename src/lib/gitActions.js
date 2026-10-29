@@ -1,6 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
+import {
+  addDivider,
+  isArranged,
+  labelDivider,
+  removeKey,
+  renameKey,
+  resetOrder,
+  topLevelKeys,
+} from "./branchOrder.js";
 
 // The Pull dialog's last choices, offered again next time.
 const PULL_CHOICES_KEY = "palace.pullChoices";
@@ -88,25 +97,28 @@ export function useGitActions({ overview, run, compare }) {
       confirmLabel: "Rename",
     });
     if (!values || values.name.trim() === name) return;
-    await run(["Renaming…", "Renamed", "Couldn't rename the branch"], "rename_branch", {
+    const error = await run(["Renaming…", "Renamed", "Couldn't rename the branch"], "rename_branch", {
       old: name,
       new: values.name.trim(),
     });
+    if (!error) renameKey(overview.value.path, name, values.name.trim());
   }
 
   async function deleteBranch(name) {
     if (!(await confirm(`Delete the branch “${name}”?`, "Delete Branch", "Delete"))) return;
     const titles = ["Deleting branch…", "Deleted branch", "Couldn't delete the branch"];
     const notMerged = (e) => e.includes("not fully merged");
-    const error = await run(titles, "delete_branch", { name, force: false }, { quietError: notMerged });
+    let error = await run(titles, "delete_branch", { name, force: false }, { quietError: notMerged });
     if (error && notMerged(error)) {
       const force = await confirm(
         `“${name}” has commits that aren't merged into any other branch. If you delete it, those commits will be hard to get back.`,
         "Delete Unmerged Branch?",
         "Delete Anyway",
       );
-      if (force) await run(titles, "delete_branch", { name, force: true });
+      if (!force) return;
+      error = await run(titles, "delete_branch", { name, force: true });
     }
+    if (!error) removeKey(overview.value.path, `branch:${name}`);
   }
 
   // Asks how to merge `name` (or a branch to choose) into the current branch.
@@ -469,6 +481,9 @@ export function useGitActions({ overview, run, compare }) {
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { label: `New Tag at “${name}”…`, action: () => createTag(name) },
       { label: "Rename…", action: () => renameBranch(name) },
+      // Dividers only go between top-level rows.
+      !name.includes("/") && { separator: true },
+      !name.includes("/") && { label: "Add Divider Below…", action: () => newDivider(`branch:${name}`) },
       isCurrent && headBranchInfo()?.upstream && { separator: true },
       isCurrent && headBranchInfo()?.upstream && { label: "Force Push…", action: forcePush, danger: true },
       { separator: true },
@@ -603,10 +618,60 @@ export function useGitActions({ overview, run, compare }) {
     ];
   }
 
+  // --- Arranging branches ------------------------------------------------------------
+
+  // A divider in the sidebar's Branches, after `afterKey` or at the end.
+  async function newDivider(afterKey = null) {
+    const values = await openForm({
+      title: "Add Divider",
+      message: "A line between groups of branches. Drag it, or the branches, to arrange them.",
+      fields: [{ key: "label", label: "Label", type: "text", value: "", placeholder: "None", optional: true }],
+      confirmLabel: "Add Divider",
+    });
+    if (!values) return;
+    const path = overview.value.path;
+    addDivider(path, values.label.trim(), afterKey, topLevelKeys(path, overview.value.branches));
+  }
+
+  async function editDividerLabel(key, label) {
+    const values = await openForm({
+      title: "Edit Divider Label",
+      message: "Leave it empty for just a line.",
+      fields: [{ key: "label", label: "Label", type: "text", value: label, placeholder: "None", optional: true }],
+      confirmLabel: "Save",
+    });
+    if (values) labelDivider(overview.value.path, key, values.label.trim());
+  }
+
+  function dividerMenu(key, label) {
+    return [
+      { label: label ? "Edit Label…" : "Add Label…", action: () => editDividerLabel(key, label) },
+      { separator: true },
+      { label: "Remove Divider", action: () => removeKey(overview.value.path, key) },
+    ];
+  }
+
+  async function resetBranchOrder() {
+    const ok = await confirm(
+      "List the branches in alphabetical order again? Their dividers are removed.",
+      "Reset Order",
+      "Reset",
+      false,
+    );
+    if (ok) resetOrder(overview.value.path);
+  }
+
   // Menus for the sidebar's section headings, and its + button.
   function sectionMenu(section) {
     if (section === "tags") return [{ label: "Create New Tag…", action: () => createTag() }];
-    if (section === "branches") return [{ label: "New Branch…", action: () => newBranch() }];
+    if (section === "branches") {
+      return [
+        { label: "New Branch…", action: () => newBranch() },
+        { separator: true },
+        { label: "Add Divider…", action: () => newDivider() },
+        { label: "Reset Order…", action: resetBranchOrder, disabled: !isArranged(overview.value.path) },
+      ];
+    }
     if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];
     return null;
   }
@@ -632,6 +697,7 @@ export function useGitActions({ overview, run, compare }) {
     publishBranch,
     push,
     sectionMenu,
+    dividerMenu,
     newBranch,
     mergeInto,
     stashSave,

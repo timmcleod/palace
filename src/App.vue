@@ -583,6 +583,7 @@ function sidebarMenu(row, event) {
   const [kind, name] = splitKey(row.key);
   const items = {
     branch: () => actions.branchMenu(name),
+    "branch-divider": () => actions.dividerMenu(row.key, row.label),
     "remote-branch": () => actions.remoteBranchMenu(name),
     tag: () => actions.tagMenu(name),
     stash: () => actions.stashMenu(Number(name)),
