@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { wordHighlights } from "../lib/wordDiff.js";
+import { settings } from "../lib/settings.js";
 import ImageDiff from "./ImageDiff.vue";
 
 // Renders one file's diff. Loading it is up to the parent.
@@ -21,6 +22,43 @@ const SIGN = { "+": "+", "-": "−" };
 
 // Each hunk's changed words, by line: see wordDiff.js.
 const words = computed(() => props.diff.hunks?.map((hunk) => wordHighlights(hunk.lines)) ?? []);
+
+// Side by side, each hunk is rows of { old, new }: the indexes of the lines shown on
+// the left and right, or null for a gap. Removed lines are lined up with the added
+// lines that follow them.
+const split = computed(() => settings.diffLayout === "split");
+const splitHunks = computed(() => (split.value ? props.diff.hunks?.map((hunk) => splitRows(hunk.lines)) : null) ?? []);
+
+function splitRows(lines) {
+  const rows = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (!isChange(lines[i])) {
+      // Context, or a "No newline" marker that applies to both sides.
+      rows.push({ old: i, new: i });
+      i++;
+      continue;
+    }
+    const left = [];
+    const right = [];
+    let side = null;
+    while (i < lines.length && (isChange(lines[i]) || (lines[i].kind === "\\" && side))) {
+      // A removed line after added ones starts the next block.
+      if (lines[i].kind === "-" && right.length) break;
+      if (lines[i].kind !== "\\") side = lines[i].kind === "-" ? left : right;
+      side.push(i++);
+    }
+    for (let k = 0; k < Math.max(left.length, right.length); k++) rows.push({ old: left[k] ?? null, new: right[k] ?? null });
+  }
+  return rows;
+}
+
+// The classes for one side of a split row.
+function sideClass(h, l) {
+  if (l == null) return "gap";
+  const line = props.diff.hunks[h].lines[l];
+  return [LINE_CLASS[line.kind], { pickable: canPick.value && isChange(line), picked: isPicked(h, l) }];
+}
 
 // Changed lines picked by clicking their line numbers, all in one hunk at a time.
 const canPick = computed(() => props.hunkActions.some((a) => a.verb));
@@ -92,6 +130,66 @@ function runAction(action, h) {
       </button>
     </p>
     <p v-else-if="!diff.hunks.length" v-show="!diff.images" class="notice">No content changes.</p>
+
+    <div v-else-if="split" class="scroller">
+      <table class="mono split">
+        <colgroup>
+          <col class="gutter-col" />
+          <col class="sign-col" />
+          <col class="text-col" />
+          <col class="gutter-col" />
+          <col class="sign-col" />
+          <col class="text-col" />
+        </colgroup>
+        <tbody v-for="(hunk, h) in diff.hunks" :key="h">
+          <tr class="hunk-header">
+            <td colspan="6" class="text">
+              <div class="hunk-bar">
+                <span class="hunk-title">{{ hunk.header }}</span>
+                <span v-if="hunkActions.length" class="hunk-actions">
+                  <button
+                    v-for="action in hunkActions"
+                    :key="action.id"
+                    class="hunk-action"
+                    :class="{ danger: action.danger }"
+                    :disabled="busy"
+                    @click="runAction(action, h)"
+                  >
+                    {{ actionLabel(action, h) }}
+                  </button>
+                </span>
+              </div>
+            </td>
+          </tr>
+          <tr v-for="(row, r) in splitHunks[h]" :key="r">
+            <template v-for="side in ['old', 'new']" :key="side">
+              <td
+                class="gutter"
+                :class="sideClass(h, row[side])"
+                :title="row[side] != null && canPick && isChange(hunk.lines[row[side]]) ? 'Click to pick this line. Drag or Shift-click to pick more.' : null"
+                @mousedown="row[side] != null && onLineDown($event, h, row[side])"
+                @mouseenter="row[side] != null && onLineEnter(h, row[side])"
+              >
+                {{ row[side] != null ? (hunk.lines[row[side]][side] ?? "") : "" }}
+              </td>
+              <td
+                class="sign"
+                :class="sideClass(h, row[side])"
+                @mousedown="row[side] != null && onLineDown($event, h, row[side])"
+                @mouseenter="row[side] != null && onLineEnter(h, row[side])"
+              >
+                {{ row[side] != null ? (SIGN[hunk.lines[row[side]].kind] ?? "") : "" }}
+              </td>
+              <td v-if="row[side] == null" class="text gap" />
+              <td v-else-if="words[h].has(row[side])" class="text" :class="sideClass(h, row[side])">
+                <span v-for="(part, p) in words[h].get(row[side])" :key="p" :class="{ word: part.changed }">{{ part.text }}</span>
+              </td>
+              <td v-else class="text" :class="sideClass(h, row[side])">{{ hunk.lines[row[side]].text }}</td>
+            </template>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-else class="scroller">
       <table class="mono">
@@ -325,6 +423,95 @@ td {
   box-shadow: inset 3px 0 var(--accent);
 }
 
+/* Side by side, each side's cells carry its line's classes, and long lines wrap so
+   both sides stay in view. */
+.split {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.gutter-col {
+  width: 48px;
+}
+
+.sign-col {
+  width: 24px;
+}
+
+.text-col {
+  width: 50%;
+}
+
+.split .gutter {
+  min-width: 0;
+}
+
+.split .text {
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.split .hunk-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split .text + .gutter {
+  border-left: 1px solid var(--border);
+}
+
+.text.added,
+.sign.added {
+  background: var(--diff-added-bg);
+}
+
+.sign.added {
+  color: var(--diff-added-text);
+}
+
+.gutter.added {
+  background: var(--diff-added-gutter);
+}
+
+.text.removed,
+.sign.removed {
+  background: var(--diff-removed-bg);
+}
+
+.sign.removed {
+  color: var(--diff-removed-text);
+}
+
+.gutter.removed {
+  background: var(--diff-removed-gutter);
+}
+
+.gap {
+  background: var(--diff-gutter-bg);
+}
+
+.gutter.pickable,
+.sign.pickable {
+  cursor: pointer;
+}
+
+.gutter.pickable:hover {
+  color: var(--text-primary);
+}
+
+.gutter.picked,
+.sign.picked {
+  background: var(--accent);
+  color: #fff;
+}
+
+.text.picked {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.text.marker,
 .marker .text {
   color: var(--text-tertiary);
   font-style: italic;

@@ -11,6 +11,8 @@ const DEFAULTS = {
   // "accessible" (blue and orange) or "classic" (green and red).
   diffColors: "accessible",
   tabSize: 4,
+  // "unified" (one column) or "split" (old and new side by side).
+  diffLayout: "unified",
   githubAvatars: true,
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).

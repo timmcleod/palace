@@ -97,6 +97,10 @@ const THEMES = [
   ["dark", "Dark"],
 ];
 const TAB_SIZES = [2, 4, 8];
+const LAYOUTS = [
+  ["unified", "Unified"],
+  ["split", "Side by Side"],
+];
 const FETCH_MINUTES = [5, 15, 30];
 </script>
 
@@ -234,6 +238,18 @@ const FETCH_MINUTES = [5, 15, 30];
               <span class="swatches classic"><i class="added" /><i class="removed" /></span>
               Green and red
             </label>
+          </div>
+
+          <span class="label">Layout:</span>
+          <div class="segmented">
+            <button
+              v-for="[value, label] in LAYOUTS"
+              :key="value"
+              :class="{ active: settings.diffLayout === value }"
+              @click="settings.diffLayout = value"
+            >
+              {{ label }}
+            </button>
           </div>
 
           <span class="label">Tab width:</span>
