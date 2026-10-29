@@ -70,11 +70,13 @@ export async function installUpdate() {
   }
 }
 
-// Automatic checks, while they're turned on in Settings.
+// Automatic checks, while they're turned on in Settings. Not in `tauri dev`: its
+// version comes from the source, which releases don't bump, so it would always be
+// behind. Check Now in Settings still works there.
 let timer = null;
 function schedule() {
   clearTimeout(timer);
-  if (!settings.checkForUpdates) return;
+  if (!settings.checkForUpdates || import.meta.env.DEV) return;
   timer = setTimeout(async function run() {
     await checkForUpdates({ quiet: true });
     timer = setTimeout(run, DAILY);
