@@ -59,7 +59,7 @@ pub struct Hunk {
 #[derive(Serialize)]
 pub struct Line {
     /// '+', '-', ' ', or '\\' for git's "No newline at end of file" marker.
-    kind: char,
+    pub(crate) kind: char,
     old: Option<u32>,
     new: Option<u32>,
     pub(crate) text: String,

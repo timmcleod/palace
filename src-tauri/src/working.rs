@@ -53,7 +53,9 @@ pub async fn unstage_files(path: String, files: Vec<String>) -> Result<(), Strin
 }
 
 /// Stages one hunk of a file's unstaged diff, or with `staged` set, unstages one hunk
-/// of its staged diff. `hunk` indexes the hunks returned by `working_diff`.
+/// of its staged diff. `hunk` indexes the hunks returned by `working_diff`, and
+/// `lines`, when given, the lines of that hunk to stage or unstage; its other changes
+/// stay where they are.
 #[tauri::command]
 pub async fn stage_hunk(
     path: String,
@@ -61,8 +63,9 @@ pub async fn stage_hunk(
     old_path: Option<String>,
     staged: bool,
     hunk: usize,
+    lines: Option<Vec<usize>>,
 ) -> Result<(), String> {
-    apply_hunk(&path, &file, old_path.as_deref(), staged, hunk)
+    apply_hunk(&path, &file, old_path.as_deref(), staged, hunk, lines.as_deref())
 }
 
 /// Throws away all changes to the listed files, staged and unstaged, returning them to
@@ -73,11 +76,10 @@ pub async fn discard_files(path: String, files: Vec<String>) -> Result<(), Strin
     discard(&path, &files, &move_to_trash)
 }
 
-/// Throws away one hunk of a file's unstaged changes.
+/// Throws away one hunk of a file's unstaged changes, or only the chosen `lines` of it.
 #[tauri::command]
-pub async fn discard_hunk(path: String, file: String, hunk: usize) -> Result<(), String> {
-    let patch = hunk_patch(&path, &file, None, false, hunk)?;
-    git(&path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
+pub async fn discard_hunk(path: String, file: String, hunk: usize, lines: Option<Vec<usize>>) -> Result<(), String> {
+    discard_lines(&path, &file, hunk, lines.as_deref())
 }
 
 #[tauri::command]
@@ -281,8 +283,15 @@ fn unstage(path: &str, files: &[String]) -> Result<(), String> {
     git(path, &args, None).map(drop)
 }
 
-fn apply_hunk(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk: usize) -> Result<(), String> {
-    let patch = hunk_patch(path, file, old_path, staged, hunk)?;
+fn apply_hunk(
+    path: &str,
+    file: &str,
+    old_path: Option<&str>,
+    staged: bool,
+    hunk: usize,
+    lines: Option<&[usize]>,
+) -> Result<(), String> {
+    let patch = hunk_patch(path, file, old_path, staged, hunk, lines.map(|l| (l, staged)))?;
 
     // Unstaging applies the staged hunk in reverse to the index.
     let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
@@ -293,8 +302,22 @@ fn apply_hunk(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk
     git(path, &args, Some(&patch)).map(drop)
 }
 
-/// A patch holding just one hunk of a file's staged or unstaged diff.
-fn hunk_patch(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk: usize) -> Result<String, String> {
+fn discard_lines(path: &str, file: &str, hunk: usize, lines: Option<&[usize]>) -> Result<(), String> {
+    let patch = hunk_patch(path, file, None, false, hunk, lines.map(|l| (l, true)))?;
+    git(path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
+}
+
+/// A patch holding just one hunk of a file's staged or unstaged diff. With `lines`,
+/// the hunk is narrowed to those of its lines, for a patch applied in reverse when
+/// the flag beside them is set.
+fn hunk_patch(
+    path: &str,
+    file: &str,
+    old_path: Option<&str>,
+    staged: bool,
+    hunk: usize,
+    lines: Option<(&[usize], bool)>,
+) -> Result<String, String> {
     let repo = Repository::discover(path).map_err(message)?;
     let diff = file_diff(&repo, file, old_path, staged).map_err(message)?;
     let index = delta_index(&diff, file).ok_or("This file no longer has those changes.")?;
@@ -302,11 +325,20 @@ fn hunk_patch(path: &str, file: &str, old_path: Option<&str>, staged: bool, hunk
         .map_err(message)?
         .ok_or("Binary files can't be changed by chunk.")?;
     let text = patch.to_buf().map_err(message)?;
-    single_hunk_patch(&String::from_utf8_lossy(&text), hunk).ok_or_else(|| "That chunk no longer exists.".to_string())
+    let (header, mut hunk) =
+        single_hunk(&String::from_utf8_lossy(&text), hunk).ok_or("That chunk no longer exists.")?;
+    if let Some((lines, reverse)) = lines {
+        hunk = select_lines(&hunk, lines, reverse).ok_or("Those lines no longer have changes.")?;
+    }
+    let mut patch = header + &hunk;
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    Ok(patch)
 }
 
-/// Keeps a patch's file header and only its `hunk`th hunk.
-fn single_hunk_patch(patch: &str, hunk: usize) -> Option<String> {
+/// Splits a patch into its file header and its `hunk`th hunk.
+fn single_hunk(patch: &str, hunk: usize) -> Option<(String, String)> {
     let mut header = String::new();
     let mut hunks: Vec<String> = Vec::new();
     for line in patch.split_inclusive('\n') {
@@ -319,11 +351,60 @@ fn single_hunk_patch(patch: &str, hunk: usize) -> Option<String> {
         }
     }
 
-    let mut result = header + hunks.get(hunk)?;
-    if !result.ends_with('\n') {
-        result.push('\n');
+    let hunk = hunks.into_iter().nth(hunk)?;
+    Some((header, hunk))
+}
+
+/// Narrows a hunk to the `chosen` lines, counted from the line after its `@@` header
+/// as `working_diff` lists them. The hunk's other changes are left as they are in the
+/// file the patch applies to: applied forward, to the old side, an unchosen addition
+/// isn't there yet and is dropped, while an unchosen removal is still there and stays
+/// as context. Applied in `reverse`, to the new side, it's the other way around.
+/// None when none of the chosen lines is a change.
+fn select_lines(hunk: &str, chosen: &[usize], reverse: bool) -> Option<String> {
+    let mut lines = hunk.split_inclusive('\n');
+    let header = lines.next()?;
+    // "@@ -12,6 +12,8 @@ function name"
+    let rest = header.strip_prefix("@@ -")?;
+    let (old_start, rest) = rest.split_once(' ')?;
+    let (new_start, section) = rest.strip_prefix('+')?.split_once(" @@")?;
+    let start = |range: &str| range.split(',').next().map(str::to_string);
+    let (old_start, new_start) = (start(old_start)?, start(new_start)?);
+
+    let mut body = String::new();
+    let (mut old_count, mut new_count, mut changes) = (0, 0, 0);
+    // A "\ No newline at end of file" marker belongs to the line before it.
+    let mut kept_previous = false;
+    for (i, line) in lines.enumerate() {
+        let picked = chosen.contains(&i);
+        let kind = match line.chars().next()? {
+            '\\' => {
+                if kept_previous {
+                    body.push_str(line);
+                }
+                continue;
+            }
+            ' ' => Some(' '),
+            c @ ('+' | '-') if picked => {
+                changes += 1;
+                Some(c)
+            }
+            '+' => reverse.then_some(' '),
+            '-' => (!reverse).then_some(' '),
+            _ => return None,
+        };
+        kept_previous = kind.is_some();
+        if let Some(kind) = kind {
+            old_count += usize::from(kind != '+');
+            new_count += usize::from(kind != '-');
+            body.push(kind);
+            body.push_str(&line[1..]);
+        }
     }
-    Some(result)
+    if changes == 0 {
+        return None;
+    }
+    Some(format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@{section}{body}"))
 }
 
 fn commit(path: &str, message: &str, amend: bool) -> Result<(), String> {
@@ -577,14 +658,14 @@ mod tests {
         let unstaged = read_working_diff(t.path(), "a.txt", None, false, None).unwrap();
         assert_eq!(unstaged.hunks.len(), 2);
 
-        apply_hunk(t.path(), "a.txt", None, false, 1).unwrap();
+        apply_hunk(t.path(), "a.txt", None, false, 1, None).unwrap();
         let staged = read_working_diff(t.path(), "a.txt", None, true, None).unwrap();
         let unstaged = read_working_diff(t.path(), "a.txt", None, false, None).unwrap();
         assert_eq!((staged.hunks.len(), unstaged.hunks.len()), (1, 1));
         assert!(staged.hunks[0].lines.iter().any(|l| l.text == "line nineteen"));
         assert!(unstaged.hunks[0].lines.iter().any(|l| l.text == "line two"));
 
-        apply_hunk(t.path(), "a.txt", None, true, 0).unwrap();
+        apply_hunk(t.path(), "a.txt", None, true, 0, None).unwrap();
         assert_eq!(statuses(&t), [("a.txt".into(), None, Some("modified"))]);
     }
 
@@ -594,11 +675,93 @@ mod tests {
         t.commit(&[("a.txt", Some("a\n"))], "First");
         t.write(&[("new.txt", Some("one\ntwo\n"))]);
 
-        apply_hunk(t.path(), "new.txt", None, false, 0).unwrap();
+        apply_hunk(t.path(), "new.txt", None, false, 0, None).unwrap();
         assert_eq!(statuses(&t), [("new.txt".into(), Some("added"), None)]);
 
-        apply_hunk(t.path(), "new.txt", None, true, 0).unwrap();
+        apply_hunk(t.path(), "new.txt", None, true, 0, None).unwrap();
         assert_eq!(statuses(&t), [("new.txt".into(), None, Some("untracked"))]);
+    }
+
+    /// The index of each listed line in the file's only hunk.
+    fn line_indexes(t: &TempRepo, staged: bool, lines: &[&str]) -> Vec<usize> {
+        let diff = read_working_diff(t.path(), "a.txt", None, staged, None).unwrap();
+        assert_eq!(diff.hunks.len(), 1);
+        lines
+            .iter()
+            .map(|wanted| {
+                diff.hunks[0]
+                    .lines
+                    .iter()
+                    .position(|l| format!("{}{}", l.kind, l.text) == *wanted)
+                    .unwrap_or_else(|| panic!("no line {wanted:?}"))
+            })
+            .collect()
+    }
+
+    fn index_contents(t: &TempRepo, file: &str) -> String {
+        git(t.path(), &["show", &format!(":{file}")], None).unwrap()
+    }
+
+    #[test]
+    fn staging_and_unstaging_single_lines() {
+        let t = TempRepo::new("stage-lines");
+        t.commit(&[("a.txt", Some("one\ntwo\nthree\nfour\n"))], "First");
+        t.write(&[("a.txt", Some("one\nTWO\nthree\nthree and a half\nfour\n"))]);
+
+        // An addition on its own.
+        let lines = line_indexes(&t, false, &["+three and a half"]);
+        apply_hunk(t.path(), "a.txt", None, false, 0, Some(&lines)).unwrap();
+        assert_eq!(index_contents(&t, "a.txt"), "one\ntwo\nthree\nthree and a half\nfour");
+
+        // A removal without the addition that replaces it.
+        let lines = line_indexes(&t, false, &["-two"]);
+        apply_hunk(t.path(), "a.txt", None, false, 0, Some(&lines)).unwrap();
+        assert_eq!(index_contents(&t, "a.txt"), "one\nthree\nthree and a half\nfour");
+
+        // Unstaging one line puts just that line back.
+        let lines = line_indexes(&t, true, &["+three and a half"]);
+        apply_hunk(t.path(), "a.txt", None, true, 0, Some(&lines)).unwrap();
+        assert_eq!(index_contents(&t, "a.txt"), "one\nthree\nfour");
+
+        // The working copy never changes.
+        assert_eq!(read(&t, "a.txt").unwrap(), "one\nTWO\nthree\nthree and a half\nfour\n");
+    }
+
+    #[test]
+    fn discarding_single_lines_keeps_the_rest() {
+        let t = TempRepo::new("discard-lines");
+        t.commit(&[("a.txt", Some("one\ntwo\nthree\nfour\n"))], "First");
+        t.write(&[("a.txt", Some("one\nTWO\nthree\nthree and a half\nfour\n"))]);
+
+        let lines = line_indexes(&t, false, &["-two", "+TWO"]);
+        discard_lines(t.path(), "a.txt", 0, Some(&lines)).unwrap();
+        assert_eq!(read(&t, "a.txt").unwrap(), "one\ntwo\nthree\nthree and a half\nfour\n");
+
+        let lines = line_indexes(&t, false, &["+three and a half"]);
+        discard_lines(t.path(), "a.txt", 0, Some(&lines)).unwrap();
+        assert_eq!(statuses(&t), []);
+    }
+
+    #[test]
+    fn choosing_only_unchanged_lines_changes_nothing() {
+        let t = TempRepo::new("context-lines");
+        t.commit(&[("a.txt", Some("one\ntwo\n"))], "First");
+        t.write(&[("a.txt", Some("one\nTWO\n"))]);
+
+        let lines = line_indexes(&t, false, &[" one"]);
+        let error = apply_hunk(t.path(), "a.txt", None, false, 0, Some(&lines)).unwrap_err();
+        assert_eq!(error, "Those lines no longer have changes.");
+    }
+
+    #[test]
+    fn narrowing_a_hunk_recounts_its_header() {
+        let hunk = "@@ -1,3 +1,3 @@ fn main\n a\n-b\n+B\n+C\n c\n";
+        assert_eq!(select_lines(hunk, &[3], false).unwrap(), "@@ -1,3 +1,4 @@ fn main\n a\n b\n+C\n c\n");
+        assert_eq!(select_lines(hunk, &[1], true).unwrap(), "@@ -1,5 +1,4 @@ fn main\n a\n-b\n B\n C\n c\n");
+        // A missing-newline marker goes with the line before it.
+        let hunk = "@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+a\n";
+        assert_eq!(select_lines(hunk, &[0], false).unwrap(), "@@ -1,1 +1,0 @@\n-a\n\\ No newline at end of file\n");
+        assert_eq!(select_lines(hunk, &[2], true).unwrap(), "@@ -1,0 +1,1 @@\n+a\n");
     }
 
     #[test]
@@ -696,7 +859,7 @@ mod tests {
         let changed = original.replace("line 2\n", "line two\n").replace("line 19\n", "line nineteen\n");
         t.write(&[("a.txt", Some(&changed))]);
 
-        let patch = hunk_patch(t.path(), "a.txt", None, false, 0).unwrap();
+        let patch = hunk_patch(t.path(), "a.txt", None, false, 0, None).unwrap();
         git(t.path(), &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).unwrap();
 
         let now = read(&t, "a.txt").unwrap();

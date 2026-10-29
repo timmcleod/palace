@@ -74,12 +74,14 @@ async function run(command, args) {
   }
 }
 
-async function onHunk(staged, { action, index }) {
+// `lines`, when set, narrows the action to those lines of the hunk.
+async function onHunk(staged, { action, index, lines }) {
   if (action === "discard") {
-    const ok = await confirmDiscard("Discard this chunk?", "The change will be lost; it can't be recovered from the Trash.");
-    if (ok) run("discard_hunk", { file: props.file.path, hunk: index });
+    const what = !lines ? "this chunk" : lines.length === 1 ? "this line" : "these lines";
+    const ok = await confirmDiscard(`Discard ${what}?`, "The change will be lost; it can't be recovered from the Trash.");
+    if (ok) run("discard_hunk", { file: props.file.path, hunk: index, lines });
   } else {
-    run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk: index });
+    run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk: index, lines });
   }
 }
 
@@ -105,15 +107,15 @@ const SECTIONS = [
     staged: false,
     title: "Unstaged Changes",
     hunkActions: [
-      { id: "discard", label: "Discard Chunk", danger: true },
-      { id: "stage", label: "Stage Chunk" },
+      { id: "discard", label: "Discard Chunk", verb: "Discard", danger: true },
+      { id: "stage", label: "Stage Chunk", verb: "Stage" },
     ],
     fileAction: "Stage File",
   },
   {
     staged: true,
     title: "Staged Changes",
-    hunkActions: [{ id: "unstage", label: "Unstage Chunk" }],
+    hunkActions: [{ id: "unstage", label: "Unstage Chunk", verb: "Unstage" }],
     fileAction: "Unstage File",
   },
 ];
