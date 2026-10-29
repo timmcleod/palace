@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { File, GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
+import { shortcut } from "../lib/platform.js";
 
 // The toolbar's search: files by name or path, and commits in the history being shown
 // by message, author or hash. Picking a file shows its history, picking a commit shows
@@ -193,7 +194,7 @@ defineExpose({ focus });
         ref="input"
         v-model="query"
         placeholder="Search"
-        title="Search files and commits (Ctrl+F)"
+        :title="`Search files and commits (${shortcut('Ctrl+F')})`"
         spellcheck="false"
         @focus="onFocus"
         @blur="open = false"

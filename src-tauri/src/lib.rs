@@ -11,6 +11,8 @@ mod open;
 mod rebase;
 mod remote;
 mod reset;
+#[cfg(any(target_os = "macos", test))]
+mod shell_path;
 mod stash;
 mod tag;
 mod tree;
@@ -22,6 +24,8 @@ mod working;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    shell_path::adopt_login_path();
     github::load();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -81,6 +85,7 @@ pub fn run() {
             open::open_folder,
             open::show_in_folder,
             open::open_terminal,
+            cli::install_git_tools,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,

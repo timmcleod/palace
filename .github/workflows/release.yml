@@ -1,8 +1,8 @@
-# Builds Palace's Linux packages.
+# Builds Palace's Linux and macOS packages.
 #
 # Pushing a version tag such as v1.2.0 (made in Palace, with `npm run release`, or
 # with git) runs the tests, builds the .deb and AppImage with that version, and
-# publishes them as a GitHub release. Running the workflow by hand from the Actions
+# publishes them as a GitHub release, then adds a macOS .dmg to it. Running the workflow by hand from the Actions
 # tab builds the packages without publishing anything, and attaches them to the run
 # instead. Once a release is published, the website shows its version.
 
@@ -77,6 +77,12 @@ jobs:
             **Other distributions:** download the `.AppImage`, make it executable
             (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed,
             and on Ubuntu 22.04 and later, `libfuse2` (`libfuse2t64` on 24.04 and later).
+
+            **macOS** (11 or later, Apple Silicon or Intel): download the `.dmg`, open it and
+            drag Palace to Applications. It isn't signed by Apple yet, so the first time
+            you open it, macOS refuses. Go to System Settings › Privacy & Security and click
+            **Open Anyway**. If macOS says Palace is damaged, run
+            `xattr -cr /Applications/Palace.app` in Terminal and open it again.
           releaseDraft: false
 
       - name: Build the packages
@@ -91,6 +97,69 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  build-macos:
+    # After the Linux build, which creates the release; adding to it one job at a time
+    # keeps the two from overwriting each other's entries in latest.json.
+    needs: build
+    runs-on: macos-latest
+    env:
+      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # One app for both Apple Silicon and Intel Macs.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Run the backend tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Set the app's version from the tag
+        if: env.IS_RELEASE == 'true'
+        run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
+
+      # Not signed by Apple yet: tauri.macos.conf.json signs it ad hoc, which Apple
+      # Silicon needs to run it at all.
+      - name: Build and add to the release
+        if: env.IS_RELEASE == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
+          includeUpdaterJson: true
+          tagName: ${{ github.ref_name }}
+          releaseName: Palace ${{ github.ref_name }}
+          releaseDraft: false
+
+      - name: Build the packages
+        if: env.IS_RELEASE != 'true'
+        run: npm run package -- --target universal-apple-darwin
+
+      - name: Attach the packages to this run
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: palace-macos
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
   website:

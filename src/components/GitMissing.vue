@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { Check, CircleAlert, Copy } from "lucide-vue-next";
+import { isMac } from "../lib/platform.js";
 
 // Shown instead of the app when git isn't installed, or is too old to use.
 const props = defineProps({
@@ -10,15 +12,31 @@ const props = defineProps({
 });
 const emit = defineEmits(["recheck"]);
 
-// apt installs git if it's missing and updates it if it's old.
-const command = "sudo apt install git";
+// apt installs git if it's missing and updates it if it's old. On a Mac, git comes
+// with Apple's Command Line Tools, or from Homebrew.
+const command = isMac ? "brew install git" : "sudo apt install git";
 
 const title = computed(() => (props.status.version ? "Palace needs a newer Git" : "Palace needs Git"));
-const message = computed(() =>
-  props.status.version
-    ? `Git ${props.status.version} is installed, but Palace needs ${props.status.minimum} or newer. Update it in a terminal:`
-    : "Palace uses Git to make every change to your repositories, and it isn't installed. Install it in a terminal:",
-);
+const message = computed(() => {
+  const needs = props.status.version
+    ? `Git ${props.status.version} is installed, but Palace needs ${props.status.minimum} or newer.`
+    : "Palace uses Git to make every change to your repositories, and it isn't installed.";
+  if (!isMac) return `${needs} ${props.status.version ? "Update" : "Install"} it in a terminal:`;
+  return props.status.version
+    ? `${needs} Update the Command Line Tools in System Settings › Software Update, or install a newer Git with Homebrew:`
+    : `${needs} Install Apple's Command Line Tools, which include it. Once they're installed, check again.`;
+});
+
+// Apple's installer for the Command Line Tools runs in its own window.
+const installError = ref("");
+async function installTools() {
+  installError.value = "";
+  try {
+    await invoke("install_git_tools");
+  } catch (e) {
+    installError.value = String(e);
+  }
+}
 
 const copied = ref(false);
 async function copy() {
@@ -35,7 +53,13 @@ async function copy() {
       <h1>{{ title }}</h1>
       <p>{{ message }}</p>
 
-      <div class="command">
+      <template v-if="isMac && !status.version">
+        <button class="primary-button install" @click="installTools">Install Command Line Tools</button>
+        <p v-if="installError" class="error">{{ installError }}</p>
+        <p class="dim">If you use Homebrew, you can run <code class="mono selectable">brew install git</code> instead.</p>
+      </template>
+
+      <div v-else class="command">
         <code class="mono selectable">{{ command }}</code>
         <button class="icon-button small" :title="copied ? 'Copied' : 'Copy'" @click="copy">
           <Check v-if="copied" :size="15" />
@@ -43,8 +67,8 @@ async function copy() {
         </button>
       </div>
 
-      <p class="dim">Then check again. On other distributions, install Git with their package manager.</p>
-      <button class="primary-button" :disabled="checking" @click="emit('recheck')">
+      <p v-if="!isMac" class="dim">Then check again. On other distributions, install Git with their package manager.</p>
+      <button :class="isMac && !status.version ? 'secondary-button' : 'primary-button'" :disabled="checking" @click="emit('recheck')">
         {{ checking ? "Checking…" : "Check Again" }}
       </button>
     </div>
@@ -106,5 +130,18 @@ p.dim {
 
 code {
   font-size: 13.5px;
+}
+
+p.dim code {
+  font-size: 12px;
+}
+
+.install {
+  margin-bottom: 12px;
+}
+
+p.error {
+  font-size: 12.5px;
+  color: var(--danger);
 }
 </style>

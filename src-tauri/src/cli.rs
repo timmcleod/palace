@@ -51,6 +51,27 @@ pub async fn git_check() -> GitCheck {
     check_version(text.as_deref())
 }
 
+/// Opens Apple's installer for the Command Line Tools, which include git. It runs on
+/// its own; Palace checks for git again when the user says it's done.
+#[tauri::command]
+pub async fn install_git_tools() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("xcode-select")
+            .arg("--install")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Couldn't start the installer: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("The Command Line Tools are only for macOS.".into())
+}
+
 fn check_version(output: Option<&str>) -> GitCheck {
     // "git version 2.34.1", sometimes with more after it, e.g. " (Apple Git-145)".
     let version = output.and_then(|o| o.trim().strip_prefix("git version ")).and_then(|v| v.split_whitespace().next());

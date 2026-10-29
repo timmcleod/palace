@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { buildTree, flattenTree } from "../lib/tree.js";
+import { commandKey } from "../lib/platform.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -225,8 +226,9 @@ function onDrop(row, event) {
 const COMPARABLE = ["branch", "remote-branch", "tag"];
 
 function onRowClick(row, event) {
-  // Ctrl- or Shift-clicking a second branch or tag compares it with the first.
-  if ((event.ctrlKey || event.shiftKey) && !row.folder && COMPARABLE.includes(row.key.split(":")[0])) {
+  // Ctrl- (Cmd- on a Mac) or Shift-clicking a second branch or tag compares it with
+  // the first.
+  if ((commandKey(event) || event.shiftKey) && !row.folder && COMPARABLE.includes(row.key.split(":")[0])) {
     emit("compare", row.key);
     return;
   }

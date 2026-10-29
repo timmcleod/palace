@@ -70,6 +70,7 @@ import {
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
+import { commandKey, fileManager, shortcut } from "./lib/platform.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -312,24 +313,30 @@ function describe(place) {
 
 function onNavKeydown(event) {
   // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
-  // dialogs, which keep their own.
+  // dialogs, which keep their own. On a Mac, these and the shortcuts below use Cmd.
   const key = event.key.toLowerCase();
-  if (event.ctrlKey && !event.altKey && (key === "z" || key === "y") && !inTextField(event.target) && !dialogOpen()) {
+  if (commandKey(event) && !event.altKey && (key === "z" || key === "y") && !inTextField(event.target) && !dialogOpen()) {
     event.preventDefault();
     if (key === "y" || event.shiftKey) redo();
     else undo();
     return;
   }
   // Ctrl+Shift+O opens the repository's folder.
-  if (event.ctrlKey && event.shiftKey && !event.altKey && key === "o" && overview.value && !dialogOpen()) {
+  if (commandKey(event) && event.shiftKey && !event.altKey && key === "o" && overview.value && !dialogOpen()) {
     event.preventDefault();
     openOutside("open_folder", "Couldn't Open the Folder");
     return;
   }
   // Ctrl+F goes to the toolbar search.
-  if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f" && toolbarSearch.value) {
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && toolbarSearch.value) {
     event.preventDefault();
     toolbarSearch.value.focus();
+    return;
+  }
+  // Ctrl+, opens Settings.
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "," && overview.value && !dialogOpen()) {
+    event.preventDefault();
+    selected.value = "workspace:settings";
     return;
   }
   if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
@@ -718,7 +725,7 @@ function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
-    current && { label: "Open in Files", detail: "Ctrl+Shift+O", action: () => openOutside("open_folder", "Couldn't Open the Folder") },
+    current && { label: `Open in ${fileManager}`, detail: shortcut("Ctrl+Shift+O"), action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => openOutside("open_terminal", "Couldn't Open a Terminal") },
     current && { separator: true },
     ...recents.value.map((repo) => ({
@@ -913,7 +920,7 @@ function startResize(event, pane, min, max) {
         <div class="nav-buttons">
           <button
             class="icon-button"
-            :title="nav.back.length ? `Back to ${describe(nav.back.at(-1))} (Alt+←)` : 'Back'"
+            :title="nav.back.length ? `Back to ${describe(nav.back.at(-1))} (${shortcut('Alt+←')})` : 'Back'"
             :disabled="!nav.back.length"
             @click="go('back')"
           >
@@ -921,7 +928,7 @@ function startResize(event, pane, min, max) {
           </button>
           <button
             class="icon-button"
-            :title="nav.forward.length ? `Forward to ${describe(nav.forward.at(-1))} (Alt+→)` : 'Forward'"
+            :title="nav.forward.length ? `Forward to ${describe(nav.forward.at(-1))} (${shortcut('Alt+→')})` : 'Forward'"
             :disabled="!nav.forward.length"
             @click="go('forward')"
           >
@@ -1090,7 +1097,7 @@ function startResize(event, pane, min, max) {
         <div class="action-group">
           <button
             class="icon-button"
-            :title="undoStack.length ? `Undo ${undoStack.at(-1).label} (Ctrl+Z)` : 'Nothing to undo'"
+            :title="undoStack.length ? `Undo ${undoStack.at(-1).label} (${shortcut('Ctrl+Z')})` : 'Nothing to undo'"
             :disabled="remoteBusy || !undoStack.length"
             @click="undo"
           >
@@ -1098,7 +1105,7 @@ function startResize(event, pane, min, max) {
           </button>
           <button
             class="icon-button"
-            :title="redoStack.length ? `Redo ${redoStack.at(-1).label} (Ctrl+Shift+Z)` : 'Nothing to redo'"
+            :title="redoStack.length ? `Redo ${redoStack.at(-1).label} (${shortcut('Ctrl+Shift+Z')})` : 'Nothing to redo'"
             :disabled="remoteBusy || !redoStack.length"
             @click="redo"
           >

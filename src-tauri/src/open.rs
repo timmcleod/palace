@@ -3,7 +3,9 @@
 
 use git2::Repository;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(not(target_os = "macos"))]
+use std::process::Stdio;
 use tauri_plugin_opener::OpenerExt;
 
 /// Opens the working copy's folder in the file manager.
@@ -32,9 +34,25 @@ pub async fn show_in_folder(app: tauri::AppHandle, path: String, file: String) -
         .map_err(|e| format!("Couldn't open the folder: {e}"))
 }
 
+/// Opens a terminal in the working copy: iTerm if it's installed, else Terminal.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn open_terminal(path: String) -> Result<(), String> {
+    let dir = workdir(&path)?;
+    let home = std::env::var("HOME").unwrap_or_default();
+    let iterm = ["/Applications/iTerm.app".to_string(), format!("{home}/Applications/iTerm.app")];
+    let app = if iterm.iter().any(|p| Path::new(p).exists()) { "iTerm" } else { "Terminal" };
+    let status = Command::new("open").args(["-a", app]).arg(&dir).status().map_err(|e| format!("Couldn't open {app}: {e}"))?;
+    if !status.success() {
+        return Err(format!("Couldn't open {app}."));
+    }
+    Ok(())
+}
+
 /// Opens a terminal in the working copy: the one in $TERMINAL, else the system's
 /// default (x-terminal-emulator on Debian and Ubuntu), else the first of the common
 /// ones that's installed.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 pub async fn open_terminal(path: String) -> Result<(), String> {
     let dir = workdir(&path)?;
@@ -68,6 +86,7 @@ pub async fn open_terminal(path: String) -> Result<(), String> {
     Err("Palace couldn't find a terminal. Set the TERMINAL environment variable to the one you use.".into())
 }
 
+#[cfg(not(target_os = "macos"))]
 const TERMINALS: &[&str] = &[
     "x-terminal-emulator",
     "ptyxis",
@@ -91,6 +110,7 @@ fn workdir(path: &str) -> Result<PathBuf, String> {
 }
 
 /// The program's full path: `name` itself if it's a path, else where it is on PATH.
+#[cfg(not(target_os = "macos"))]
 fn find_program(name: &str) -> Option<PathBuf> {
     if name.contains('/') {
         return Path::new(name).is_file().then(|| PathBuf::from(name));
@@ -101,6 +121,7 @@ fn find_program(name: &str) -> Option<PathBuf> {
 /// How to tell a terminal which folder to start in. `program` is followed through
 /// symlinks first, since x-terminal-emulator is a link to the real one. Terminals not
 /// listed start in their working directory, which is set as well.
+#[cfg(not(target_os = "macos"))]
 fn directory_args(program: &Path, dir: &Path) -> Vec<String> {
     let real = std::fs::canonicalize(program).unwrap_or_else(|_| program.to_path_buf());
     let name = real.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -123,6 +144,7 @@ fn directory_args(program: &Path, dir: &Path) -> Vec<String> {
 
 /// Inside the AppImage, Palace's environment points GTK and GLib at the libraries and
 /// schemas bundled with it, which would break a terminal from the system.
+#[cfg(not(target_os = "macos"))]
 fn leave_app_image(command: &mut Command) {
     let Some(appdir) = std::env::var_os("APPDIR").filter(|_| std::env::var_os("APPIMAGE").is_some()) else {
         return;
@@ -152,7 +174,7 @@ fn leave_app_image(command: &mut Command) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
 

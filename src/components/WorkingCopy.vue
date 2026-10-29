@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { confirmDiscard } from "../lib/confirm.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
+import { commandKey, fileManager, shortcut } from "../lib/platform.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -197,7 +198,7 @@ function onRowMenu(file, event) {
     { separator: true },
     list.length === 1 && { label: "Open in Editor", action: () => invoke("open_in_editor", { path: props.path, file: file.path }) },
     list.length === 1 && {
-      label: "Show in Files",
+      label: `Show in ${fileManager}`,
       action: () => invoke("show_in_folder", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Show the File", String(e))),
     },
     {
@@ -268,6 +269,13 @@ const canCommit = computed(
     !committing.value &&
     !busy.value,
 );
+
+// Ctrl+Enter (Cmd+Enter on a Mac) in the subject commits.
+function onSubjectEnter(event) {
+  if (!commandKey(event)) return;
+  event.preventDefault();
+  commit();
+}
 
 async function commit() {
   if (!canCommit.value) return;
@@ -383,7 +391,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
           class="subject"
           placeholder="Commit subject"
           spellcheck="true"
-          @keydown.ctrl.enter.prevent="commit"
+          @keydown.enter="onSubjectEnter"
         />
         <span
           class="counter"
@@ -410,7 +418,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
           />
           Amend last commit
         </label>
-        <span class="hint">Ctrl+Enter</span>
+        <span class="hint">{{ shortcut("Ctrl+Enter") }}</span>
         <button type="submit" class="primary-button" :disabled="!canCommit">
           <template v-if="committing">{{ draft.amend ? "Amending…" : "Committing…" }}</template>
           <template v-else-if="draft.amend">Amend Last Commit</template>
