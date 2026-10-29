@@ -311,6 +311,38 @@ export function useGitActions({ overview, run, compare }) {
     await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps }, { undo: "Squash" });
   }
 
+  // Gives a commit on the current branch a new message. The commits after it are
+  // replayed unchanged.
+  async function editMessage(commit) {
+    const title = "Can't Edit This Message";
+    const plan = await rewritePlan([{ commit, index: 0 }], title);
+    if (!plan) return;
+    const [edited, ...later] = plan.commits;
+    if (edited?.id !== commit.id) {
+      await tell(title, `Only commits on ${plan.branch} can be edited here.`);
+      return;
+    }
+
+    const notes = [
+      later.length === 1 && "The commit after it gets a new hash too, but its changes stay the same.",
+      later.length > 1 && `The ${later.length} commits after it get new hashes too, but their changes stay the same.`,
+      // The edited commit is the oldest, so if any are pushed, it is.
+      plan.pushed && `It's already on ${plan.upstream}, so you'll need to force push afterwards.`,
+    ];
+    const values = await openForm({
+      title: "Edit Commit Message",
+      message: notes.filter(Boolean).join("\n\n") || null,
+      fields: [{ key: "message", label: "Message", type: "textarea", value: edited.message }],
+      confirmLabel: "Save",
+    });
+    if (!values || values.message.trim() === edited.message.trim()) return;
+
+    const steps = plan.commits.map((c) => ({ id: c.id, action: "pick", message: c === edited ? values.message : null }));
+    await run(["Editing message…", "Edited message", "Couldn't edit the message"], "rebase_interactive", { base: plan.base, steps }, {
+      undo: "Edit Message",
+    });
+  }
+
   // Moves a commit to just above (newer than) or below (older than) another.
   async function moveCommit(moving, target, position) {
     const plan = await rewritePlan([moving, target], "Can't Move This Commit");
@@ -488,7 +520,7 @@ export function useGitActions({ overview, run, compare }) {
     ];
   }
 
-  function commitMenu(commit) {
+  function commitMenu(commit, rewritable) {
     return [
       { label: "Check Out This Commit", action: () => checkout("commit", commit.id) },
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
@@ -500,6 +532,7 @@ export function useGitActions({ overview, run, compare }) {
         disabled: midOperation(),
       },
       { label: `Revert “${commit.short_id}”`, action: () => revert(commit), disabled: midOperation() },
+      { label: "Edit Message…", action: () => editMessage(commit), disabled: !rewritable || midOperation() },
       { label: `Reset HEAD to “${commit.short_id}”…`, action: () => resetTo(commit.id), disabled: midOperation() },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },

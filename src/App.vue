@@ -1013,7 +1013,7 @@ function startResize(event, pane, min, max) {
           :selected-id="selectedCommit?.id"
           :editable="rewritable"
           @select="selectedCommit = $event"
-          @menu="(commit, event) => openMenu(event, actions.commitMenu(commit))"
+          @menu="(commit, event) => openMenu(event, actions.commitMenu(commit, rewritable))"
           @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable))"
           @move="actions.moveCommit"
           @count="historyCount = $event"
