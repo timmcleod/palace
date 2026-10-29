@@ -161,6 +161,13 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(3)).is_ok()
     }
 
+    /// Waits out the reports of the test's own setup. macOS can deliver them well
+    /// after the watcher starts, so they're let through rather than counted.
+    fn settle(rx: &mpsc::Receiver<()>) {
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < until && rx.recv_timeout(Duration::from_secs(2)).is_ok() {}
+    }
+
     /// Waits out any pending report, then checks nothing more arrives.
     fn quiet(rx: &mpsc::Receiver<()>) -> bool {
         while rx.recv_timeout(Duration::from_millis(800)).is_ok() {}
@@ -173,7 +180,7 @@ mod tests {
         std::fs::create_dir_all(t.dir.join("vendor/package")).unwrap();
         t.commit(&[("a.txt", Some("a\n")), (".gitignore", Some("vendor/\n"))], "First");
         let (_watcher, rx) = watch(&t);
-        assert!(quiet(&rx));
+        settle(&rx);
 
         t.write(&[("a.txt", Some("edited\n"))]);
         assert!(reported(&rx), "editing a tracked file");
@@ -191,7 +198,7 @@ mod tests {
         let t = TempRepo::new("watch-new-dir");
         t.commit(&[("a.txt", Some("a\n"))], "First");
         let (_watcher, rx) = watch(&t);
-        assert!(quiet(&rx));
+        settle(&rx);
 
         std::fs::create_dir_all(t.dir.join("app/Models")).unwrap();
         assert!(reported(&rx), "creating folders");
@@ -206,7 +213,7 @@ mod tests {
         let t = TempRepo::new("watch-stop");
         t.commit(&[("a.txt", Some("a\n"))], "First");
         let (watcher, rx) = watch(&t);
-        assert!(quiet(&rx));
+        settle(&rx);
         drop(watcher);
 
         t.write(&[("a.txt", Some("edited\n"))]);
