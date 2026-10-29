@@ -22,9 +22,12 @@ import { buildTree, flattenTree } from "../lib/tree.js";
 const props = defineProps({
   overview: { type: Object, required: true },
   selected: { type: String, default: null },
+  // Rows of the two revisions being compared, highlighted along with the selection.
+  compared: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
   "update:selected",
+  "compare",
   "open-repository",
   "menu",
   "activate",
@@ -219,7 +222,14 @@ function onDrop(row, event) {
   emit("merge-into-head", name);
 }
 
-function onRowClick(row) {
+const COMPARABLE = ["branch", "remote-branch", "tag"];
+
+function onRowClick(row, event) {
+  // Ctrl- or Shift-clicking a second branch or tag compares it with the first.
+  if ((event.ctrlKey || event.shiftKey) && !row.folder && COMPARABLE.includes(row.key.split(":")[0])) {
+    emit("compare", row.key);
+    return;
+  }
   if (row.folder && !query.value) {
     collapsedFolders.has(row.key) ? collapsedFolders.delete(row.key) : collapsedFolders.add(row.key);
   }
@@ -254,7 +264,11 @@ function onRowClick(row) {
             v-for="row in section.rows"
             :key="row.key"
             class="row"
-            :class="{ selected: row.key === selected, current: row.current, 'drop-target': row.head && overHead }"
+            :class="{
+              selected: row.key === selected || compared.includes(row.key),
+              current: row.current,
+              'drop-target': row.head && overHead,
+            }"
             :style="{ paddingLeft: `${8 + row.depth * 18}px` }"
             :title="row.head && dragging ? `Merge ${dragging} into ${row.label}` : row.title"
             :draggable="canDrag(row)"
@@ -263,7 +277,7 @@ function onRowClick(row) {
             @dragover="onDragOver(row, $event)"
             @dragleave="onDragLeave(row, $event)"
             @drop="onDrop(row, $event)"
-            @click="onRowClick(row)"
+            @click="onRowClick(row, $event)"
             @dblclick="emit('activate', row)"
             @contextmenu.prevent="
               emit('update:selected', row.key);

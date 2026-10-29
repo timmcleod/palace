@@ -3,10 +3,12 @@ import { inject, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import DiffTable from "./DiffTable.vue";
 
-// One file's diff within a commit.
+// One file's diff within a commit, or within a comparison of two revisions.
 const props = defineProps({
   path: { type: String, required: true },
-  commitId: { type: String, required: true },
+  commitId: { type: String, default: null },
+  // { base, head }, in place of a commit.
+  comparison: { type: Object, default: null },
   index: { type: Number, required: true },
 });
 
@@ -22,12 +24,10 @@ const scroller = inject("diffScroller", null);
 async function load(maxLines) {
   loading.value = true;
   try {
-    diff.value = await invoke("file_diff", {
-      path: props.path,
-      id: props.commitId,
-      index: props.index,
-      maxLines,
-    });
+    const where = props.comparison
+      ? ["compare_file_diff", { base: props.comparison.base, head: props.comparison.head }]
+      : ["file_diff", { id: props.commitId }];
+    diff.value = await invoke(where[0], { path: props.path, ...where[1], index: props.index, maxLines });
     error.value = "";
   } catch (e) {
     error.value = String(e);

@@ -15,6 +15,9 @@ struct History {
     generation: u64,
     path: String,
     rev: String,
+    /// Set when the commits reachable from this revision are left out, to list only
+    /// what `rev` has that it doesn't.
+    hide: Option<String>,
     /// Set when only the commits that changed this file are listed.
     file: Option<String>,
     /// Set when only the commits matching this search are listed.
@@ -79,12 +82,14 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Loads the history reachable from `rev` (HEAD when omitted), or with `file`, only
 /// the commits that changed that file, and with `search`, only the commits matching
-/// it. If nothing has changed since the last load of the same history, the cached
-/// walk is reused.
+/// it. With `hide`, the commits reachable from that revision are left out, as in
+/// `git log hide..rev`. If nothing has changed since the last load of the same
+/// history, the cached walk is reused.
 #[tauri::command]
 pub async fn load_history(
     path: String,
     rev: Option<String>,
+    hide: Option<String>,
     file: Option<String>,
     search: Option<String>,
     state: State<'_, HistoryState>,
@@ -96,12 +101,18 @@ pub async fn load_history(
 
     let mut cache = state.0.lock().unwrap();
     if let Some(h) = cache.as_ref() {
-        if h.path == path && h.rev == rev && h.file == file && h.search == search && h.fingerprint == fingerprint {
+        if h.path == path
+            && h.rev == rev
+            && h.hide == hide
+            && h.file == file
+            && h.search == search
+            && h.fingerprint == fingerprint
+        {
             return Ok(summary(h));
         }
     }
 
-    let mut history = walk(&repo, path, rev, file, fingerprint).map_err(message)?;
+    let mut history = walk(&repo, path, rev, hide, file, fingerprint).map_err(message)?;
     if let Some(search) = search {
         keep_matches(&repo, &mut history, &search).map_err(message)?;
         history.search = Some(search);
@@ -250,6 +261,7 @@ fn walk(
     repo: &Repository,
     path: String,
     rev: String,
+    hide: Option<String>,
     file: Option<String>,
     fingerprint: String,
 ) -> Result<History, git2::Error> {
@@ -257,6 +269,7 @@ fn walk(
         generation: GENERATION.fetch_add(1, Ordering::Relaxed) + 1,
         path,
         rev,
+        hide,
         file,
         search: None,
         fingerprint,
@@ -277,9 +290,11 @@ fn walk(
     };
 
     // A branch's history includes what's been fetched for it but not pulled yet, so new
-    // commits on the remote show up as soon as they're fetched.
+    // commits on the remote show up as soon as they're fetched. Not when comparing,
+    // which is about exactly the two revisions.
     let mut starts = vec![start];
-    if let Some(upstream) = upstream_of(repo, &history.rev).filter(|u| *u != start) {
+    let upstream = if history.hide.is_some() { None } else { upstream_of(repo, &history.rev) };
+    if let Some(upstream) = upstream.filter(|u| *u != start) {
         let mut ahead = repo.revwalk()?;
         ahead.push(upstream)?;
         ahead.hide(start)?;
@@ -301,6 +316,9 @@ fn walk(
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     for oid in &starts {
         revwalk.push(*oid)?;
+    }
+    if let Some(hide) = &history.hide {
+        revwalk.hide(repo.revparse_single(hide)?.peel_to_commit()?.id())?;
     }
 
     let mut lanes = Vec::new();
@@ -501,7 +519,7 @@ mod tests {
         let edited = t.commit(&[("new.txt", Some("one\ntwo\nthree\nfour\nfive\n"))], "Edit");
 
         let repo = Repository::open(t.path()).unwrap();
-        let history = walk(&repo, t.path().into(), "HEAD".into(), Some("new.txt".into()), String::new()).unwrap();
+        let history = walk(&repo, t.path().into(), "HEAD".into(), None, Some("new.txt".into()), String::new()).unwrap();
         let ids: Vec<Oid> = history.rows.iter().map(|r| r.oid).collect();
         assert_eq!(ids, [edited, moved, first]);
         assert_eq!(history.rows[0].graph.out, [0]);
@@ -517,7 +535,7 @@ mod tests {
 
         let repo = Repository::open(t.path()).unwrap();
         let search = |query: &str| {
-            let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, String::new()).unwrap();
+            let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
             keep_matches(&repo, &mut history, query).unwrap();
             history.rows.iter().map(|r| r.oid).collect::<Vec<_>>()
         };
@@ -529,7 +547,7 @@ mod tests {
         assert_eq!(search("ada@example.com lovelace").len(), 3);
         assert!(search("nothing like this").is_empty());
 
-        let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, String::new()).unwrap();
+        let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
         keep_matches(&repo, &mut history, "hidden").unwrap();
         assert_eq!(history.times.len(), 2);
         assert_eq!(history.rows[0].graph.out, [0]);
@@ -556,14 +574,30 @@ mod tests {
         let local = mine.commit(&[("c.txt", Some("3"))], "Mine");
         crate::cli::git(mine.path(), &["fetch"], None).unwrap();
 
-        let history = walk(&mine.repo, mine.path().into(), "HEAD".into(), None, String::new()).unwrap();
+        let history = walk(&mine.repo, mine.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
         let ids: HashSet<Oid> = history.rows.iter().map(|r| r.oid).collect();
         assert!(ids.contains(&pushed) && ids.contains(&local));
         assert_eq!(history.incoming, HashSet::from([pushed]));
 
         // A remote branch's own history has nothing "incoming".
-        let remote_history = walk(&mine.repo, mine.path().into(), "refs/remotes/origin/main".into(), None, String::new());
+        let remote_history = walk(&mine.repo, mine.path().into(), "refs/remotes/origin/main".into(), None, None, String::new());
         assert!(remote_history.map(|h| h.incoming.is_empty()).unwrap_or(true));
+    }
+
+    #[test]
+    fn hiding_a_revision_lists_only_what_rev_adds() {
+        let mine = crate::test_support::TempRepo::new("hide-mine");
+        let remote = crate::test_support::TempRepo::bare("hide-remote");
+        mine.commit(&[("a.txt", Some("1"))], "First");
+        crate::cli::git(mine.path(), &["remote", "add", "origin", remote.path()], None).unwrap();
+        crate::cli::git(mine.path(), &["push", "-u", "origin", "HEAD"], None).unwrap();
+        let main = mine.branch();
+        crate::cli::git(mine.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
+        let added = mine.commit(&[("b.txt", Some("2"))], "Feature");
+
+        let history = walk(&mine.repo, mine.path().into(), "feature".into(), Some(main), None, String::new()).unwrap();
+        assert_eq!(history.rows.iter().map(|r| r.oid).collect::<Vec<_>>(), [added]);
+        assert!(history.incoming.is_empty());
     }
 
     #[test]

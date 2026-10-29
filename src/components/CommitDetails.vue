@@ -8,7 +8,10 @@ import FileDiff from "./FileDiff.vue";
 const props = defineProps({
   path: { type: String, required: true },
   // The selected row from the history list; supplies the id and ref labels.
-  commit: { type: Object, required: true },
+  commit: { type: Object, default: null },
+  // { base, head }: in place of a commit, everything `head` changed since it split
+  // from `base`.
+  comparison: { type: Object, default: null },
   // A file to open and scroll to, such as the one whose history is being shown.
   focusFile: { type: String, default: null },
   // A stash: its changes are shown against the commit it was made on.
@@ -31,7 +34,9 @@ async function load() {
   expanded.clear();
 
   try {
-    const result = await invoke("commit_details", { path: props.path, id: props.commit.id });
+    const result = props.comparison
+      ? await invoke("compare", { path: props.path, base: props.comparison.base, head: props.comparison.head })
+      : await invoke("commit_details", { path: props.path, id: props.commit.id });
     if (seq !== loadSeq) return;
     details.value = result;
     if (props.focusFile) focus(props.focusFile);
@@ -40,7 +45,7 @@ async function load() {
   }
 }
 
-watch(() => [props.path, props.commit.id], load, { immediate: true });
+watch(() => [props.path, props.commit?.id, props.comparison?.base, props.comparison?.head], load, { immediate: true });
 
 // Older commits may have the file under a previous name, which still shows up as
 // the old side of a rename or, failing that, as a file with the same name.
@@ -97,7 +102,7 @@ function splitPath(path) {
     </div>
 
     <template v-else-if="details">
-      <section class="meta">
+      <section v-if="!comparison" class="meta">
         <dl>
           <dt>Author</dt>
           <dd>{{ details.author.name }} &lt;{{ details.author.email }}&gt;</dd>
@@ -128,7 +133,7 @@ function splitPath(path) {
         <Avatar :name="details.author.name" :email="details.author.email" :size="72" />
       </section>
 
-      <section class="commit-message">{{ details.message }}</section>
+      <section v-if="!comparison" class="commit-message">{{ details.message }}</section>
 
       <div class="changes-bar">
         <button v-if="details.files.length" class="link-button" @click="toggleAll">
@@ -136,7 +141,10 @@ function splitPath(path) {
         </button>
         <span>{{ changeSummary }}</span>
       </div>
-      <p v-if="details.parents.length > 1 && !stash" class="merge-note">
+      <p v-if="comparison" class="merge-note">
+        Changes made on “{{ comparison.head }}” since it split from “{{ comparison.base }}”.
+      </p>
+      <p v-else-if="details.parents.length > 1 && !stash" class="merge-note">
         This is a merge commit; changes are shown against its first parent.
       </p>
 
@@ -157,7 +165,13 @@ function splitPath(path) {
             <span v-if="file.deletions" class="minus">−{{ file.deletions }}</span>
           </span>
         </div>
-        <FileDiff v-if="expanded.has(i)" :path="path" :commit-id="details.id" :index="i" />
+        <FileDiff
+          v-if="expanded.has(i)"
+          :path="path"
+          :commit-id="details.id ?? null"
+          :comparison="comparison"
+          :index="i"
+        />
       </div>
     </template>
   </div>

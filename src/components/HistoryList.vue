@@ -8,6 +8,8 @@ import CommitGraph from "./CommitGraph.vue";
 const props = defineProps({
   path: { type: String, required: true },
   rev: { type: String, default: null },
+  // Leaves out the commits this revision has, to list only what `rev` adds to it.
+  hide: { type: String, default: null },
   // Only commits that changed this file.
   file: { type: String, default: null },
   // Only commits matching this search.
@@ -48,6 +50,7 @@ async function load({ resetScroll }) {
     const next = await invoke("load_history", {
       path: props.path,
       rev: props.rev,
+      hide: props.hide,
       file: props.file,
       search: props.search || null,
     });
@@ -96,7 +99,7 @@ function commitAt(index) {
 }
 
 watch(
-  () => [props.path, props.rev, props.file, props.search],
+  () => [props.path, props.rev, props.hide, props.file, props.search],
   () => load({ resetScroll: true }),
   { immediate: true },
 );
@@ -390,6 +393,10 @@ const MAX_REFS = 3;
     <template v-if="search">
       <Search :size="32" :stroke-width="1.25" />
       <p>No commits match “{{ search }}”.</p>
+    </template>
+    <template v-else-if="hide">
+      <History :size="32" :stroke-width="1.25" />
+      <p>“{{ rev }}” has no commits that “{{ hide }}” doesn't have.</p>
     </template>
     <template v-else>
       <History :size="32" :stroke-width="1.25" />

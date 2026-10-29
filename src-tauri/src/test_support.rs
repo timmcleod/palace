@@ -68,6 +68,8 @@ impl TempRepo {
     pub fn commit(&self, files: &[(&str, Option<&str>)], message: &str) -> Oid {
         self.write(files);
         let mut index = self.repo.index().unwrap();
+        // The git CLI may have changed the index since (switching branches, say).
+        index.read(true).unwrap();
         for (path, content) in files {
             match content {
                 Some(_) => index.add_path(Path::new(path)).unwrap(),

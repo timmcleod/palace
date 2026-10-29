@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
+import CompareBar from "./components/CompareBar.vue";
 import ConflictView from "./components/ConflictView.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
@@ -120,6 +121,54 @@ const isFullView = computed(() => isSettings.value || isGitHub.value);
 // The GitHub view opened from the welcome screen, before any repository is open.
 const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
+// Comparing two revisions: the history lists what `head` has that `base` doesn't,
+// and with no commit chosen, the detail pane shows all of `head`'s changes.
+const isCompare = computed(() => selected.value === "workspace:compare");
+const comparison = ref(null);
+// Views without a history of their own to search or filter.
+const awayFromHistory = () => isWorkingCopy.value || isFullView.value || isStashes.value || isCompare.value;
+
+function openComparison({ base, head }) {
+  comparison.value = { base, head };
+  selected.value = "workspace:compare";
+  selectedCommit.value = null;
+  fileFilter.value = null;
+  historySearch.value = "";
+}
+
+function closeComparison() {
+  selected.value = headHistoryKey(overview.value);
+}
+
+// Ctrl- or Shift-clicking a branch or tag in the sidebar compares it with the one
+// already selected, or while comparing, puts it in place of the newer side.
+function compareWith(key) {
+  const [, name] = splitKey(key);
+  if (isCompare.value && comparison.value) {
+    if (name !== comparison.value.base) openComparison({ base: comparison.value.base, head: name });
+    return;
+  }
+  const [kind, first] = splitKey(selected.value);
+  if (HISTORY_KINDS.includes(kind) && first !== name) {
+    openComparison({ base: first, head: name });
+  } else {
+    selected.value = key;
+  }
+}
+
+// The sidebar rows of the two sides being compared.
+const comparedKeys = computed(() => {
+  const c = comparison.value;
+  if (!isCompare.value || !c) return [];
+  const o = overview.value;
+  const keyOf = (name) =>
+    o.branches.some((b) => b.name === name)
+      ? `branch:${name}`
+      : o.tags.includes(name)
+        ? `tag:${name}`
+        : `remote-branch:${name}`;
+  return [keyOf(c.base), keyOf(c.head)];
+});
 
 // The Stashes view: the chosen stash (by index) and the search for one by message.
 const selectedStash = ref(null);
@@ -152,14 +201,14 @@ function showFileHistory(file) {
   fileFilter.value = file;
   historySearch.value = "";
   selectedCommit.value = null;
-  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  if (awayFromHistory()) selected.value = headHistoryKey(overview.value);
 }
 
 // The toolbar search looks through the history being shown, or HEAD's from elsewhere.
-const searchRev = computed(() => (isWorkingCopy.value || isStashes.value || isFullView.value ? null : historyRev.value));
+const searchRev = computed(() => (awayFromHistory() ? null : historyRev.value));
 
 function showFoundCommit(commit) {
-  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  if (awayFromHistory()) selected.value = headHistoryKey(overview.value);
   // Filters could hide the commit.
   fileFilter.value = null;
   historySearch.value = "";
@@ -168,7 +217,7 @@ function showFoundCommit(commit) {
 }
 
 function showMatchingCommits(query) {
-  if (isWorkingCopy.value || isFullView.value || isStashes.value) selected.value = headHistoryKey(overview.value);
+  if (awayFromHistory()) selected.value = headHistoryKey(overview.value);
   fileFilter.value = null;
   historySearch.value = query;
 }
@@ -193,6 +242,7 @@ const placeHere = () => ({
   fileFilter: fileFilter.value,
   detailMode: detailMode.value,
   treeFile: treeFile.value,
+  comparison: comparison.value,
 });
 
 const samePlace = (a, b) =>
@@ -201,9 +251,10 @@ const samePlace = (a, b) =>
   a.stash === b.stash &&
   a.fileFilter === b.fileFilter &&
   a.detailMode === b.detailMode &&
-  a.treeFile === b.treeFile;
+  a.treeFile === b.treeFile &&
+  a.comparison === b.comparison;
 
-watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile], () => {
+watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile, comparison], () => {
   if (restoring || !overview.value) return;
   const place = placeHere();
   if (here && samePlace(here, place)) return;
@@ -232,6 +283,7 @@ async function go(direction) {
   detailMode.value = place.detailMode;
   treeFile.value = place.treeFile;
   treeReveal.value = place.treeFile;
+  comparison.value = place.comparison;
   // Let the views settle (opening a stash's view picks one, say) before recording again.
   await nextTick();
   await nextTick();
@@ -248,6 +300,7 @@ function describe(place) {
     "workspace:github": "GitHub",
     "workspace:settings": "Settings",
     "workspace:history": "History",
+    "workspace:compare": place.comparison && `${place.comparison.head} with ${place.comparison.base}`,
   }[place.selected] ?? name ?? kind;
   const detail = place.commit?.short_id ?? (place.selected === "workspace:stashes" && place.stash != null ? `stash@{${place.stash}}` : "");
   return [view, detail].filter(Boolean).join(" › ");
@@ -351,7 +404,7 @@ const REMOTE_TITLES = {
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
 
-const actions = useGitActions({ overview, run: runGit });
+const actions = useGitActions({ overview, run: runGit, compare: openComparison });
 
 // Context menus for sidebar rows, keyed the same way the sidebar keys them.
 function sidebarMenu(row, event) {
@@ -426,6 +479,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       selectedStash.value = null;
       stashQuery.value = "";
       historySearch.value = "";
+      comparison.value = null;
       // Places belong to a repository.
       nav.back = [];
       nav.forward = [];
@@ -592,7 +646,7 @@ const rewritable = computed(() => {
   const o = overview.value;
   const r = historyRef.value;
   const own = !r || (r.kind === "branch" && r.name === o?.head.branch);
-  return !!(o?.head.branch && own && !fileFilter.value && !historySearch.value && !o.operation);
+  return !!(o?.head.branch && own && !isCompare.value && !fileFilter.value && !historySearch.value && !o.operation);
 });
 
 const historyRev = computed(() => {
@@ -656,6 +710,8 @@ function startResize(event, pane, min, max) {
     <Sidebar
       v-model:selected="selected"
       :overview="overview"
+      :compared="comparedKeys"
+      @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
       @activate="sidebarActivate"
@@ -706,20 +762,21 @@ function startResize(event, pane, min, max) {
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
         <span v-else-if="isStashes">Stashes</span>
+        <span v-else-if="isCompare">Compare</span>
         <span v-else class="breadcrumb">
           <template v-for="(part, i) in breadcrumb" :key="i">
             <span v-if="i > 0" class="breadcrumb-sep">›</span>
             <span :class="{ dim: i > 0 }">{{ part }}</span>
           </template>
         </span>
-        <span v-if="fileFilter && !isWorkingCopy && !isStashes" class="file-filter" :title="`Only commits that changed ${fileFilter}`">
+        <span v-if="fileFilter && !awayFromHistory()" class="file-filter" :title="`Only commits that changed ${fileFilter}`">
           <span class="file-filter-name">{{ fileFilter.slice(fileFilter.lastIndexOf("/") + 1) }}</span>
           <button class="icon-button small" title="Show all commits" @click="fileFilter = null">
             <X :size="13" />
           </button>
         </span>
         <span
-          v-if="historySearch && !isWorkingCopy && !isStashes"
+          v-if="historySearch && !awayFromHistory()"
           class="file-filter"
           :title="`Only commits matching “${historySearch}”`"
         >
@@ -740,6 +797,17 @@ function startResize(event, pane, min, max) {
         @action="actions.controlOperation"
       />
 
+      <CompareBar
+        v-if="isCompare && comparison"
+        :path="overview.path"
+        :comparison="comparison"
+        :choices="actions.revisionChoices()"
+        :all-selected="!selectedCommit"
+        :refresh-key="refreshKey"
+        @change="openComparison"
+        @close="closeComparison"
+        @select-all="selectedCommit = null"
+      />
       <WorkingCopy
         v-if="isWorkingCopy"
         :draft="draft"
@@ -761,9 +829,10 @@ function startResize(event, pane, min, max) {
       <div v-show="!isWorkingCopy && !isStashes" class="pane-body">
         <HistoryList
           :path="overview.path"
-          :rev="historyRev"
-          :file="fileFilter"
-          :search="historySearch"
+          :rev="isCompare ? comparison?.head : historyRev"
+          :hide="isCompare ? comparison?.base : null"
+          :file="isCompare ? null : fileFilter"
+          :search="isCompare ? '' : historySearch"
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           :editable="rewritable"
@@ -873,7 +942,10 @@ function startResize(event, pane, min, max) {
       </template>
 
       <template v-else>
-        <div class="subheader">
+        <div v-if="isCompare && !detailCommit && comparison" class="subheader">
+          <span class="dim">All changes on “{{ comparison.head }}”</span>
+        </div>
+        <div v-else class="subheader">
           <span class="mono dim">{{ detailCommit?.short_id }}</span>
           <div class="segmented">
             <button :class="{ active: detailMode === 'changeset' }" @click="detailMode = 'changeset'">Changeset</button>
@@ -900,6 +972,7 @@ function startResize(event, pane, min, max) {
             :focus-file="focusFile"
           />
         </template>
+        <CommitDetails v-else-if="isCompare && comparison" :path="overview.path" :comparison="comparison" />
         <div v-else class="empty-state">
           <p>{{ isStashes ? "Select a stash to see its changes." : "Select a commit to see its details." }}</p>
         </div>

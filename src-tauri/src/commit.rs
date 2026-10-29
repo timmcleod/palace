@@ -1,4 +1,4 @@
-use git2::{Commit, Delta, Diff, DiffFindOptions, Oid, Patch, Repository, Signature};
+use git2::{Commit, Delta, Diff, DiffFindOptions, Oid, Patch, Repository, Signature, Tree};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -23,13 +23,13 @@ pub struct Person {
 
 #[derive(Serialize)]
 pub struct ChangedFile {
-    path: String,
+    pub(crate) path: String,
     /// The previous path, for renames and copies.
     old_path: Option<String>,
     /// "added", "deleted", "modified", "renamed", "copied" or "typechange".
     status: &'static str,
-    additions: usize,
-    deletions: usize,
+    pub(crate) additions: usize,
+    pub(crate) deletions: usize,
     binary: bool,
 }
 
@@ -86,11 +86,27 @@ fn read_details(path: &str, id: &str) -> Result<CommitDetails, git2::Error> {
     let repo = Repository::discover(path)?;
     let commit = repo.find_commit(Oid::from_str(id)?)?;
     let diff = commit_diff(&repo, &commit)?;
+    let files = changed_files(&diff)?;
 
+    Ok(CommitDetails {
+        id: commit.id().to_string(),
+        author: person(&commit.author()),
+        committer: person(&commit.committer()),
+        message: String::from_utf8_lossy(commit.message_bytes()).trim_end().to_string(),
+        parents: commit.parent_ids().map(|p| p.to_string()).collect(),
+        tree_id: commit.tree_id().to_string(),
+        additions: files.iter().map(|f| f.additions).sum(),
+        deletions: files.iter().map(|f| f.deletions).sum(),
+        files,
+    })
+}
+
+/// Each file a diff changes, with its line counts.
+pub(crate) fn changed_files(diff: &Diff) -> Result<Vec<ChangedFile>, git2::Error> {
     let mut files = Vec::new();
     for (index, delta) in diff.deltas().enumerate() {
         let (mut additions, mut deletions, mut binary) = (0, 0, delta.flags().is_binary());
-        if let Some(patch) = Patch::from_diff(&diff, index)? {
+        if let Some(patch) = Patch::from_diff(diff, index)? {
             (_, additions, deletions) = patch.line_stats()?;
             // Binary detection needs the file contents, which loading the patch reads.
             binary |= patch.delta().flags().is_binary();
@@ -116,18 +132,7 @@ fn read_details(path: &str, id: &str) -> Result<CommitDetails, git2::Error> {
             binary,
         });
     }
-
-    Ok(CommitDetails {
-        id: commit.id().to_string(),
-        author: person(&commit.author()),
-        committer: person(&commit.committer()),
-        message: String::from_utf8_lossy(commit.message_bytes()).trim_end().to_string(),
-        parents: commit.parent_ids().map(|p| p.to_string()).collect(),
-        tree_id: commit.tree_id().to_string(),
-        additions: files.iter().map(|f| f.additions).sum(),
-        deletions: files.iter().map(|f| f.deletions).sum(),
-        files,
-    })
+    Ok(files)
 }
 
 fn read_file_diff(path: &str, id: &str, index: usize, max_lines: Option<usize>) -> Result<FileDiff, git2::Error> {
@@ -194,7 +199,12 @@ fn commit_diff<'r>(repo: &'r Repository, commit: &Commit) -> Result<Diff<'r>, gi
         0 => None,
         _ => Some(commit.parent(0)?.tree()?),
     };
-    let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit.tree()?), None)?;
+    tree_diff(repo, parent_tree.as_ref(), &commit.tree()?)
+}
+
+/// The changes from one tree to another, with renames found.
+pub(crate) fn tree_diff<'r>(repo: &'r Repository, old: Option<&Tree>, new: &Tree) -> Result<Diff<'r>, git2::Error> {
+    let mut diff = repo.diff_tree_to_tree(old, Some(new), None)?;
     diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
     Ok(diff)
 }

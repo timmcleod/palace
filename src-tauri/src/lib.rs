@@ -2,6 +2,7 @@ mod avatars;
 mod branch;
 mod cli;
 mod commit;
+mod compare;
 mod config;
 mod git;
 mod github;
@@ -37,6 +38,8 @@ pub fn run() {
             history::search_commits,
             commit::commit_details,
             commit::file_diff,
+            compare::compare,
+            compare::compare_file_diff,
             working::working_status,
             working::working_diff,
             working::stage_files,

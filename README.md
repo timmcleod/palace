@@ -22,7 +22,7 @@
 
 - **History:** every commit on a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash. Search files and commits together with Ctrl+F, browse each commit's files, and blame them line by line.
 - **Working copy:** stage, unstage or discard whole files, single chunks or individual lines. Discarded changes go to the Trash. Commit, amend, and stash everything or just the files you pick.
-- **Branches:** drag a branch onto HEAD to merge it, and drag commits to reorder or squash them. Rebase, cherry-pick, revert and reset from a right-click. Resolve conflicts one block at a time.
+- **Branches:** drag a branch onto HEAD to merge it, and drag commits to reorder or squash them. Rebase, cherry-pick, revert and reset from a right-click. Compare any two branches or tags, and resolve conflicts one block at a time.
 - **Remotes:** fetch, pull and push with live progress and Cancel. Publish new branches, and manage tags, remote branches and remotes.
 - **GitHub:** sign in to clone your repositories, create new ones and manage SSH keys.
 - **Real Git underneath:** Palace runs your own `git` for every change, so your hooks, commit signing, SSH agent, credential helpers and `.gitconfig` work exactly as they do in a terminal.

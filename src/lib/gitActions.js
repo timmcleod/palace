@@ -11,7 +11,7 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // `run(titles, command, args, options)` performs a backend command with progress and
 // error reporting, resolving to the error message or null; `overview` is the
 // repository overview ref.
-export function useGitActions({ overview, run }) {
+export function useGitActions({ overview, run, compare }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -429,6 +429,9 @@ export function useGitActions({ overview, run }) {
       !isCurrent && { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       !isCurrent && { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
       !isCurrent && { separator: true },
+      !isCurrent && head && { label: `Compare “${name}” with “${head}”`, action: () => compare({ head: name, base: head }) },
+      isCurrent && upstream && { label: `Compare “${name}” with “${upstream}”`, action: () => compare({ head: name, base: upstream }) },
+      (!isCurrent && head) || (isCurrent && upstream) ? { separator: true } : null,
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { label: `New Tag at “${name}”…`, action: () => createTag(name) },
       { label: "Rename…", action: () => renameBranch(name) },
@@ -449,6 +452,8 @@ export function useGitActions({ overview, run }) {
       { separator: true },
       { label: `Pull into “${head}”…`, action: () => pull(name), disabled: !head || midOperation() },
       { separator: true },
+      { label: `Compare “${name}” with “${head ?? "HEAD"}”`, action: () => compare({ head: name, base: head ?? "HEAD" }) },
+      { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
       { label: "Delete from Remote…", action: () => deleteRemoteBranch(name), danger: true },
@@ -462,6 +467,8 @@ export function useGitActions({ overview, run }) {
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
       { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
+      { separator: true },
+      { label: `Compare “${head ?? "HEAD"}” with “${name}”`, action: () => compare({ head: head ?? "HEAD", base: name }) },
       { separator: true },
       { label: "Push to Remote", action: () => pushTag(name), disabled: !tagRemote() },
       { separator: true },
@@ -600,5 +607,6 @@ export function useGitActions({ overview, run }) {
     tagMenu,
     stashMenu,
     commitMenu,
+    revisionChoices,
   };
 }
