@@ -363,9 +363,12 @@ function onRowClick(row, event) {
   flex-shrink: 0;
 }
 
-/* The macOS window buttons sit at its left end. */
+/* The macOS window buttons get a row of their own above the name, which then lines
+   up with the section labels below. */
 :root[data-title-bar="overlay"] .sidebar-toolbar {
-  padding-left: 82px;
+  height: auto;
+  padding-top: 30px;
+  padding-bottom: 6px;
 }
 
 .sidebar-scroll {
