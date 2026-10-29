@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { wordHighlights } from "../lib/wordDiff.js";
 
 // Renders one file's diff. Loading it is up to the parent.
 const props = defineProps({
@@ -14,8 +15,11 @@ const props = defineProps({
 const emit = defineEmits(["hunk", "show-all"]);
 
 const LINE_CLASS = { "+": "added", "-": "removed", "\\": "marker" };
-// Marks each changed line, so added and removed lines differ by more than colour.
+// Marks each changed line, so added and removed lines differ by more than color.
 const SIGN = { "+": "+", "-": "−" };
+
+// Each hunk's changed words, by line: see wordDiff.js.
+const words = computed(() => props.diff.hunks?.map((hunk) => wordHighlights(hunk.lines)) ?? []);
 
 // Changed lines picked by clicking their line numbers, all in one hunk at a time.
 const canPick = computed(() => props.hunkActions.some((a) => a.verb));
@@ -130,7 +134,10 @@ function runAction(action, h) {
             <td class="sign" @mousedown="onLineDown($event, h, l)" @mouseenter="onLineEnter(h, l)">
               {{ SIGN[line.kind] ?? "" }}
             </td>
-            <td class="text">{{ line.text }}</td>
+            <td v-if="words[h].has(l)" class="text">
+              <span v-for="(part, p) in words[h].get(l)" :key="p" :class="{ word: part.changed }">{{ part.text }}</span>
+            </td>
+            <td v-else class="text">{{ line.text }}</td>
           </tr>
         </tbody>
       </table>
@@ -283,6 +290,18 @@ td {
 
 .removed .gutter {
   background: var(--diff-removed-gutter);
+}
+
+.word {
+  border-radius: 2px;
+}
+
+.added .word {
+  background: var(--diff-added-word);
+}
+
+.removed .word {
+  background: var(--diff-removed-word);
 }
 
 .pickable .gutter,

@@ -1,6 +1,6 @@
 //! GitHub profile pictures for commit authors.
 //!
-//! Authors using GitHub's private noreply address are recognised from the address
+//! Authors using GitHub's private noreply address are recognized from the address
 //! alone. Anyone else is looked up through the GitHub API on the repository's own
 //! GitHub remote: its recent commits link most authors to their accounts, and the
 //! rest are asked about one by one. Results are remembered on disk, so each person is
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn recognising_noreply_addresses() {
+    fn recognizing_noreply_addresses() {
         assert_eq!(
             noreply_avatar("12345+someone@users.noreply.github.com").as_deref(),
             Some("https://avatars.githubusercontent.com/u/12345?v=4")

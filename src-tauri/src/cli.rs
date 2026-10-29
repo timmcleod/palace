@@ -66,7 +66,7 @@ fn check_version(output: Option<&str>) -> GitCheck {
     }
 }
 
-/// The git process currently doing network work, so it can be cancelled.
+/// The git process currently doing network work, so it can be canceled.
 #[derive(Default)]
 pub struct Running(pub(crate) Mutex<Option<u32>>);
 
@@ -103,14 +103,30 @@ pub(crate) fn git_with_progress_in(
     dir: &PathBuf,
     args: &[&str],
     running: &Running,
-    mut on_progress: impl FnMut(&str),
+    on_progress: impl FnMut(&str),
 ) -> Result<String, String> {
+    run_with_progress(command(dir, args), running, on_progress)
+}
+
+/// Runs git with nobody watching, as background fetches do: anything that would ask
+/// for a password or passphrase fails instead of opening a prompt.
+pub(crate) fn git_unattended(path: &str, args: &[&str], running: &Running) -> Result<String, String> {
+    let mut command = command(&workdir(path)?, args);
+    command
+        // ssh's graphical passphrase prompt.
+        .env("SSH_ASKPASS_REQUIRE", "never")
+        // Git Credential Manager's sign-in window.
+        .env("GCM_INTERACTIVE", "never");
+    run_with_progress(command, running, |_| {})
+}
+
+fn run_with_progress(mut command: Command, running: &Running, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
     let mut child: Child = {
         let mut slot = running.0.lock().unwrap();
         if slot.is_some() {
             return Err("Another fetch, pull or push is still running.".into());
         }
-        let child = command(dir, args)
+        let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -166,7 +182,7 @@ pub(crate) fn git_with_progress_in(
         Ok(s) if s.success() => Ok(join_output(&transcript, &stdout)),
         #[cfg(unix)]
         Ok(s) if std::os::unix::process::ExitStatusExt::signal(&s) == Some(libc::SIGTERM) => {
-            Err("Cancelled.".into())
+            Err("Canceled.".into())
         }
         Ok(_) => Err(join_output(&transcript, &stdout)),
         Err(e) => Err(format!("git failed: {e}")),

@@ -21,6 +21,17 @@ pub async fn fetch(app: AppHandle, path: String, remote: Option<String>) -> Resu
     .await
 }
 
+/// Fetches all remotes without showing progress or asking for credentials, to keep
+/// ahead and behind counts current while Palace is open.
+#[tauri::command]
+pub async fn fetch_in_background(app: AppHandle, path: String) -> Result<String, String> {
+    in_background(app, move |running, _| fetch_unattended(&path, running)).await
+}
+
+fn fetch_unattended(path: &str, running: &Running) -> Result<String, String> {
+    crate::cli::git_unattended(path, &["fetch", "--all", "--quiet"], running)
+}
+
 /// Adds a remote, then fetches it so its branches show straight away. If the fetch
 /// fails (a mistyped URL, no access), the remote stays, to fix or remove.
 #[tauri::command]
@@ -151,7 +162,7 @@ fn clone_into(url: &str, dest: &Path, running: &Running, report: Report) -> Resu
     let parent: PathBuf = dest.parent().ok_or("Choose a folder to clone into.")?.to_path_buf();
     std::fs::create_dir_all(&parent).map_err(|e| format!("Couldn't create {}: {e}", parent.display()))?;
 
-    // If cloning fails or is cancelled, git removes what it had written.
+    // If cloning fails or is canceled, git removes what it had written.
     git_with_progress_in(&parent, &["clone", "--progress", url, &dest.to_string_lossy()], running, report)?;
     let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     Ok(format!("Cloned {name} into {}.", parent.display()))
@@ -425,6 +436,17 @@ mod tests {
     }
 
     #[test]
+    fn background_fetches_bring_in_new_commits() {
+        let (server, local) = setup("background");
+        let other = TempRepo::clone_of("background-other", &server);
+        let theirs = other.commit(&[("b.txt", Some("b\n"))], "Theirs");
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
+
+        fetch_unattended(local.path(), &Running::default()).unwrap();
+        assert_eq!(tracking(&local), theirs);
+    }
+
+    #[test]
     fn fetch_updates_remote_tracking_branches_only() {
         let (server, local) = setup("fetch");
         let before = local.head();
@@ -507,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelling_stops_git_and_the_processes_it_started() {
+    fn canceling_stops_git_and_the_processes_it_started() {
         let (_server, local) = setup("cancel");
         // Make the "server" side hang, like a stalled network connection.
         let mut config = local.repo.config().unwrap();
@@ -523,7 +545,7 @@ mod tests {
             fetch.join().unwrap()
         });
 
-        assert_eq!(result, Err("Cancelled.".to_string()));
+        assert_eq!(result, Err("Canceled.".to_string()));
         assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
         // The slot is free again for the next operation.
         assert!(running.0.lock().unwrap().is_none());

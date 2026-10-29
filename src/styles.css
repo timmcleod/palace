@@ -29,15 +29,17 @@
   --lane-6: #0d9488;
 
   /* Diffs use blue for added and orange for removed rather than green and red, so
-     they stay distinct with red-green colour blindness (deuteranopia); every line
+     they stay distinct with red-green color blindness (deuteranopia); every line
      also carries a +/− marker. */
   --diff-gutter-bg: #f7f7f7;
   --diff-hunk-bg: #f1f5fb;
   --diff-added-bg: #ddeeff;
   --diff-added-gutter: #c2dcff;
+  --diff-added-word: #a8cfff;
   --diff-added-text: #0969da;
   --diff-removed-bg: #ffe8d1;
   --diff-removed-gutter: #ffd0a3;
+  --diff-removed-word: #ffc68f;
   --diff-removed-text: #bc4c00;
   --conflict-current: #ddeeff;
   --conflict-incoming: #fdf0c4;
@@ -88,9 +90,11 @@
   --diff-hunk-bg: #1f2838;
   --diff-added-bg: #12304f;
   --diff-added-gutter: #173f6b;
+  --diff-added-word: #1f5590;
   --diff-added-text: #58a6ff;
   --diff-removed-bg: #3f2810;
   --diff-removed-gutter: #5a3812;
+  --diff-removed-word: #74481a;
   --diff-removed-text: #e8873a;
   --conflict-current: #12304f;
   --conflict-incoming: #3b3214;
@@ -102,18 +106,22 @@
 :root[data-diff-colors="classic"] {
   --diff-added-bg: #dafbe1;
   --diff-added-gutter: #aceebb;
+  --diff-added-word: #aceebb;
   --diff-added-text: #1a7f37;
   --diff-removed-bg: #ffebe9;
   --diff-removed-gutter: #ffcecb;
+  --diff-removed-word: #ffc1bc;
   --diff-removed-text: #cf222e;
 }
 
 :root[data-theme="dark"][data-diff-colors="classic"] {
   --diff-added-bg: #173322;
   --diff-added-gutter: #1f4a2e;
+  --diff-added-word: #26603a;
   --diff-added-text: #3fb950;
   --diff-removed-bg: #3d1d20;
   --diff-removed-gutter: #5c2629;
+  --diff-removed-word: #73302f;
   --diff-removed-text: #f85149;
 }
 
@@ -129,7 +137,7 @@ body {
   background: var(--sidebar-bg);
 }
 
-/* Desktop-app behaviour: text isn't selectable, so clicking, double-clicking or
+/* Desktop-app behavior: text isn't selectable, so clicking, double-clicking or
    dragging things like branches doesn't highlight their labels. The detail pane's
    content opts back in with .selectable, and form fields stay editable. WebKitGTK,
    which runs the app on Linux, only understands the prefixed property. */

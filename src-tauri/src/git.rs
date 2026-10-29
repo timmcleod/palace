@@ -115,7 +115,7 @@ fn read_head(repo: &Repository) -> Result<Head, git2::Error> {
             branch: head.is_branch().then(|| head.shorthand().unwrap_or("").to_string()),
             short_id: head.target().map(|oid| oid.to_string()[..7].to_string()),
         }),
-        // A freshly initialised repo has a HEAD that names a branch with no commits yet.
+        // A freshly initialized repo has a HEAD that names a branch with no commits yet.
         Err(e) if e.code() == ErrorCode::UnbornBranch => {
             let branch = repo
                 .find_reference("HEAD")?

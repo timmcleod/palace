@@ -6,7 +6,7 @@ import { shallowRef } from "vue";
 export const formDialog = shallowRef(null);
 
 /**
- * Shows a modal form and resolves to its values, or null if cancelled.
+ * Shows a modal form and resolves to its values, or null if canceled.
  *
  * fields: [{ key, label, type: "text" | "password" | "textarea" | "select" | "checkbox", value, options, placeholder }]
  */
@@ -41,7 +41,7 @@ export const tagDialog = shallowRef(null);
 
 /**
  * Shows the Create New Tag dialog and resolves to { name, revision, message, push },
- * or null if cancelled. options: { path, revision, branches, remoteBranches, tags, hasRemote }
+ * or null if canceled. options: { path, revision, branches, remoteBranches, tags, hasRemote }
  */
 export function openTagDialog(options) {
   return new Promise((resolve) => {
@@ -58,7 +58,7 @@ export const pullDialog = shallowRef(null);
 
 /**
  * Shows the Pull dialog and resolves to { from, rebase, autostash }, or null if
- * cancelled. options: { branch, from, remotes: [{ name, branches }], rebase, autostash }
+ * canceled. options: { branch, from, remotes: [{ name, branches }], rebase, autostash }
  */
 export function openPullDialog(options) {
   return new Promise((resolve) => {
@@ -75,7 +75,7 @@ export const resetDialog = shallowRef(null);
 
 /**
  * Shows the Reset dialog and resolves to { revision, keepChanges }, or null if
- * cancelled. options: { path, revision, branch, upstream, branches, tags, remoteBranches }
+ * canceled. options: { path, revision, branch, upstream, branches, tags, remoteBranches }
  */
 export function openResetDialog(options) {
   return new Promise((resolve) => {
@@ -91,7 +91,7 @@ export function closeResetDialog(values) {
 export const cloneDialog = shallowRef(null);
 
 /**
- * Shows the Clone dialog and resolves to { url, location }, or null if cancelled.
+ * Shows the Clone dialog and resolves to { url, location }, or null if canceled.
  * options: { url, folder } — the URL to clone (may be empty) and the clone folder.
  */
 export function openCloneDialog(options) {
@@ -108,7 +108,7 @@ export function closeCloneDialog(values) {
 export const mergeDialog = shallowRef(null);
 
 /**
- * Shows the Merge dialog and resolves to { branch, options }, or null if cancelled.
+ * Shows the Merge dialog and resolves to { branch, options }, or null if canceled.
  * options: { head, branch, branches, remoteBranches, tags }
  */
 export function openMergeDialog(options) {

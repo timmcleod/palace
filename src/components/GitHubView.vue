@@ -8,7 +8,7 @@ import { openForm } from "../lib/overlays.js";
 import GitHubAccount from "./GitHubAccount.vue";
 import GitHubKeys from "./GitHubKeys.vue";
 
-// Your GitHub account, organisations and collaborators on the left, the chosen one's
+// Your GitHub account, organizations and collaborators on the left, the chosen one's
 // repositories on the right, each ready to clone.
 defineProps({
   // Shown on its own from the welcome screen, with a way back.
@@ -73,7 +73,7 @@ watch(owner, (o) => {
   if (o && !listings.has(o.login)) loadRepos(o);
 });
 
-// Repositories can be created for yourself and in organisations, not for collaborators.
+// Repositories can be created for yourself and in organizations, not for collaborators.
 const createError = ref("");
 
 async function createRepository() {

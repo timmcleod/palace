@@ -23,7 +23,7 @@ const picture = computed(() => {
 const loaded = ref(false);
 watch(picture, () => (loaded.value = false));
 
-// A stable colour per author, so the same person is recognisable everywhere.
+// A stable color per author, so the same person is recognizable everywhere.
 const hue = computed(() => {
   let hash = 0;
   for (const char of (props.email || props.name).toLowerCase()) {

@@ -69,6 +69,7 @@ import {
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
+import { settings } from "./lib/settings.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -357,7 +358,7 @@ onBeforeUnmount(() => {
 const remoteOp = ref(null);
 let dismissTimer;
 
-// Only network operations report progress and can be cancelled.
+// Only network operations report progress and can be canceled.
 const NETWORK = new Set(["fetch", "pull", "push", "publish_branch", "clone_repo", "add_remote", "delete_remote_tag"]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
@@ -380,6 +381,7 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
   remoteOp.value = op;
 
   try {
+    await stopBackgroundFetch();
     const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
     const label = !path && (undoLabel ?? UNDOABLE[command]);
     const mode = command === "reset" && args.keepChanges ? "mixed" : "keep";
@@ -389,7 +391,10 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     op.title = done;
     if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
     // Fetching and pulling can bring in commits by new authors.
-    if (command === "fetch" || command === "pull") loadAvatars(overview.value.path);
+    if (command === "fetch" || command === "pull") {
+      loadAvatars(overview.value.path);
+      fetchedAt[overview.value.path] = Date.now();
+    }
     // Successes get out of the way; failures stay until dismissed.
     dismissTimer = setTimeout(() => {
       if (remoteOp.value === op) remoteOp.value = null;
@@ -428,6 +433,60 @@ const REMOTE_TITLES = {
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
 
+// --- Background fetch --------------------------------------------------------------
+
+// Every few minutes, the open repository's remotes are fetched quietly, so the counts
+// of commits to pull and push stay current. Failures (offline, a locked key) are let
+// go until the next time.
+const fetchedAt = reactive({});
+const triedAt = {};
+let backgroundFetch = null;
+const now = ref(Date.now());
+
+function fetchIfDue() {
+  now.value = Date.now();
+  const o = overview.value;
+  if (!settings.fetchInBackground || !o?.remotes.length || backgroundFetch || remoteBusy.value) return;
+  if (loading.value || !navigator.onLine) return;
+  const last = Math.max(fetchedAt[o.path] ?? 0, triedAt[o.path] ?? 0);
+  if (now.value - last < settings.fetchMinutes * 60_000) return;
+  triedAt[o.path] = now.value;
+  backgroundFetch = invoke("fetch_in_background", { path: o.path })
+    .then(() => {
+      fetchedAt[o.path] = Date.now();
+      if (o.path === overview.value?.path) {
+        loadAvatars(o.path);
+        refresh();
+      }
+    })
+    .catch(() => {})
+    .finally(() => (backgroundFetch = null));
+}
+
+// Anything the user does goes first: a background fetch still running is canceled.
+// It also keeps the fetch's new tags out of an undo step's before and after.
+async function stopBackgroundFetch() {
+  if (!backgroundFetch) return;
+  invoke("cancel_remote").catch(() => {});
+  await backgroundFetch;
+}
+
+const fetchTimer = setInterval(fetchIfDue, 30_000);
+onBeforeUnmount(() => clearInterval(fetchTimer));
+// A repository is fetched shortly after it's opened, once it has had time to load.
+watch(
+  () => overview.value?.path,
+  () => setTimeout(fetchIfDue, 3000),
+);
+
+const fetchTitle = computed(() => {
+  const at = overview.value && fetchedAt[overview.value.path];
+  if (!at) return "Fetch from all remotes";
+  const minutes = Math.floor((now.value - at) / 60_000);
+  const ago = minutes < 1 ? "just now" : minutes === 1 ? "a minute ago" : `${minutes} minutes ago`;
+  return `Fetch from all remotes (last fetched ${ago})`;
+});
+
 // --- Undo and redo -----------------------------------------------------------------
 
 // Operations that can be undone, and what Undo calls them. Committing is undoable
@@ -460,6 +519,7 @@ const redoStack = ref([]);
  * `step` is { label, mode } and, for a commit, its message.
  */
 async function undoable(step, work) {
+  await stopBackgroundFetch();
   const path = overview.value.path;
   const snapshot = () => invoke("ref_snapshot", { path }).catch(() => null);
   const before = await snapshot();
@@ -969,7 +1029,7 @@ function startResize(event, pane, min, max) {
           <button
             class="icon-button"
             :class="{ active: remoteOp?.command === 'fetch' && remoteBusy }"
-            title="Fetch from all remotes"
+            :title="fetchTitle"
             :disabled="remoteBusy"
             @click="runRemote('fetch')"
           >

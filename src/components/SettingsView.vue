@@ -97,6 +97,7 @@ const THEMES = [
   ["dark", "Dark"],
 ];
 const TAB_SIZES = [2, 4, 8];
+const FETCH_MINUTES = [5, 15, 30];
 </script>
 
 <template>
@@ -161,6 +162,31 @@ const TAB_SIZES = [2, 4, 8];
       </section>
 
       <section>
+        <h2>Fetching</h2>
+        <label class="choice">
+          <input v-model="settings.fetchInBackground" type="checkbox" />
+          Fetch in the background
+        </label>
+        <p class="note indent">
+          Keeps the counts of commits to pull and push up to date. Fetching never changes your branches or files.
+        </p>
+        <div class="fields indent">
+          <span class="label">Every:</span>
+          <div class="segmented">
+            <button
+              v-for="minutes in FETCH_MINUTES"
+              :key="minutes"
+              :class="{ active: settings.fetchMinutes === minutes }"
+              :disabled="!settings.fetchInBackground"
+              @click="settings.fetchMinutes = minutes"
+            >
+              {{ minutes }} minutes
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section>
         <h2>Updates</h2>
         <p class="note">You have Palace {{ updates.current || "…" }}.</p>
         <label class="choice">
@@ -196,12 +222,12 @@ const TAB_SIZES = [2, 4, 8];
       <section>
         <h2>Diffs</h2>
         <div class="fields">
-          <span class="label top">Colours:</span>
+          <span class="label top">Colors:</span>
           <div class="stack">
             <label class="choice">
               <input v-model="settings.diffColors" type="radio" value="accessible" />
               <span class="swatches accessible"><i class="added" /><i class="removed" /></span>
-              <span>Blue and orange <span class="dim">— easy to tell apart with red-green colour blindness</span></span>
+              <span>Blue and orange <span class="dim">— easy to tell apart with red-green color blindness</span></span>
             </label>
             <label class="choice">
               <input v-model="settings.diffColors" type="radio" value="classic" />
@@ -381,6 +407,14 @@ input[type="text"]:focus {
 
 .segmented button.active {
   background: var(--row-selected);
+}
+
+.segmented button:disabled {
+  opacity: 0.5;
+}
+
+.fields.indent {
+  margin-left: 26px;
 }
 
 .choice {

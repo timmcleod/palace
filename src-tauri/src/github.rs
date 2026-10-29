@@ -65,7 +65,7 @@ pub async fn github_sign_out() -> Result<(), String> {
     Ok(())
 }
 
-/// Someone whose repositories can be listed: the signed-in account, an organisation
+/// Someone whose repositories can be listed: the signed-in account, an organization
 /// it belongs to, or someone whose repositories it collaborates on.
 #[derive(Serialize, Debug)]
 pub struct Owner {
@@ -104,7 +104,7 @@ struct Org {
 
 const NOT_SIGNED_IN: &str = "Sign in to GitHub first, in Settings › GitHub.";
 
-/// The signed-in account, its organisations, then the people whose repositories it
+/// The signed-in account, its organizations, then the people whose repositories it
 /// collaborates on, alphabetically within each group.
 #[tauri::command]
 pub async fn github_owners() -> Result<Vec<Owner>, String> {
@@ -261,7 +261,7 @@ pub async fn github_scopes() -> Result<Option<Vec<String>>, String> {
     .await
 }
 
-/// Creates a repository for the signed-in account (`kind` "me") or an organisation.
+/// Creates a repository for the signed-in account (`kind` "me") or an organization.
 /// With `readme`, GitHub gives it a first commit, so it isn't empty when cloned.
 #[tauri::command]
 pub async fn github_create_repo(

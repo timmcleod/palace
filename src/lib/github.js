@@ -10,7 +10,7 @@ invoke("github_account")
   .catch(() => {});
 
 // A new classic token with the scopes Palace uses: private repositories, workflow
-// files (pushing changes to .github/workflows), organisations, and SSH keys.
+// files (pushing changes to .github/workflows), organizations, and SSH keys.
 export const NEW_TOKEN_URL =
   "https://github.com/settings/tokens/new?description=Palace&scopes=repo,workflow,read:org,admin:public_key";
 
@@ -24,7 +24,7 @@ export const SCOPES = [
 
 /**
  * Asks for a personal access token and signs in with it. Resolves to an error
- * message, or null when signed in or cancelled.
+ * message, or null when signed in or canceled.
  */
 export async function signInWithToken() {
   const values = await openForm({

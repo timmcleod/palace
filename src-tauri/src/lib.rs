@@ -101,6 +101,7 @@ pub fn run() {
             github::github_delete_key,
             github::local_ssh_keys,
             remote::fetch,
+            remote::fetch_in_background,
             remote::pull,
             remote::push,
             remote::publish_branch,
