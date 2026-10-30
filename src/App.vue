@@ -63,6 +63,7 @@ import {
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
 import {
+  askConfirm,
   cloneDialog,
   confirmDialog,
   contextMenu,
@@ -76,6 +77,7 @@ import {
   tell,
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
+import { CANCELED } from "./lib/confirm.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
@@ -232,8 +234,10 @@ const openIssues = ref(null);
 const updatedIssue = shallowRef(null);
 
 function onIssueUpdated(issue) {
-  if (openIssues.value != null && selectedIssue.value?.state !== issue.state) {
-    openIssues.value += issue.state === "open" ? 1 : -1;
+  // "#123" can open a pull request here, which counts toward the open pull requests.
+  const count = issue.pull_request ? openPulls : openIssues;
+  if (count.value != null && selectedIssue.value?.state !== issue.state) {
+    count.value += issue.state === "open" ? 1 : -1;
   }
   selectedIssue.value = issue;
   updatedIssue.value = issue;
@@ -275,8 +279,7 @@ function onPullUpdated(pull) {
 // After a pull request is merged here, the merge is fetched, and the local branch
 // that tracked it is offered for deleting: from wherever it's checked out, by going
 // to the branch it was merged into.
-async function onPullMerged({ base, head, headRepo, branchDeleted }) {
-  const number = selectedPull.value?.number ?? selectedIssue.value?.number;
+async function onPullMerged({ number, base, head, headRepo, branchDeleted }) {
   const remotes = overview.value.remotes;
   const headRemote = githubRemoteOf(remotes, headRepo);
   const baseRemote = githubRemoteOf(remotes, issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`);
@@ -286,9 +289,12 @@ async function onPullMerged({ base, head, headRepo, branchDeleted }) {
   }
 
   const offers = [];
-  if (local && local.name !== overview.value.head.branch) {
+  // Deleting is forced, since a squash or rebase leaves the branch looking unmerged,
+  // so a branch with commits that were never pushed is kept.
+  const unpushed = local?.ahead > 0;
+  if (local && !unpushed && local.name !== overview.value.head.branch) {
     offers.push({ label: `Delete “${local.name}”`, run: () => actions.deleteMergedBranch(local.name) });
-  } else if (local) {
+  } else if (local && !unpushed) {
     const into =
       overview.value.branches.find((b) => baseRemote && b.upstream === `${baseRemote.name}/${base}`) ??
       overview.value.branches.find((b) => b.name === base);
@@ -301,9 +307,14 @@ async function onPullMerged({ base, head, headRepo, branchDeleted }) {
   }
   clearTimeout(dismissTimer);
   const op = reactive({
-    title: number ? `Merged pull request #${number}` : "Merged the pull request",
+    title: `Merged pull request #${number}`,
     state: "done",
-    message: branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
+    message: [
+      branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
+      unpushed && `Your local “${local.name}” has commits that weren't pushed, so it's been kept.`,
+    ]
+      .filter(Boolean)
+      .join(" "),
     actions: offers,
   });
   remoteOp.value = op;
@@ -614,7 +625,18 @@ const remoteOp = ref(null);
 let dismissTimer;
 
 // Only network operations report progress and can be canceled.
-const NETWORK = new Set(["fetch", "pull", "push", "publish_branch", "clone_repo", "add_remote", "delete_remote_tag"]);
+const NETWORK = new Set([
+  "fetch",
+  "pull",
+  "push",
+  "publish_branch",
+  "clone_repo",
+  "add_remote",
+  "delete_remote_tag",
+  "delete_remote_branch",
+  "rename_remote_branch",
+  "finish_remote_rename",
+]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 const remoteBusy = computed(() => remoteOp.value?.state === "running");
@@ -658,7 +680,9 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     return null;
   } catch (e) {
     const message = String(e);
-    if (quietError?.(message)) {
+    if (message === CANCELED) {
+      remoteOp.value = null;
+    } else if (quietError?.(message)) {
       remoteOp.value = null;
     } else if (message.startsWith("CONFLICT: ")) {
       // The operation is under way and waiting on the user, not failed.
@@ -797,9 +821,24 @@ const otherStacks = new Map();
 async function undoable({ cover, ...step }, work) {
   await stopBackgroundFetch();
   const path = overview.value.path;
-  const snapshot = (cover) => invoke("take_snapshot", { path, cover }).catch(() => null);
-  // Without a snapshot (the changes are too large to copy, say), it just isn't undoable.
+  let reason = "";
+  const snapshot = (cover) =>
+    invoke("take_snapshot", { path, cover }).catch((e) => {
+      reason = String(e);
+      return null;
+    });
+  // Without a snapshot, it isn't undoable. Changes to files would then be lost for
+  // good, though the confirmation said they could be undone, so it asks again.
   const before = await snapshot(cover ?? null);
+  if (!before && cover) {
+    const ok = await askConfirm({
+      title: `${step.label} Without Undo?`,
+      message: `Palace couldn't keep a copy of the changes to undo this with: ${reason}\n\nGo ahead anyway? It can't be undone.`,
+      confirmLabel: step.label,
+      danger: true,
+    });
+    if (!ok) throw CANCELED;
+  }
   const result = await work();
   const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
   if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
@@ -901,7 +940,7 @@ function onPullRequestClosed(pull) {
 // or to view the one it has. Not for the repository's main branch, or while the
 // dialog is the one pushing.
 async function offerPullRequest(op, branch) {
-  if (!githubAccount.value || !branch || pullRequestDialog.value) return;
+  if (!githubAccount.value || !branch || pullRequestDialog.value || !issueRemotes.value.length) return;
   await loadRepository(overview.value.path, { quiet: true });
   const plan = pullRequestPlan(overview.value, pullTarget(), branch);
   if (!plan || plan.push) return;

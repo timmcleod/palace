@@ -1,7 +1,7 @@
 <script setup>
 import { ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { confirmDiscard } from "../lib/confirm.js";
+import { CANCELED, confirmDiscard } from "../lib/confirm.js";
 import DiffTable from "./DiffTable.vue";
 
 // The staged and unstaged changes of one working-copy file, with hunk staging.
@@ -70,7 +70,7 @@ async function run(command, args, step) {
     const work = () => invoke(command, { path: props.path, ...args });
     await (step ? props.undoable(step, work) : work());
   } catch (e) {
-    error.value = String(e);
+    if (String(e) !== CANCELED) error.value = String(e);
   } finally {
     busy.value = false;
     emit("changed");

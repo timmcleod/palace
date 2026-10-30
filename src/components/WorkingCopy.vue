@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
-import { confirmDiscard } from "../lib/confirm.js";
+import { CANCELED, confirmDiscard } from "../lib/confirm.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 import { commandKey, fileManager, shortcut } from "../lib/platform.js";
 import { useIssueSuggestions } from "../lib/issueSuggestions.js";
@@ -60,7 +60,7 @@ async function run(command, args, step) {
     const work = () => invoke(command, { path: props.path, ...args });
     await (step ? props.undoable(step, work) : work());
   } catch (e) {
-    error.value = String(e);
+    if (String(e) !== CANCELED) error.value = String(e);
   } finally {
     busy.value = false;
     emit("changed");

@@ -131,7 +131,12 @@ fn read_files(repo: &Repository, cover: &Cover) -> Result<Vec<FileState>, String
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
     let index = repo.index().map_err(message)?;
     let mut total = 0;
-    paths.iter().map(|path| file_state(repo, workdir, &index, path, true, &mut total)).collect()
+    paths
+        .iter()
+        // A submodule's folder: what's in it is the submodule's, not this repository's.
+        .filter(|path| !workdir.join(path).symlink_metadata().is_ok_and(|m| m.is_dir()))
+        .map(|path| file_state(repo, workdir, &index, path, true, &mut total))
+        .collect()
 }
 
 fn covered(repo: &Repository, cover: &Cover) -> Result<BTreeSet<String>, git2::Error> {
@@ -372,13 +377,19 @@ fn restore_refs(path: &str, from: &Snapshot, to: &Snapshot, mode: &str, done: &m
 /// so it's rebuilt from the oldest stash up; the stashes themselves are commits that
 /// stay in the repository.
 fn put_stashes(path: &str, now: &[(String, String)], to: &[(String, String)]) -> Result<(), String> {
-    if !now.is_empty() {
-        git(path, &["update-ref", "-d", "refs/stash"], None)?;
-    }
-    for (id, description) in to.iter().rev() {
-        git(path, &["stash", "store", "--quiet", "--message", description, id], None)?;
-    }
-    Ok(())
+    let rebuild = |list: &[(String, String)]| -> Result<(), String> {
+        if git(path, &["rev-parse", "--verify", "--quiet", "refs/stash"], None).is_ok() {
+            git(path, &["update-ref", "-d", "refs/stash"], None)?;
+        }
+        for (id, description) in list.iter().rev() {
+            git(path, &["stash", "store", "--quiet", "--message", description, id], None)?;
+        }
+        Ok(())
+    };
+    // Halfway through, the list would be missing stashes: put back the one there was.
+    rebuild(to).inspect_err(|_| {
+        let _ = rebuild(now);
+    })
 }
 
 /// Puts files back in the index and the working copy as `files` has them.

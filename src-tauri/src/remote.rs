@@ -178,13 +178,13 @@ fn delete_on_remote(path: &str, name: &str, running: &Running, report: Report) -
 #[tauri::command]
 pub async fn finish_remote_rename(app: AppHandle, path: String, remote: String, old: String, new: String) -> Result<String, String> {
     in_background(app, move |running, report| {
-        let exists = |branch: &str| {
-            crate::cli::git(&path, &["ls-remote", "--heads", &remote, &format!("refs/heads/{branch}")], None)
-                .map(|out| !out.trim().is_empty())
-        };
+        let (old_ref, new_ref) = (format!("refs/heads/{old}"), format!("refs/heads/{new}"));
         let mut done = false;
         for _ in 0..15 {
-            if exists(&new)? && !exists(&old)? {
+            // One look at both names, which Cancel can stop.
+            let listed = git_with_progress(&path, &["ls-remote", "--heads", &remote, &old_ref, &new_ref], running, &mut *report)?;
+            let has = |name: &str| listed.lines().any(|line| line.ends_with(&format!("\t{name}")));
+            if has(&new_ref) && !has(&old_ref) {
                 done = true;
                 break;
             }

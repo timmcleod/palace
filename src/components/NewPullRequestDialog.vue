@@ -54,7 +54,9 @@ onMounted(async () => {
     ]);
     existing.value = info.pull;
     base.value = info.default_branch;
-    branches.value = [info.default_branch, ...names.filter((n) => n !== info.default_branch && n !== props.plan.name)];
+    // A branch can't go into itself, though a fork's can go into the same name here.
+    const itself = (n) => n === props.plan.name && !props.plan.head.includes(":");
+    branches.value = [info.default_branch, ...names.filter((n) => n !== info.default_branch && !itself(n))];
     const messages = baseRef(base.value)
       ? await invoke("branch_commit_messages", { path: props.path, base: baseRef(base.value), head: props.plan.branch }).catch(() => [])
       : [];

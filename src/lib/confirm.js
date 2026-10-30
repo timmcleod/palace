@@ -9,3 +9,6 @@ export function confirmDiscard(question, detail = "") {
 }
 
 export const undoHint = () => `You can undo this with ${shortcut("Ctrl+Z")}.`;
+
+// Thrown, or returned as the error, when the user decides against going ahead.
+export const CANCELED = "Canceled.";

@@ -55,8 +55,18 @@ pub async fn github_branch_pull(owner: String, repo: String, head: String) -> Re
 pub async fn github_branches(owner: String, repo: String) -> Result<Vec<String>, String> {
     let token = token()?;
     blocking(move || {
-        let branches: Vec<BranchName> = api_get(&token, &format!("/repos/{owner}/{repo}/branches?per_page=100")).map_err(plain)?;
-        Ok(branches.into_iter().map(|b| b.name).collect())
+        // A page at a time, up to a thousand.
+        let mut names = Vec::new();
+        for page in 1..=10 {
+            let branches: Vec<BranchName> =
+                api_get(&token, &format!("/repos/{owner}/{repo}/branches?per_page=100&page={page}")).map_err(plain)?;
+            let last = branches.len() < 100;
+            names.extend(branches.into_iter().map(|b| b.name));
+            if last {
+                break;
+            }
+        }
+        Ok(names)
     })
     .await
 }
@@ -236,6 +246,8 @@ fn merge_state(pull: Pull, settings: &MergeSettings, messages: &[String], checks
     .filter_map(|(on, method)| on.then_some(method))
     .collect();
     let (merge_title, merge_message, squash_title, squash_message) = commit_texts(&pull, settings, messages);
+    let name = |branch: &PullBranch| branch.repo.as_ref().map(|r| r.full_name.to_lowercase());
+    let same_repo = name(&pull.head).is_some() && name(&pull.head) == name(&pull.base);
     MergeState {
         node_id: pull.node_id,
         draft: pull.draft,
@@ -247,7 +259,8 @@ fn merge_state(pull: Pull, settings: &MergeSettings, messages: &[String], checks
         head_sha: pull.head.sha,
         methods,
         can_merge: settings.permissions.as_ref().is_some_and(|p| p.push),
-        deletes_branch: settings.delete_branch_on_merge,
+        // Only for branches in the repository itself, not in forks.
+        deletes_branch: settings.delete_branch_on_merge && same_repo,
         checks,
         merge_title,
         merge_message,
@@ -371,7 +384,7 @@ pub async fn github_ready_for_review(node_id: String) -> Result<(), String> {
 pub async fn github_rename_branch(owner: String, repo: String, branch: String, new_name: String) -> Result<(), String> {
     let token = token()?;
     let fields = serde_json::json!({ "new_name": new_name.trim() });
-    let path = format!("/repos/{owner}/{repo}/branches/{branch}/rename");
+    let path = format!("/repos/{owner}/{repo}/branches/{}/rename", encode_branch(&branch));
     // Renaming is about the repository's contents rather than its pull requests.
     let plain = |e| plain(e).replace("the Pull requests permission", "the Contents permission");
     blocking(move || api::<serde_json::Value>(&token, Method::Post(fields), &path).map(drop).map_err(plain)).await
@@ -381,7 +394,7 @@ pub async fn github_rename_branch(owner: String, repo: String, branch: String, n
 #[tauri::command]
 pub async fn github_delete_branch(owner: String, repo: String, branch: String) -> Result<(), String> {
     let token = token()?;
-    let path = format!("/repos/{owner}/{repo}/git/refs/heads/{branch}");
+    let path = format!("/repos/{owner}/{repo}/git/refs/heads/{}", encode_branch(&branch));
     blocking(move || api(&token, Method::Delete, &path).map_err(plain)).await
 }
 
@@ -421,6 +434,12 @@ fn find_template(workdir: &Path) -> Option<String> {
         })?;
         std::fs::read_to_string(found.path()).ok()
     })
+}
+
+/// A branch name for a URL path: each part percent-encoded, keeping the slashes
+/// between them, so a "#" or "?" in a name can't cut it short.
+fn encode_branch(branch: &str) -> String {
+    branch.split('/').map(encode).collect::<Vec<_>>().join("/")
 }
 
 /// GitHub's refusals about pull requests in plain words. Those about the token start
@@ -522,6 +541,25 @@ mod tests {
         assert!(state.can_merge);
         let unknown = Pull { mergeable: None, ..pull("Dark mode") };
         assert_eq!(merge_state(unknown, &settings, &[], None).mergeable_state, "unknown");
+    }
+
+    #[test]
+    fn encoding_branch_names_for_urls() {
+        assert_eq!(encode_branch("feature/fix#12?"), "feature/fix%2312%3F");
+    }
+
+    #[test]
+    fn github_deletes_only_its_own_branches_after_merging() {
+        let settings = MergeSettings { delete_branch_on_merge: true, ..Default::default() };
+        let in_repo = |owner: &str| Some(RepoName { full_name: format!("{owner}/lantern") });
+        let mut own = pull("Dark mode");
+        own.head.repo = in_repo("tim");
+        own.base.repo = in_repo("tim");
+        assert!(merge_state(own, &settings, &[], None).deletes_branch);
+        let mut forked = pull("Dark mode");
+        forked.head.repo = in_repo("maya");
+        forked.base.repo = in_repo("tim");
+        assert!(!merge_state(forked, &settings, &[], None).deletes_branch);
     }
 
     #[test]

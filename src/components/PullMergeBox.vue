@@ -19,7 +19,7 @@ const props = defineProps({
   url: { type: String, required: true },
   refreshKey: { type: Number, default: 0 },
 });
-// "merged" gives { base, head, headRepo, branchDeleted }; "changed" says the pull
+// "merged" gives { number, base, head, headRepo, branchDeleted }; "changed" says the pull
 // request changed otherwise (a draft made ready).
 const emit = defineEmits(["merged", "changed"]);
 
@@ -170,7 +170,7 @@ async function merge() {
         .catch(() => false);
     }
     confirming.value = false;
-    emit("merged", { base: s.base, head: s.head, headRepo: s.head_repo, branchDeleted });
+    emit("merged", { number: props.number, base: s.base, head: s.head, headRepo: s.head_repo, branchDeleted });
   } catch (e) {
     actionError.value = String(e);
     // The head may have moved, or GitHub changed its mind: show where it stands now.
