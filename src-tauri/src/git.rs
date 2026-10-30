@@ -207,8 +207,38 @@ fn read_tags(repo: &Repository) -> Result<Vec<String>, git2::Error> {
             tags.push(tag.to_string());
         }
     }
-    tags.sort_by_key(|t| t.to_lowercase());
+    // Newest version first: v0.10.0 before v0.2.0, and v1.0.0 before both.
+    tags.sort_by(|a, b| natural_order(b, a));
     Ok(tags)
+}
+
+/// Compares names with the numbers in them as numbers ("v0.2" before "v0.10"), and the
+/// rest regardless of case.
+fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
+    // Runs of digits, and runs of everything else.
+    fn chunks(s: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut start = 0;
+        let bytes = s.as_bytes();
+        for i in 1..=bytes.len() {
+            if i == bytes.len() || bytes[i].is_ascii_digit() != bytes[start].is_ascii_digit() {
+                out.push(&s[start..i]);
+                start = i;
+            }
+        }
+        out
+    }
+    let (left, right) = (chunks(a), chunks(b));
+    for (x, y) in left.iter().zip(&right) {
+        let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+            (Ok(m), Ok(n)) => m.cmp(&n),
+            _ => x.to_lowercase().cmp(&y.to_lowercase()),
+        };
+        if order.is_ne() {
+            return order;
+        }
+    }
+    left.len().cmp(&right.len()).then_with(|| a.cmp(b))
 }
 
 fn read_stashes(repo: &mut Repository) -> Result<Vec<Stash>, git2::Error> {
@@ -263,6 +293,13 @@ fn read_submodules(repo: &Repository) -> Vec<Submodule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordering_versions_naturally() {
+        let mut tags = vec!["v0.1.5", "v0.10.0", "v0.2.0", "v1.3.0", "v0.10.2", "release-2", "release-10"];
+        tags.sort_by(|a, b| natural_order(b, a));
+        assert_eq!(tags, ["v1.3.0", "v0.10.2", "v0.10.0", "v0.2.0", "v0.1.5", "release-10", "release-2"]);
+    }
 
     #[test]
     fn reading_stash_messages() {

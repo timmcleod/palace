@@ -1580,8 +1580,38 @@ function startResize(event, pane, min, max) {
   text-overflow: ellipsis;
 }
 
+/* Too narrow for everything, the toolbar loses its right end, the search, rather than
+   the buttons at its left. */
 .actions {
-  justify-content: flex-end;
+  justify-content: safe flex-end;
+}
+
+.actions > * {
+  flex-shrink: 0;
+}
+
+.actions > .toolbar-search-box,
+.actions > .stash-search {
+  flex-shrink: 1;
+}
+
+/* And before that, a narrow toolbar packs its buttons closer together. */
+.actions {
+  container-type: inline-size;
+}
+
+@container (max-width: 460px) {
+  .actions > * {
+    margin-left: -6px;
+  }
+
+  .actions > :first-child {
+    margin-left: -4px;
+  }
+
+  .actions .icon-button {
+    width: 28px;
+  }
 }
 
 .action-group .icon-button {
@@ -1685,10 +1715,15 @@ function startResize(event, pane, min, max) {
   color: var(--text-tertiary);
 }
 
+/* Like the toolbar's other searches (see ToolbarSearch.vue). */
 .stash-search {
   width: 220px;
-  min-width: 120px;
+  min-width: 36px;
   flex-shrink: 1;
+}
+
+.stash-search:focus-within {
+  min-width: 160px;
 }
 
 .settings-pane {

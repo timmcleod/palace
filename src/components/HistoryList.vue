@@ -43,9 +43,12 @@ let selectedIndex = -1;
 
 let loadSeq = 0;
 const inflight = new Set();
+// How many times the selection has changed from outside (see "reveal" below).
+let selectionChanges = 0;
 
 async function load({ resetScroll }) {
   const seq = ++loadSeq;
+  const selections = selectionChanges;
   try {
     const next = await invoke("load_history", {
       path: props.path,
@@ -64,8 +67,12 @@ async function load({ resetScroll }) {
     if (resetScroll && viewport.value) {
       viewport.value.scrollTop = 0;
       scrollTop.value = 0;
-      // Showing another branch's history keeps the selected commit in view, if it's there.
+      // Showing another branch's history keeps the selected commit in view if it's
+      // there, and otherwise selects the newest commit, so the details match the list.
       pendingReveal = props.selectedId;
+      // Not when the commit was chosen along with the history, as when a search or a
+      // blame jumps to one.
+      orNewest = selectionChanges === selections;
       chosen.clear();
     }
     selectedIndex = -1;
@@ -306,11 +313,15 @@ const dropLine = computed(() => {
 // view: straight away, or once the history it's in has loaded.
 let pickedHere = null;
 let pendingReveal = null;
+// Whether a commit that isn't in the history gives way to the newest one.
+let orNewest = false;
 
 watch(
   () => props.selectedId,
   (id) => {
     pendingReveal = id && id !== pickedHere ? id : null;
+    orNewest = false;
+    selectionChanges++;
     pickedHere = null;
     reveal();
   },
@@ -322,8 +333,17 @@ async function reveal() {
   const generation = summary.value?.generation;
   if (!id || !generation) return;
   pendingReveal = null;
+  const newest = orNewest;
+  orNewest = false;
   const index = await invoke("history_position", { generation, id }).catch(() => null);
-  if (index == null || summary.value?.generation !== generation || props.selectedId !== id) return;
+  if (summary.value?.generation !== generation || props.selectedId !== id) return;
+  if (index == null) {
+    if (newest && summary.value.total) {
+      await loadPage(0);
+      select(0);
+    }
+    return;
+  }
   selectedIndex = index;
   await nextTick();
   scrollIntoView(index, { center: true });

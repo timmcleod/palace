@@ -245,11 +245,17 @@ defineExpose({ focus });
 </template>
 
 <style scoped>
+/* Shrinks to its icon before the toolbar's buttons are squeezed out, and widens
+   again while it's being typed in. */
 .toolbar-search-box {
   position: relative;
   width: 220px;
-  min-width: 120px;
+  min-width: 36px;
   flex-shrink: 1;
+}
+
+.toolbar-search-box:focus-within {
+  min-width: 160px;
 }
 
 .results {
