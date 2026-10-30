@@ -74,6 +74,35 @@ pub async fn rename_branch(path: String, old: String, new: String) -> Result<Str
     Ok(format!("Renamed {old} to {new}."))
 }
 
+/// After `remote`'s branch `old` was renamed to `new` there, points the local branches
+/// that tracked it at the new name, and renames a local branch called `old` to match,
+/// unless `new` is taken. Says what changed locally, or nothing.
+pub(crate) fn retrack(path: &str, remote: &str, old: &str, new: &str) -> Result<String, String> {
+    let repo = open(path)?;
+    let config = repo.config().and_then(|mut c| c.snapshot()).map_err(|e| e.message().to_string())?;
+    let setting = |branch: &str, key: &str| config.get_string(&format!("branch.{branch}.{key}")).ok();
+    let mut tracking = Vec::new();
+    for (branch, _) in repo.branches(Some(git2::BranchType::Local)).map_err(|e| e.message().to_string())?.flatten() {
+        let Ok(Some(name)) = branch.name() else { continue };
+        if setting(name, "remote").as_deref() == Some(remote) && setting(name, "merge") == Some(format!("refs/heads/{old}")) {
+            tracking.push(name.to_string());
+        }
+    }
+    for branch in &tracking {
+        git(path, &["config", &format!("branch.{branch}.merge"), &format!("refs/heads/{new}")], None)?;
+    }
+    let taken = repo.find_branch(new, git2::BranchType::Local).is_ok();
+    if tracking.iter().any(|b| b == old) && !taken {
+        git(path, &["branch", "--move", old, new], None)?;
+        return Ok(format!("Renamed your local {old} to match."));
+    }
+    Ok(match tracking.as_slice() {
+        [] => String::new(),
+        [one] => format!("Your local {one} now tracks {remote}/{new}."),
+        many => format!("Your local branches {} now track {remote}/{new}.", many.join(", ")),
+    })
+}
+
 /// Deletes a local branch. Without `force`, git refuses to delete a branch whose
 /// commits aren't merged anywhere, and that refusal is returned as the error.
 #[tauri::command]
@@ -255,7 +284,7 @@ pub(crate) fn stopped_or(path: &str, error: String) -> String {
     )
 }
 
-fn validate_branch_name(path: &str, name: &str) -> Result<(), String> {
+pub(crate) fn validate_branch_name(path: &str, name: &str) -> Result<(), String> {
     git(path, &["check-ref-format", "--branch", name], None)
         .map(drop)
         .map_err(|_| format!("“{name}” isn't a valid branch name."))

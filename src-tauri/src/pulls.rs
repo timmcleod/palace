@@ -366,6 +366,17 @@ pub async fn github_ready_for_review(node_id: String) -> Result<(), String> {
     .await
 }
 
+/// Renames a branch on GitHub, which moves its open pull requests to the new name.
+#[tauri::command]
+pub async fn github_rename_branch(owner: String, repo: String, branch: String, new_name: String) -> Result<(), String> {
+    let token = token()?;
+    let fields = serde_json::json!({ "new_name": new_name.trim() });
+    let path = format!("/repos/{owner}/{repo}/branches/{branch}/rename");
+    // Renaming is about the repository's contents rather than its pull requests.
+    let plain = |e| plain(e).replace("the Pull requests permission", "the Contents permission");
+    blocking(move || api::<serde_json::Value>(&token, Method::Post(fields), &path).map(drop).map_err(plain)).await
+}
+
 /// Deletes a branch on GitHub, as after merging its pull request.
 #[tauri::command]
 pub async fn github_delete_branch(owner: String, repo: String, branch: String) -> Result<(), String> {

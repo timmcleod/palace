@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { undoHint } from "./confirm.js";
+import { githubAccount } from "./github.js";
+import { githubRepoOf } from "./githubRemote.js";
 import {
   addDivider,
   isArranged,
@@ -104,6 +106,41 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       new: values.name.trim(),
     });
     if (!error) renameKey(overview.value.path, name, values.name.trim());
+  }
+
+  // Renames a branch on its remote (`name` is e.g. "origin/old"). On GitHub, GitHub
+  // renames it, which moves its open pull requests along; elsewhere it's pushed under
+  // the new name and the old one deleted. Local branches that tracked it follow.
+  async function renameRemoteBranch(name) {
+    const remote = overview.value.remotes
+      .filter((r) => name.startsWith(`${r.name}/`))
+      .sort((a, b) => b.name.length - a.name.length)[0];
+    if (!remote) return;
+    const old = name.slice(remote.name.length + 1);
+    const github = githubAccount.value && githubRepoOf(remote.url);
+    const values = await openForm({
+      title: "Rename Remote Branch",
+      message: github
+        ? `Rename “${old}” on ${github.owner}/${github.repo}. GitHub moves its open pull requests to the new name.`
+        : `Rename “${old}” on ${remote.name}. Palace pushes it under the new name, then deletes the old one, so any open pull requests for it there may close.`,
+      fields: [{ key: "name", label: "New name", type: "text", value: old }],
+      confirmLabel: "Rename",
+    });
+    const to = values?.name.trim();
+    if (!to || to === old) return;
+
+    const branches = overview.value.branches;
+    const followsLocally = branches.some((b) => b.name === old && b.upstream === name) && !branches.some((b) => b.name === to);
+    const titles = ["Renaming…", "Renamed", "Couldn't rename the branch"];
+    let error;
+    if (github) {
+      error = await run(titles, "github_rename_branch", { owner: github.owner, repo: github.repo, branch: old, newName: to });
+      // GitHub finishes renaming in the background; Palace waits for it, then fetches.
+      error ??= await run(titles, "finish_remote_rename", { remote: remote.name, old, new: to });
+    } else {
+      error = await run(titles, "rename_remote_branch", { name, new: to });
+    }
+    if (!error && followsLocally) renameKey(overview.value.path, old, to);
   }
 
   async function deleteBranch(name) {
@@ -492,6 +529,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { label: `New Tag at “${name}”…`, action: () => createTag(name) },
       { label: "Rename…", action: () => renameBranch(name) },
+      upstream && { label: `Rename “${upstream}”…`, action: () => renameRemoteBranch(upstream) },
       // Dividers only go between top-level rows.
       !name.includes("/") && { separator: true },
       !name.includes("/") && { label: "Add Divider Below…", action: () => newDivider(`branch:${name}`) },
@@ -516,6 +554,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       { separator: true },
       { label: `New Branch from “${name}”…`, action: () => newBranch(name, name) },
       { separator: true },
+      { label: "Rename…", action: () => renameRemoteBranch(name) },
       { label: "Delete from Remote…", action: () => deleteRemoteBranch(name), danger: true },
     ];
   }

@@ -282,7 +282,7 @@ async function onPullMerged({ base, head, headRepo, branchDeleted }) {
   const baseRemote = githubRemoteOf(remotes, issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`);
   const local = headRemote && overview.value.branches.find((b) => b.upstream === `${headRemote.name}/${head}`);
   for (const remote of new Set([baseRemote?.name, headRemote?.name].filter(Boolean))) {
-    await runGit(["Fetching…", "Fetched", "Fetch failed"], "fetch", { remote, prune: branchDeleted });
+    await runGit(["Fetching…", "Fetched", "Fetch failed"], "fetch", { remote });
   }
 
   const offers = [];

@@ -13,9 +13,9 @@ struct Progress {
 }
 
 #[tauri::command]
-pub async fn fetch(app: AppHandle, path: String, remote: Option<String>, prune: Option<bool>) -> Result<String, String> {
+pub async fn fetch(app: AppHandle, path: String, remote: Option<String>) -> Result<String, String> {
     in_background(app, move |running, report| match remote {
-        Some(remote) => fetch_one(&path, &remote, prune.unwrap_or(false), running, report),
+        Some(remote) => fetch_one(&path, &remote, running, report),
         None => fetch_all(&path, running, report),
     })
     .await
@@ -29,7 +29,7 @@ pub async fn fetch_in_background(app: AppHandle, path: String) -> Result<String,
 }
 
 fn fetch_unattended(path: &str, running: &Running) -> Result<String, String> {
-    crate::cli::git_unattended(path, &["fetch", "--all", "--quiet"], running)
+    crate::cli::git_unattended(path, &["fetch", "--all", "--prune", "--quiet"], running)
 }
 
 /// Adds a remote, then fetches it so its branches show straight away. If the fetch
@@ -42,7 +42,7 @@ pub async fn add_remote(app: AppHandle, path: String, name: String, url: String)
     }
     crate::cli::git(&path, &["remote", "add", &name, &url], None).map_err(|e| explain_remote_error(&name, e))?;
     in_background(app, move |running, report| {
-        fetch_one(&path, &name, false, running, report)
+        fetch_one(&path, &name, running, report)
             .map(|_| format!("Added {name} and fetched its branches."))
             .map_err(|e| format!("Added {name}, but couldn't fetch from it:\n{e}"))
     })
@@ -74,10 +74,10 @@ fn explain_remote_error(name: &str, error: String) -> String {
     }
 }
 
-/// With `prune`, remote branches deleted on the remote go here too.
-fn fetch_one(path: &str, remote: &str, prune: bool, running: &Running, report: Report) -> Result<String, String> {
-    let args: &[&str] = if prune { &["fetch", "--progress", "--prune", remote] } else { &["fetch", "--progress", remote] };
-    git_with_progress(path, args, running, report)?;
+// Fetches prune: branches deleted on a remote go from its list here too. Local
+// branches are never touched.
+fn fetch_one(path: &str, remote: &str, running: &Running, report: Report) -> Result<String, String> {
+    git_with_progress(path, &["fetch", "--progress", "--prune", remote], running, report)?;
     Ok(format!("Fetched from {remote}."))
 }
 
@@ -121,13 +121,79 @@ pub async fn publish_branch(app: AppHandle, path: String, branch: String, remote
     in_background(app, move |running, report| publish(&path, &branch, &remote, &name, running, report)).await
 }
 
+/// Renames a branch on its remote, `name` being the remote branch ("origin/old"): pushes
+/// what the remote has under `new`, as long as that name is free, then deletes the old
+/// name, as long as it hasn't moved meanwhile. Local branches that tracked it follow.
+#[tauri::command]
+pub async fn rename_remote_branch(app: AppHandle, path: String, name: String, new: String) -> Result<String, String> {
+    in_background(app, move |running, report| rename_on_remote(&path, &name, &new, running, report)).await
+}
+
+fn rename_on_remote(path: &str, name: &str, new: &str, running: &Running, report: Report) -> Result<String, String> {
+    let (remote, old) = split_remote_branch(path, name)?;
+    let new = new.trim().to_string();
+    crate::branch::validate_branch_name(path, &new)?;
+    let tracking = format!("refs/remotes/{remote}/{old}");
+    git_with_progress(path, &["fetch", "--progress", &remote, &format!("+refs/heads/{old}:{tracking}")], running, &mut *report)?;
+    let id = crate::cli::git(path, &["rev-parse", "--verify", &tracking], None)?;
+    // The lease below only guards a push that changes something: one to a branch
+    // already at the same commit would succeed without it.
+    let taken = || format!("{remote} already has a branch called {new}.");
+    if !git_with_progress(path, &["ls-remote", "--heads", &remote, &format!("refs/heads/{new}")], running, &mut *report)?.trim().is_empty() {
+        return Err(taken());
+    }
+    let free = format!("--force-with-lease=refs/heads/{new}:");
+    git_with_progress(path, &["push", "--progress", &free, &remote, &format!("{id}:refs/heads/{new}")], running, &mut *report)
+        .map_err(|e| if e.contains("stale info") { taken() } else { e })?;
+    let unmoved = format!("--force-with-lease=refs/heads/{old}:{id}");
+    git_with_progress(path, &["push", "--progress", &unmoved, &remote, &format!(":refs/heads/{old}")], running, &mut *report)?;
+    git_with_progress(path, &["fetch", "--progress", "--prune", &remote], running, &mut *report)?;
+    let local = crate::branch::retrack(path, &remote, &old, &new)?;
+    Ok(format!("Renamed {old} to {new} on {remote}. {local}").trim().to_string())
+}
+
 /// Deletes a branch on its remote. `name` is the remote branch, e.g. "origin/feature".
 #[tauri::command]
 pub async fn delete_remote_branch(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    in_background(app, move |running, report| delete_on_remote(&path, &name, running, report)).await
+}
+
+fn delete_on_remote(path: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
+    let (remote, branch) = split_remote_branch(path, name)?;
+    match git_with_progress(path, &["push", "--progress", &remote, "--delete", &branch], running, report) {
+        Ok(_) => Ok(format!("Deleted {branch} from {remote}.")),
+        // Someone deleted it already: only the local copy of it is left to remove.
+        Err(e) if e.contains("remote ref does not exist") => {
+            crate::cli::git(path, &["branch", "--delete", "--remotes", name], None)?;
+            Ok(format!("{branch} was already gone from {remote}, so it's been removed from the list."))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// After a branch was renamed on the remote by other means (GitHub's rename, which
+/// finishes in the background), waits for the old name to go, at most 15 seconds,
+/// then fetches with pruning and has local branches follow, as `rename_remote_branch`
+/// does.
+#[tauri::command]
+pub async fn finish_remote_rename(app: AppHandle, path: String, remote: String, old: String, new: String) -> Result<String, String> {
     in_background(app, move |running, report| {
-        let (remote, branch) = split_remote_branch(&path, &name)?;
-        git_with_progress(&path, &["push", "--progress", &remote, "--delete", &branch], running, report)?;
-        Ok(format!("Deleted {branch} from {remote}."))
+        let exists = |branch: &str| {
+            crate::cli::git(&path, &["ls-remote", "--heads", &remote, &format!("refs/heads/{branch}")], None)
+                .map(|out| !out.trim().is_empty())
+        };
+        let mut done = false;
+        for _ in 0..15 {
+            if exists(&new)? && !exists(&old)? {
+                done = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        git_with_progress(&path, &["fetch", "--progress", "--prune", &remote], running, &mut *report)?;
+        let local = crate::branch::retrack(&path, &remote, &old, &new)?;
+        let later = if done { "" } else { " The remote is still finishing; fetch again in a moment if the old name is still listed." };
+        Ok(format!("Renamed {old} to {new} on {remote}. {local}{later}").trim().replace("  ", " "))
     })
     .await
 }
@@ -215,7 +281,7 @@ async fn in_background(
 }
 
 fn fetch_all(path: &str, running: &Running, report: Report) -> Result<String, String> {
-    git_with_progress(path, &["fetch", "--all", "--progress"], running, report)?;
+    git_with_progress(path, &["fetch", "--all", "--progress", "--prune"], running, report)?;
     Ok("Fetched from all remotes.".to_string())
 }
 
@@ -375,6 +441,66 @@ mod tests {
     use super::*;
     use crate::test_support::TempRepo;
     use git2::Oid;
+
+    #[test]
+    fn renaming_a_branch_on_its_remote() {
+        let server = TempRepo::bare("rename-remote-server");
+        let t = TempRepo::clone_of("rename-remote", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        crate::cli::git(t.path(), &["push", "-q", "origin", &main], None).unwrap();
+        crate::cli::git(t.path(), &["switch", "-qc", "old-name"], None).unwrap();
+        let tip = t.commit(&[("b.txt", Some("1\n"))], "Feature");
+        crate::cli::git(t.path(), &["push", "-qu", "origin", "old-name"], None).unwrap();
+
+        let message = rename_on_remote(t.path(), "origin/old-name", "new-name", &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, "Renamed old-name to new-name on origin. Renamed your local old-name to match.");
+        assert!(server.repo.find_reference("refs/heads/old-name").is_err());
+        assert_eq!(server.repo.find_reference("refs/heads/new-name").unwrap().target(), Some(tip));
+        assert!(t.repo.find_reference("refs/remotes/origin/old-name").is_err());
+        let local = t.repo.find_branch("new-name", git2::BranchType::Local).unwrap();
+        assert_eq!(local.upstream().unwrap().name().unwrap(), Some("origin/new-name"));
+    }
+
+    #[test]
+    fn fetching_drops_branches_deleted_on_the_remote() {
+        let server = TempRepo::bare("fetch-prune-server");
+        let t = TempRepo::clone_of("fetch-prune", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/heads/gone"], None).unwrap();
+        crate::cli::git(t.path(), &["fetch", "-q", "origin"], None).unwrap();
+        server.repo.find_reference("refs/heads/gone").unwrap().delete().unwrap();
+
+        fetch_all(t.path(), &Running::default(), &mut |_| {}).unwrap();
+        assert!(t.repo.find_reference("refs/remotes/origin/gone").is_err());
+    }
+
+    #[test]
+    fn deleting_a_branch_already_gone_from_the_remote_clears_it() {
+        let server = TempRepo::bare("delete-gone-server");
+        let t = TempRepo::clone_of("delete-gone", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/heads/gone"], None).unwrap();
+        crate::cli::git(t.path(), &["fetch", "-q", "origin"], None).unwrap();
+        // Deleted on the server by someone else.
+        server.repo.find_reference("refs/heads/gone").unwrap().delete().unwrap();
+
+        let message = delete_on_remote(t.path(), "origin/gone", &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(message, "gone was already gone from origin, so it's been removed from the list.");
+        assert!(t.repo.find_reference("refs/remotes/origin/gone").is_err());
+    }
+
+    #[test]
+    fn renaming_onto_a_taken_name_changes_nothing() {
+        let server = TempRepo::bare("rename-taken-server");
+        let t = TempRepo::clone_of("rename-taken", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/heads/taken", "HEAD:refs/heads/old-name"], None).unwrap();
+
+        let error = rename_on_remote(t.path(), "origin/old-name", "taken", &Running::default(), &mut |_| {}).unwrap_err();
+        assert_eq!(error, "origin already has a branch called taken.");
+        assert!(server.repo.find_reference("refs/heads/old-name").is_ok());
+    }
     use std::time::{Duration, Instant};
 
     /// A bare "server" with one commit pushed to it, plus a clone that tracks it.
@@ -635,7 +761,7 @@ mod tests {
 
         let names = |t: &TempRepo| crate::cli::git(t.path(), &["remote"], None).unwrap();
         crate::cli::git(local.path(), &["remote", "add", "upstream", other.path()], None).unwrap();
-        fetch_one(local.path(), "upstream", false, &Running::default(), &mut |_| {}).unwrap();
+        fetch_one(local.path(), "upstream", &Running::default(), &mut |_| {}).unwrap();
         assert!(local.repo.find_reference("refs/remotes/upstream/feature").is_ok());
 
         let taken = tauri::async_runtime::block_on(rename_remote(local.path().into(), "upstream".into(), "origin".into()));
