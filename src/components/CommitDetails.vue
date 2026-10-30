@@ -171,6 +171,7 @@ function splitPath(path) {
           :commit-id="details.id ?? null"
           :comparison="comparison"
           :index="i"
+          :file="file.path"
         />
       </div>
     </template>

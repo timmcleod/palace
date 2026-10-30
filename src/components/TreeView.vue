@@ -10,6 +10,8 @@ const showBlame = ref(false);
 import { computed, reactive, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { formatSize } from "../lib/format.js";
+import { highlightText } from "../lib/highlight.js";
+import { settings } from "../lib/settings.js";
 import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen, UserRoundSearch } from "lucide-vue-next";
 
 // Every file as it was at a commit: a folder tree on top, the chosen file below.
@@ -155,6 +157,20 @@ const lines = computed(() => {
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   return { text: body, numbers: Array.from({ length: body.split("\n").length }, (_, i) => i + 1).join("\n") };
 });
+
+// The text as highlighted HTML (escaped by highlight.js) once it's ready; plain until then.
+const highlighted = shallowRef(null);
+watch(
+  [lines, () => settings.syntaxHighlighting],
+  async () => {
+    highlighted.value = null;
+    const shown = lines.value;
+    if (!shown || !settings.syntaxHighlighting) return;
+    const html = await highlightText(contents.value.file, shown.text);
+    if (lines.value === shown) highlighted.value = html;
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -218,7 +234,8 @@ const lines = computed(() => {
             </div>
           </div>
           <pre class="numbers">{{ lines.numbers }}</pre>
-          <pre class="text">{{ lines.text }}</pre>
+          <pre v-if="highlighted" class="text" v-html="highlighted" />
+          <pre v-else class="text">{{ lines.text }}</pre>
         </div>
       </template>
       <div v-else class="empty-state">

@@ -1,12 +1,15 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { wordHighlights } from "../lib/wordDiff.js";
+import { combine, highlightBlocks } from "../lib/highlight.js";
 import { settings } from "../lib/settings.js";
 import ImageDiff from "./ImageDiff.vue";
 
 // Renders one file's diff. Loading it is up to the parent.
 const props = defineProps({
   diff: { type: Object, required: true },
+  // The file's path, which decides how its code is highlighted.
+  file: { type: String, default: null },
   // Buttons shown on each hunk, as [{ id, label, verb, danger }]. With a `verb`, the
   // button acts on just the lines picked in its hunk when there are some.
   hunkActions: { type: Array, default: () => [] },
@@ -22,6 +25,49 @@ const SIGN = { "+": "+", "-": "−" };
 
 // Each hunk's changed words, by line: see wordDiff.js.
 const words = computed(() => props.diff.hunks?.map((hunk) => wordHighlights(hunk.lines)) ?? []);
+
+// Each hunk's highlighted code, by line, once it's ready: the diff shows plain until
+// then. Each hunk is highlighted as its old and new versions, so a comment or string
+// that runs over several lines is read as one.
+const syntax = shallowRef([]);
+let highlightRun = 0;
+watch(
+  [() => props.diff, () => props.file, () => settings.syntaxHighlighting],
+  async () => {
+    const run = ++highlightRun;
+    syntax.value = [];
+    const hunks = props.diff.hunks;
+    if (!hunks?.length || !settings.syntaxHighlighting) return;
+    const sides = hunks.map((hunk) => ({
+      old: hunk.lines.flatMap((line, i) => (line.kind === " " || line.kind === "-" ? [i] : [])),
+      new: hunk.lines.flatMap((line, i) => (line.kind === " " || line.kind === "+" ? [i] : [])),
+    }));
+    const blocks = sides.flatMap((side, h) => [side.old, side.new].map((ids) => ids.map((i) => hunks[h].lines[i].text)));
+    const highlighted = await highlightBlocks(props.file, blocks);
+    if (run !== highlightRun || !highlighted) return;
+    syntax.value = sides.map((side, h) => {
+      const byLine = new Map();
+      side.old.forEach((i, k) => byLine.set(i, highlighted[2 * h][k]));
+      side.new.forEach((i, k) => byLine.set(i, highlighted[2 * h + 1][k]));
+      return byLine;
+    });
+  },
+  { immediate: true },
+);
+
+// What each line shows: pieces of { text, kind, changed } where it's highlighted or
+// has changed words, and otherwise just its text.
+const pieces = computed(() =>
+  (props.diff.hunks ?? []).map((hunk, h) => {
+    const byLine = new Map();
+    hunk.lines.forEach((line, l) => {
+      const tokens = syntax.value[h]?.get(l) ?? null;
+      const changed = words.value[h]?.get(l) ?? null;
+      if (tokens || changed) byLine.set(l, combine(tokens, changed));
+    });
+    return byLine;
+  }),
+);
 
 // Side by side, each hunk is rows of { old, new }: the indexes of the lines shown on
 // the left and right, or null for a gap. Removed lines are lined up with the added
@@ -181,8 +227,13 @@ function runAction(action, h) {
                 {{ row[side] != null ? (SIGN[hunk.lines[row[side]].kind] ?? "") : "" }}
               </td>
               <td v-if="row[side] == null" class="text gap" />
-              <td v-else-if="words[h].has(row[side])" class="text" :class="sideClass(h, row[side])">
-                <span v-for="(part, p) in words[h].get(row[side])" :key="p" :class="{ word: part.changed }">{{ part.text }}</span>
+              <td v-else-if="pieces[h].has(row[side])" class="text" :class="sideClass(h, row[side])">
+                <span
+                  v-for="(part, p) in pieces[h].get(row[side])"
+                  :key="p"
+                  :class="[part.kind, { word: part.changed }]"
+                  >{{ part.text }}</span
+                >
               </td>
               <td v-else class="text" :class="sideClass(h, row[side])">{{ hunk.lines[row[side]].text }}</td>
             </template>
@@ -234,8 +285,10 @@ function runAction(action, h) {
             <td class="sign" @mousedown="onLineDown($event, h, l)" @mouseenter="onLineEnter(h, l)">
               {{ SIGN[line.kind] ?? "" }}
             </td>
-            <td v-if="words[h].has(l)" class="text">
-              <span v-for="(part, p) in words[h].get(l)" :key="p" :class="{ word: part.changed }">{{ part.text }}</span>
+            <td v-if="pieces[h].has(l)" class="text">
+              <span v-for="(part, p) in pieces[h].get(l)" :key="p" :class="[part.kind, { word: part.changed }]">{{
+                part.text
+              }}</span>
             </td>
             <td v-else class="text">{{ line.text }}</td>
           </tr>

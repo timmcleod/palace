@@ -267,6 +267,12 @@ const FETCH_MINUTES = [5, 15, 30];
               {{ size }}
             </button>
           </div>
+
+          <span class="label">Code:</span>
+          <label class="choice">
+            <input v-model="settings.syntaxHighlighting" type="checkbox" />
+            Highlight syntax <span class="dim">— in diffs and file contents</span>
+          </label>
         </div>
       </section>
 

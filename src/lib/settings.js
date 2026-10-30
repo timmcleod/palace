@@ -13,6 +13,8 @@ const DEFAULTS = {
   tabSize: 4,
   // "unified" (one column) or "split" (old and new side by side).
   diffLayout: "unified",
+  // Color code by language in diffs and file contents.
+  syntaxHighlighting: true,
   githubAvatars: true,
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).

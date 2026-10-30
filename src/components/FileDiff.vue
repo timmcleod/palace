@@ -10,6 +10,8 @@ const props = defineProps({
   // { base, head }, in place of a commit.
   comparison: { type: Object, default: null },
   index: { type: Number, required: true },
+  // The file's path in the repository.
+  file: { type: String, default: null },
 });
 
 // Bigger diffs wait for an explicit click, so expanding a lockfile doesn't stall the UI.
@@ -57,7 +59,7 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <template>
   <div ref="root" class="file-diff">
-    <DiffTable v-if="diff" :diff="diff" :loading-all="loading" @show-all="load(null)" />
+    <DiffTable v-if="diff" :diff="diff" :file="file" :loading-all="loading" @show-all="load(null)" />
     <p v-else class="notice" :class="{ error }">{{ error || "Loading…" }}</p>
   </div>
 </template>

@@ -48,6 +48,15 @@
 
   --tab-size: 4;
 
+  /* Syntax highlighting, in GitHub's colors, readable over the diff backgrounds. */
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-comment: #6e7781;
+  --syntax-number: #0550ae;
+  --syntax-title: #8250df;
+  --syntax-type: #953800;
+  --syntax-tag: #116329;
+
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: 14px;
   line-height: 1.4;
@@ -100,6 +109,14 @@
   --conflict-incoming: #3b3214;
   --error-bg: #3a1c1c;
   --banner-warning-bg: #3a3020;
+
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-comment: #8b949e;
+  --syntax-number: #79c0ff;
+  --syntax-title: #d2a8ff;
+  --syntax-type: #ffa657;
+  --syntax-tag: #7ee787;
 }
 
 /* Settings › Diffs can switch to the traditional green and red. */
@@ -127,6 +144,72 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Highlighted code (see lib/highlight.js), as highlight.js classes it. */
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-variable.language_ {
+  color: var(--syntax-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string,
+.hljs-char.escape_ {
+  color: var(--syntax-string);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-meta,
+.hljs-operator,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--syntax-number);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--syntax-title);
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--syntax-type);
+}
+
+.hljs-name,
+.hljs-selector-pseudo {
+  color: var(--syntax-tag);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong,
+.hljs-section {
+  font-weight: 600;
 }
 
 html,
