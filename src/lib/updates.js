@@ -1,6 +1,6 @@
 import { computed, reactive, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import { settings } from "./settings.js";
 
@@ -79,7 +79,8 @@ export async function installUpdate() {
       if (event.event === "Started") updates.total = event.data.contentLength ?? 0;
       if (event.event === "Progress") updates.downloaded += event.data.chunkLength;
     });
-    await relaunch();
+    // Palace's own restart: on Linux it waits for this copy to close first.
+    await invoke("restart_after_update");
   } catch (e) {
     updates.state = "error";
     updates.error = String(e);

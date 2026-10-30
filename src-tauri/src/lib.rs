@@ -19,6 +19,7 @@ mod stash;
 mod tag;
 mod tree;
 mod undo;
+mod updates;
 mod watch;
 #[cfg(test)]
 mod test_support;
@@ -127,6 +128,7 @@ pub fn run() {
             pulls::github_rename_branch,
             remote::rename_remote_branch,
             remote::finish_remote_rename,
+            updates::restart_after_update,
             github::github_create_repo,
             github::github_keys,
             github::github_add_key,
