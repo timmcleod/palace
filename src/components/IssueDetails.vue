@@ -2,12 +2,19 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { CircleAlert, CircleCheck, CircleDot, CircleSlash } from "lucide-vue-next";
+import { ChevronDown, CircleCheck, CircleDot, CircleSlash, Pencil, Settings2 } from "lucide-vue-next";
 import { formatAgo, textColorOn } from "../lib/format.js";
+import { githubAccount } from "../lib/github.js";
+import { issueFilters } from "../lib/issues.js";
+import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
+import { commandKey } from "../lib/platform.js";
+import IssueError from "./IssueError.vue";
 import Spinner from "./Spinner.vue";
 
-// One issue: its title, state and labels, then its description and comments, as the
-// HTML GitHub renders from their Markdown.
+// One issue: its title, state, labels and assignees, then its description and
+// comments, as the HTML GitHub renders from their Markdown, and a box for commenting,
+// closing and reopening. What can be changed follows what GitHub allows the account:
+// its own issues and comments, or anything for those who can triage.
 const props = defineProps({
   // { owner, repo }
   repo: { type: Object, required: true },
@@ -15,6 +22,8 @@ const props = defineProps({
   issue: { type: Object, required: true },
   refreshKey: { type: Number, default: 0 },
 });
+// "updated" is the issue after a change, for the list and the open count.
+const emit = defineEmits(["updated"]);
 
 const thread = shallowRef(null);
 // The full issue once it's loaded, and the list's until then.
@@ -22,10 +31,20 @@ const shown = computed(() => thread.value?.issue ?? props.issue);
 const error = ref("");
 let loadSeq = 0;
 
+// While a change is being saved, and what went wrong with the last one.
+const busy = ref(false);
+const actionError = ref("");
+// The comment being written.
+const draft = ref("");
+// { id, text }: the post being edited ("issue" for the description).
+const editing = ref(null);
+
+const where = () => ({ owner: props.repo.owner, repo: props.repo.repo });
+
 async function load() {
   const seq = ++loadSeq;
   try {
-    const result = await invoke("github_issue", { owner: props.repo.owner, repo: props.repo.repo, number: props.issue.number });
+    const result = await invoke("github_issue", { ...where(), number: props.issue.number });
     if (seq !== loadSeq) return;
     thread.value = result;
     error.value = "";
@@ -39,11 +58,187 @@ watch(
   () => {
     thread.value = null;
     error.value = "";
+    actionError.value = "";
+    draft.value = "";
+    editing.value = null;
     load();
   },
   { immediate: true },
 );
 watch(() => props.refreshKey, load);
+
+// --- What the account may change ----------------------------------------------------
+
+const choices = shallowRef({ labels: [], assignees: [], can_triage: false });
+watch(
+  [() => props.repo.owner, () => props.repo.repo, () => props.refreshKey],
+  async () => (choices.value = await issueFilters(props.repo)),
+  { immediate: true },
+);
+
+const me = computed(() => githubAccount.value?.login);
+const isMine = (post) => !!me.value && post.user?.login === me.value;
+const canTriage = computed(() => choices.value.can_triage);
+// Authors can edit, close and reopen their own issues.
+const canEdit = computed(() => canTriage.value || isMine(shown.value));
+
+// --- Changes ------------------------------------------------------------------------
+
+// Runs a change, showing what goes wrong beside the comment box.
+async function change(work) {
+  busy.value = true;
+  actionError.value = "";
+  try {
+    await work();
+    return true;
+  } catch (e) {
+    actionError.value = String(e);
+    return false;
+  } finally {
+    busy.value = false;
+  }
+}
+
+// Saves changes to the issue and shows it as GitHub returns it.
+async function update(changes) {
+  return change(async () => {
+    const issue = await invoke("github_update_issue", { ...where(), number: props.issue.number, changes });
+    thread.value = { ...thread.value, issue };
+    emit("updated", issue);
+  });
+}
+
+async function editTitle() {
+  const values = await openForm({
+    title: "Edit Title",
+    fields: [{ key: "title", label: "Title", type: "text", value: shown.value.title }],
+    confirmLabel: "Save",
+  });
+  if (values && values.title.trim() !== shown.value.title) update({ title: values.title.trim() });
+}
+
+const below = (event) => {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} };
+};
+
+// Each pick adds or removes one label or person.
+function labelMenu(event) {
+  const current = shown.value.labels.map((l) => l.name);
+  const toggle = (name) => () =>
+    update({ labels: current.includes(name) ? current.filter((n) => n !== name) : [...current, name] });
+  openMenu(
+    below(event),
+    choices.value.labels.length
+      ? choices.value.labels.map((l) => ({ label: l.name, detail: l.description, checked: current.includes(l.name), action: toggle(l.name) }))
+      : [{ label: "This repository has no labels", disabled: true, action() {} }],
+  );
+}
+
+function assigneeMenu(event) {
+  const current = shown.value.assignees.map((p) => p.login);
+  const toggle = (login) => () =>
+    update({ assignees: current.includes(login) ? current.filter((l) => l !== login) : [...current, login] });
+  const people = choices.value.assignees.map((p) => p.login);
+  openMenu(
+    below(event),
+    people.length
+      ? people.map((login) => ({ label: login === me.value ? `${login} (me)` : login, checked: current.includes(login), action: toggle(login) }))
+      : [{ label: "Nobody can be assigned", disabled: true, action() {} }],
+  );
+}
+
+// --- Commenting, closing and reopening ----------------------------------------------
+
+async function comment() {
+  const body = draft.value;
+  if (!body.trim()) return true;
+  return change(async () => {
+    const added = await invoke("github_add_comment", { ...where(), number: props.issue.number, body });
+    const issue = { ...thread.value.issue, comments: thread.value.issue.comments + 1 };
+    thread.value = { issue, comments: [...thread.value.comments, added] };
+    draft.value = "";
+    emit("updated", issue);
+  });
+}
+
+// A comment being written goes in first, as on GitHub.
+async function setState(state, reason) {
+  if (!(await comment())) return;
+  await update({ state, state_reason: reason });
+}
+
+function closeMenu(event) {
+  openMenu(below(event), [
+    { label: "Close as Completed", detail: "Done, fixed or answered", action: () => setState("closed", "completed") },
+    { label: "Close as Not Planned", detail: "Won't fix, can't reproduce or stale", action: () => setState("closed", "not_planned") },
+  ]);
+}
+
+function onDraftKeydown(event) {
+  if (event.key === "Enter" && commandKey(event)) {
+    event.preventDefault();
+    comment();
+  }
+}
+
+// --- Editing the description and comments --------------------------------------------
+
+function startEditing(post) {
+  editing.value = { id: post.id, text: post.body ?? "" };
+}
+
+async function saveEdit() {
+  const { id, text } = editing.value;
+  const ok =
+    id === "issue"
+      ? await update({ body: text })
+      : await change(async () => {
+          const edited = await invoke("github_edit_comment", { ...where(), id, body: text });
+          thread.value = { ...thread.value, comments: thread.value.comments.map((c) => (c.id === id ? edited : c)) };
+        });
+  if (ok) editing.value = null;
+}
+
+// Ctrl+Enter (Cmd+Enter on a Mac) saves, and Escape cancels.
+function onEditKeydown(event) {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    editing.value = null;
+  } else if (event.key === "Enter" && commandKey(event)) {
+    event.preventDefault();
+    saveEdit();
+  }
+}
+
+async function deleteComment(post) {
+  const ok = await askConfirm({
+    title: "Delete Comment",
+    message: "Delete this comment? It's removed from GitHub for everyone.",
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  change(async () => {
+    await invoke("github_delete_comment", { ...where(), id: post.id });
+    const issue = { ...thread.value.issue, comments: thread.value.issue.comments - 1 };
+    thread.value = { issue, comments: thread.value.comments.filter((c) => c.id !== post.id) };
+    emit("updated", issue);
+  });
+}
+
+function postMenu(event, post) {
+  openMenu(below(event), [
+    { label: "Edit", action: () => startEditing(post) },
+    post.id !== "issue" && { label: "Delete…", danger: true, action: () => deleteComment(post) },
+  ]);
+}
+
+// --- Showing it ---------------------------------------------------------------------
+
+const posts = computed(() =>
+  thread.value ? [{ ...thread.value.issue, id: "issue", author_association: null }, ...thread.value.comments] : [],
+);
 
 const fullDate = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
 
@@ -72,6 +267,9 @@ function onClick(event) {
     <header>
       <h2>
         {{ shown.title }} <span class="number">#{{ issue.number }}</span>
+        <button v-if="canEdit" class="icon-button small edit-title" title="Edit Title…" @click="editTitle">
+          <Pencil :size="14" />
+        </button>
       </h2>
       <div class="summary">
         <span class="state" :class="state(shown).class">
@@ -84,7 +282,10 @@ function onClick(event) {
           · {{ shown.comments }} {{ shown.comments === 1 ? "comment" : "comments" }}
         </span>
       </div>
-      <div v-if="shown.labels.length || shown.assignees.length" class="tags">
+      <div class="tags">
+        <button v-if="canTriage" class="tag-button" title="Add or remove labels" @click="labelMenu">
+          <Settings2 :size="13" /> Labels
+        </button>
         <span
           v-for="l in shown.labels"
           :key="l.name"
@@ -93,36 +294,77 @@ function onClick(event) {
           :title="l.description"
           >{{ l.name }}</span
         >
-        <span v-if="shown.assignees.length" class="assigned dim">
-          Assigned to
-          <span v-for="p in shown.assignees" :key="p.login" class="person">
-            <img :src="p.avatar_url" alt="" class="avatar small" />{{ p.login }}
-          </span>
+        <span v-if="!canTriage && !shown.labels.length" class="dim none">No labels</span>
+      </div>
+      <div class="tags">
+        <button v-if="canTriage" class="tag-button" title="Assign or unassign people" @click="assigneeMenu">
+          <Settings2 :size="13" /> Assignees
+        </button>
+        <span v-for="p in shown.assignees" :key="p.login" class="person">
+          <img :src="p.avatar_url" alt="" class="avatar small" />{{ p.login }}
         </span>
+        <span v-if="!shown.assignees.length" class="dim none">No one assigned</span>
       </div>
     </header>
 
-    <p v-if="error" class="message error"><CircleAlert :size="15" /> {{ error }}</p>
+    <IssueError v-if="error" :error="error" />
     <p v-else-if="!thread" class="message dim"><Spinner /> Loading the conversation…</p>
 
     <template v-else>
-      <article
-        v-for="post in [{ ...thread.issue, id: 'issue', author_association: null }, ...thread.comments]"
-        :key="post.id"
-        class="post"
-      >
+      <article v-for="post in posts" :key="post.id" class="post">
         <div class="post-header">
           <img v-if="post.user" :src="post.user.avatar_url" alt="" class="avatar" />
           <strong>{{ post.user?.login ?? "ghost" }}</strong>
           <a :href="post.html_url" class="dim when" :title="fullDate.format(new Date(post.created_at))">
             {{ post.id === "issue" ? "opened" : "commented" }} {{ formatAgo(post.created_at) }}
           </a>
+          <span class="spacer" />
           <span v-if="ROLES[post.author_association]" class="role">{{ ROLES[post.author_association] }}</span>
+          <button
+            v-if="post.id === 'issue' ? canEdit : isMine(post)"
+            class="icon-button small"
+            :title="post.id === 'issue' ? 'Edit the description' : 'Edit or delete this comment'"
+            :disabled="busy || !!editing"
+            @click="post.id === 'issue' ? startEditing(post) : postMenu($event, post)"
+          >
+            <Pencil :size="13" />
+          </button>
+        </div>
+        <div v-if="editing?.id === post.id" class="editor">
+          <textarea v-model="editing.text" rows="8" spellcheck="true" @keydown="onEditKeydown" />
+          <div class="editor-buttons">
+            <button class="secondary-button" :disabled="busy" @click="editing = null">Cancel</button>
+            <button class="primary-button" :disabled="busy" @click="saveEdit">Save</button>
+          </div>
         </div>
         <!-- GitHub's rendering, which it sanitizes as it does on its own pages. -->
-        <div v-if="post.body_html" class="markdown selectable" v-html="post.body_html" />
+        <div v-else-if="post.body_html" class="markdown selectable" v-html="post.body_html" />
         <p v-else class="markdown dim"><em>No description provided.</em></p>
       </article>
+
+      <div class="composer">
+        <textarea
+          v-model="draft"
+          rows="4"
+          placeholder="Leave a comment. Markdown works here."
+          spellcheck="true"
+          :disabled="busy"
+          @keydown="onDraftKeydown"
+        />
+        <IssueError v-if="actionError" :error="actionError" />
+        <div class="composer-buttons">
+          <Spinner v-if="busy" class="dim" />
+          <template v-if="canEdit">
+            <button v-if="shown.state === 'open'" class="secondary-button with-menu" :disabled="busy" @click="closeMenu">
+              {{ draft.trim() ? "Close with Comment" : "Close Issue" }} <ChevronDown :size="14" />
+            </button>
+            <button v-else class="secondary-button" :disabled="busy" @click="setState('open', 'reopened')">
+              {{ draft.trim() ? "Reopen with Comment" : "Reopen Issue" }}
+            </button>
+          </template>
+          <button class="primary-button" :disabled="busy || !draft.trim()" @click="comment">Comment</button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -206,19 +448,102 @@ h2 {
   line-height: 20px;
 }
 
-.assigned {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 13px;
-}
-
 .person {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-size: 13px;
   color: var(--text-secondary);
+}
+
+.none {
+  font-size: 13px;
+}
+
+.edit-title {
+  display: inline-flex;
+  vertical-align: 3px;
+}
+
+/* Opens the menu for changing an issue's labels or assignees. */
+.tag-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 96px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.tag-button:hover {
+  background: var(--button-hover);
+  color: var(--text-primary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.editor,
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editor {
+  padding: 10px 12px;
+}
+
+.editor textarea,
+.composer textarea {
+  width: 100%;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--input-bg);
+  font: inherit;
+  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.editor textarea:focus,
+.composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.editor-buttons,
+.composer-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.editor-buttons button,
+.composer-buttons button {
+  padding: 5px 14px;
+  font-size: 13px;
+}
+
+.with-menu {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer {
+  margin-top: 4px;
 }
 
 .dim {
@@ -262,7 +587,6 @@ h2 {
 }
 
 .role {
-  margin-left: auto;
   padding: 0 7px;
   border: 1px solid var(--border);
   border-radius: 10px;

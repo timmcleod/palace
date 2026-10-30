@@ -1,8 +1,8 @@
-//! A GitHub repository's issues, for the Issues view: lists and searches them, and
-//! reads one with its comments. GitHub renders their Markdown, so they look as they do
-//! on the website.
+//! A GitHub repository's issues, for the Issues view: lists and searches them, reads
+//! one with its comments, and opens, comments on, edits, closes and labels them.
+//! GitHub renders their Markdown, so they look as they do on the website.
 
-use crate::github::{api_get, api_get_html, blocking, token};
+use crate::github::{api, api_get, api_get_html, api_html, blocking, token, Method};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -36,9 +36,11 @@ pub struct Issue {
     created_at: String,
     closed_at: Option<String>,
     html_url: String,
-    /// The description, as HTML; only when reading one issue.
+    /// The description, as HTML and as written; only when reading one issue.
     #[serde(default)]
     body_html: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -64,7 +66,7 @@ pub async fn github_issues(owner: String, repo: String, filters: String, page: u
     let token = token()?;
     blocking(move || {
         let path = search_path(&owner, &repo, &filters, page);
-        let found: SearchResults = api_get(&token, &path)?;
+        let found: SearchResults = api_get(&token, &path).map_err(plain)?;
         Ok(IssuePage { total: found.total_count, issues: found.items })
     })
     .await
@@ -113,6 +115,8 @@ pub struct Comment {
     id: u64,
     user: Option<Person>,
     body_html: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
     created_at: String,
     html_url: String,
     /// The commenter's role in the repository, such as "OWNER" or "CONTRIBUTOR".
@@ -130,11 +134,11 @@ pub struct IssueThread {
 pub async fn github_issue(owner: String, repo: String, number: u64) -> Result<IssueThread, String> {
     let token = token()?;
     blocking(move || {
-        let issue = api_get_html(&token, &format!("/repos/{owner}/{repo}/issues/{number}"))?;
+        let issue = api_get_html(&token, &format!("/repos/{owner}/{repo}/issues/{number}")).map_err(plain)?;
         let mut comments = Vec::new();
         for page in 1..=30 {
             let path = format!("/repos/{owner}/{repo}/issues/{number}/comments?per_page=100&page={page}");
-            let batch: Vec<Comment> = api_get_html(&token, &path)?;
+            let batch: Vec<Comment> = api_get_html(&token, &path).map_err(plain)?;
             let done = batch.len() < 100;
             comments.extend(batch);
             if done {
@@ -149,6 +153,16 @@ pub async fn github_issue(owner: String, repo: String, number: u64) -> Result<Is
 #[derive(Deserialize)]
 struct RepoInfo {
     parent: Option<Parent>,
+    permissions: Option<Permissions>,
+}
+
+/// What the signed-in account may do in a repository.
+#[derive(Deserialize, Default)]
+struct Permissions {
+    #[serde(default)]
+    push: bool,
+    #[serde(default)]
+    triage: bool,
 }
 
 #[derive(Deserialize)]
@@ -162,7 +176,7 @@ struct Parent {
 pub async fn github_fork_parent(owner: String, repo: String) -> Result<Option<String>, String> {
     let token = token()?;
     blocking(move || {
-        let info: RepoInfo = api_get(&token, &format!("/repos/{owner}/{repo}"))?;
+        let info: RepoInfo = api_get(&token, &format!("/repos/{owner}/{repo}")).map_err(plain)?;
         Ok(info.parent.map(|p| p.full_name))
     })
     .await
@@ -173,19 +187,89 @@ pub struct IssueFilters {
     labels: Vec<Label>,
     /// The people issues can be assigned to.
     assignees: Vec<Person>,
+    /// Whether the account can label, assign, close and edit anyone's issues, rather
+    /// than only its own.
+    can_triage: bool,
 }
 
-/// What the Issues view's filter menus offer.
+/// The repository's labels and assignable people, for the filter menus and for
+/// labeling and assigning, and what the account may do with them.
 #[tauri::command]
 pub async fn github_issue_filters(owner: String, repo: String) -> Result<IssueFilters, String> {
     let token = token()?;
     blocking(move || {
+        let info: RepoInfo = api_get(&token, &format!("/repos/{owner}/{repo}")).map_err(plain)?;
+        let permissions = info.permissions.unwrap_or_default();
         Ok(IssueFilters {
-            labels: api_get(&token, &format!("/repos/{owner}/{repo}/labels?per_page=100"))?,
-            assignees: api_get(&token, &format!("/repos/{owner}/{repo}/assignees?per_page=100"))?,
+            labels: api_get(&token, &format!("/repos/{owner}/{repo}/labels?per_page=100")).map_err(plain)?,
+            assignees: api_get(&token, &format!("/repos/{owner}/{repo}/assignees?per_page=100")).unwrap_or_default(),
+            can_triage: permissions.push || permissions.triage,
         })
     })
     .await
+}
+
+/// Opens an issue.
+#[tauri::command]
+pub async fn github_create_issue(owner: String, repo: String, title: String, body: String) -> Result<Issue, String> {
+    let token = token()?;
+    let fields = serde_json::json!({ "title": title.trim(), "body": body });
+    blocking(move || api_html(&token, Method::Post(fields), &format!("/repos/{owner}/{repo}/issues")).map_err(plain)).await
+}
+
+/// Changes an issue: any of title, body, state ("open" or "closed"), state_reason
+/// ("completed", "not_planned" or "reopened"), labels and assignees (whole lists of
+/// names and logins).
+#[tauri::command]
+pub async fn github_update_issue(owner: String, repo: String, number: u64, changes: serde_json::Value) -> Result<Issue, String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/{number}");
+    blocking(move || api_html(&token, Method::Patch(changes), &path).map_err(plain)).await
+}
+
+#[tauri::command]
+pub async fn github_add_comment(owner: String, repo: String, number: u64, body: String) -> Result<Comment, String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/{number}/comments");
+    blocking(move || api_html(&token, Method::Post(serde_json::json!({ "body": body })), &path).map_err(plain)).await
+}
+
+#[tauri::command]
+pub async fn github_edit_comment(owner: String, repo: String, id: u64, body: String) -> Result<Comment, String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/comments/{id}");
+    blocking(move || api_html(&token, Method::Patch(serde_json::json!({ "body": body })), &path).map_err(plain)).await
+}
+
+#[tauri::command]
+pub async fn github_delete_comment(owner: String, repo: String, id: u64) -> Result<(), String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/comments/{id}");
+    blocking(move || api(&token, Method::Delete, &path).map_err(plain)).await
+}
+
+/// Where the Issues view sends people whose token can't do what they asked.
+pub const TOKEN_HELP: &str = "TOKEN: ";
+
+/// GitHub's refusals about issues in plain words. Those about the token start with
+/// TOKEN_HELP, so the Issues view can offer a way to change it.
+fn plain(error: String) -> String {
+    if error.contains("Resource not accessible by personal access token") {
+        format!(
+            "{TOKEN_HELP}Your GitHub token isn't allowed to do that. Fine-grained tokens need the Issues \
+             permission, set to Read and write, for this repository. Change it on GitHub, or sign in with \
+             a classic token."
+        )
+    } else if error.contains("cannot be searched") {
+        format!(
+            "{TOKEN_HELP}Your GitHub token can't see this repository's issues. Fine-grained tokens need this \
+             repository and the Issues permission added. Change it on GitHub, or sign in with a classic token."
+        )
+    } else if error.contains("Issues are disabled") {
+        "Issues are turned off for this repository on GitHub.".into()
+    } else {
+        error
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +286,16 @@ mod tests {
         // Words to match are sorted by how well they match.
         assert!(!search_path("tim", "palace", "is:open crash", 1).contains("sort="));
         assert_eq!(terms(r#"is:open  label:"good first issue" crash"#), ["is:open", r#"label:"good first issue""#, "crash"]);
+    }
+
+    #[test]
+    fn explaining_refusals_about_issues() {
+        let refused = "GitHub said: Resource not accessible by personal access token".to_string();
+        assert!(plain(refused).starts_with(TOKEN_HELP));
+        let unsearchable = "GitHub said: Validation Failed: The listed users and repositories cannot be searched".to_string();
+        assert!(plain(unsearchable).contains("can't see this repository's issues"));
+        assert_eq!(plain("GitHub said: Issues are disabled for this repo".into()), "Issues are turned off for this repository on GitHub.");
+        assert_eq!(plain("Couldn't reach GitHub: timeout".into()), "Couldn't reach GitHub: timeout");
     }
 
     #[test]

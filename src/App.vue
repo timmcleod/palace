@@ -224,6 +224,21 @@ const issueRepo = computed(() => {
 const selectedIssue = shallowRef(null);
 const issueQuery = ref("");
 const openIssues = ref(null);
+// The last issue changed in the issue view, for the list to show.
+const updatedIssue = shallowRef(null);
+
+function onIssueUpdated(issue) {
+  if (openIssues.value != null && selectedIssue.value?.state !== issue.state) {
+    openIssues.value += issue.state === "open" ? 1 : -1;
+  }
+  selectedIssue.value = issue;
+  updatedIssue.value = issue;
+}
+
+function onIssueCreated(issue) {
+  if (openIssues.value != null) openIssues.value++;
+  selectedIssue.value = issue;
+}
 
 // Each repository starts with its remembered choice, and a check for a fork.
 watch(
@@ -1138,8 +1153,10 @@ function startResize(event, pane, min, max) {
         :query="issueQuery"
         :selected="selectedIssue?.number"
         :refresh-key="refreshKey"
+        :updated="updatedIssue"
         @select="selectedIssue = $event"
         @count="openIssues = $event"
+        @created="onIssueCreated"
       />
       <!-- While Palace checks whether the repository is a fork. -->
       <div v-else-if="isIssues" class="empty-state"><Spinner /></div>
@@ -1306,7 +1323,13 @@ function startResize(event, pane, min, max) {
             Open on GitHub <ExternalLink :size="13" />
           </button>
         </div>
-        <IssueDetails v-if="selectedIssue && issueRepo" :repo="issueRepo" :issue="selectedIssue" :refresh-key="refreshKey" />
+        <IssueDetails
+          v-if="selectedIssue && issueRepo"
+          :repo="issueRepo"
+          :issue="selectedIssue"
+          :refresh-key="refreshKey"
+          @updated="onIssueUpdated"
+        />
         <div v-else class="empty-state">
           <p>Select an issue to read it.</p>
         </div>

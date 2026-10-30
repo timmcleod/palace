@@ -188,9 +188,10 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-enum Method {
+pub(crate) enum Method {
     Get,
     Post(serde_json::Value),
+    Patch(serde_json::Value),
     // With no body, as for starring.
     Put,
     Delete,
@@ -203,14 +204,20 @@ pub(crate) fn api_get<T: serde::de::DeserializeOwned>(token: &str, path: &str) -
 
 /// Calls the GitHub API with the token. A reply with no body (as for a deletion)
 /// reads as `()`.
-fn api<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str) -> Result<T, String> {
+pub(crate) fn api<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str) -> Result<T, String> {
     api_as(token, method, path, "application/vnd.github+json")
 }
 
 /// GETs `path` with the Markdown in it (issues, comments) also rendered as HTML, in
 /// `body_html`.
 pub(crate) fn api_get_html<T: serde::de::DeserializeOwned>(token: &str, path: &str) -> Result<T, String> {
-    api_as(token, Method::Get, path, "application/vnd.github.full+json")
+    api_html(token, Method::Get, path)
+}
+
+/// Calls the GitHub API with the token, with the Markdown in the reply rendered as
+/// HTML too, in `body_html`.
+pub(crate) fn api_html<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str) -> Result<T, String> {
+    api_as(token, method, path, "application/vnd.github.full+json")
 }
 
 fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str, accept: &str) -> Result<T, String> {
@@ -221,6 +228,7 @@ fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &st
         Method::Delete => agent().delete(&url).header("Accept", accept).header("Authorization", &auth).call(),
         Method::Put => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_empty(),
         Method::Post(body) => agent().post(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
+        Method::Patch(body) => agent().patch(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
     };
     let mut response = sent.map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
     let status = response.status().as_u16();

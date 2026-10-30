@@ -1,10 +1,12 @@
 <script setup>
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, CircleAlert, CircleCheck, CircleDot, CircleSlash, MessageSquare } from "lucide-vue-next";
+import { ChevronDown, CircleCheck, CircleDot, CircleSlash, MessageSquare, Plus } from "lucide-vue-next";
 import { githubAccount, signInWithToken } from "../lib/github.js";
-import { openMenu } from "../lib/overlays.js";
+import { forgetIssueFilters, issueError, issueFilters } from "../lib/issues.js";
+import { openForm, openMenu, tell } from "../lib/overlays.js";
 import { formatAgo, textColorOn } from "../lib/format.js";
+import IssueError from "./IssueError.vue";
 import Spinner from "./Spinner.vue";
 
 // A GitHub repository's issues, newest first, narrowed by state, label, assignee,
@@ -16,8 +18,11 @@ const props = defineProps({
   query: { type: String, default: "" },
   selected: { type: Number, default: null },
   refreshKey: { type: Number, default: 0 },
+  // An issue changed in the issue view, to update its row.
+  updated: { type: Object, default: null },
 });
-const emit = defineEmits(["select", "count"]);
+// "created" is a new issue, already selected.
+const emit = defineEmits(["select", "count", "created"]);
 
 const state = ref("open");
 const label = ref(null);
@@ -26,8 +31,6 @@ const assignee = ref(null);
 const author = ref(null);
 
 const issues = shallowRef(null);
-// The labels and assignable people, loaded when a filter menu is first opened.
-const filterChoices = shallowRef(null);
 const total = ref(0);
 const page = ref(1);
 const loading = ref(false);
@@ -87,26 +90,60 @@ watch(
   () => {
     issues.value = null;
     label.value = assignee.value = author.value = null;
-    filterChoices.value = null;
     load();
   },
   { immediate: true },
 );
-watch(() => props.refreshKey, () => load());
+watch(
+  () => props.refreshKey,
+  () => {
+    forgetIssueFilters();
+    load();
+  },
+);
+
+watch(
+  () => props.updated,
+  (issue) => {
+    if (issue && issues.value) issues.value = issues.value.map((i) => (i.number === issue.number ? issue : i));
+  },
+);
+
+async function newIssue() {
+  const values = await openForm({
+    title: "New Issue",
+    message: `Opens an issue on ${props.repo.owner}/${props.repo.repo}. The description can use Markdown.`,
+    fields: [
+      { key: "title", label: "Title", type: "text", value: "" },
+      { key: "body", label: "Description", type: "textarea", value: "", optional: true },
+    ],
+    confirmLabel: "Create Issue",
+  });
+  if (!values) return;
+  try {
+    const issue = await invoke("github_create_issue", {
+      owner: props.repo.owner,
+      repo: props.repo.repo,
+      title: values.title,
+      body: values.body,
+    });
+    // GitHub's search takes a moment to find it, so it's added here.
+    if (state.value === "open") {
+      issues.value = [issue, ...(issues.value ?? [])];
+      total.value++;
+    }
+    emit("created", issue);
+  } catch (e) {
+    tell("Couldn't create the issue", issueError(e).text);
+  }
+}
 
 // GitHub's search goes no further than 1,000 results.
 const canLoadMore = computed(() => issues.value && issues.value.length < Math.min(total.value, 1000));
 
 // --- Filter menus -----------------------------------------------------------------
 
-async function choices() {
-  if (!filterChoices.value) {
-    filterChoices.value = await invoke("github_issue_filters", { owner: props.repo.owner, repo: props.repo.repo }).catch(
-      () => ({ labels: [], assignees: [] }),
-    );
-  }
-  return filterChoices.value;
-}
+const choices = () => issueFilters(props.repo);
 
 const below = (event) => {
   const rect = event.currentTarget.getBoundingClientRect();
@@ -186,6 +223,7 @@ async function signIn() {
       <span class="spacer" />
       <Spinner v-if="loading && issues" :size="14" class="dim" />
       <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
+      <button class="icon-button small" title="New Issue…" @click="newIssue"><Plus :size="16" /></button>
     </div>
 
     <div class="rows" tabindex="0" @keydown="onKeydown">
@@ -195,7 +233,7 @@ async function signIn() {
         <button class="primary-button" @click="signIn">Sign In with Token…</button>
         <p v-if="signInError" class="error">{{ signInError }}</p>
       </div>
-      <p v-else-if="error && !issues" class="message error"><CircleAlert :size="15" /> {{ error }}</p>
+      <IssueError v-else-if="error && !issues" :error="error" class="message" />
       <p v-else-if="!issues" class="message dim"><Spinner /> Loading issues…</p>
 
       <template v-else>
@@ -247,7 +285,7 @@ async function signIn() {
           <CircleDot :size="28" :stroke-width="1.25" />
           <p>No {{ state }} issues{{ filters !== `is:${state}` ? " match" : "" }}.</p>
         </div>
-        <p v-if="error" class="message error"><CircleAlert :size="15" /> {{ error }}</p>
+        <IssueError v-if="error" :error="error" class="message" />
         <div v-if="canLoadMore" class="more">
           <button class="secondary-button" :disabled="loading" @click="load({ more: true })">
             <Spinner v-if="loading" :size="13" /> Show More
