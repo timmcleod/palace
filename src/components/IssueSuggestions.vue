@@ -1,7 +1,8 @@
 <script setup>
 import { CircleDot } from "lucide-vue-next";
 
-// The list of open issues offered while "#" is typed: see issueSuggestions.js.
+// The open issues offered while "#" is typed, or people for "@": see
+// issueSuggestions.js.
 defineProps({
   // useIssueSuggestions()'s result.
   suggestions: { type: Object, required: true },
@@ -12,17 +13,18 @@ defineProps({
   <div v-if="suggestions.items.value.length" class="suggestions" :style="suggestions.position.value" role="listbox">
     <!-- mousedown, so the field keeps focus. -->
     <div
-      v-for="(issue, i) in suggestions.items.value"
-      :key="issue.number"
+      v-for="(item, i) in suggestions.items.value"
+      :key="item.key"
       class="suggestion"
       :class="{ active: i === suggestions.index.value }"
       role="option"
-      @mousedown.prevent="suggestions.pick(issue)"
+      @mousedown.prevent="suggestions.pick(item)"
       @mouseenter="suggestions.index.value = i"
     >
-      <CircleDot :size="14" class="icon" />
-      <span class="number">#{{ issue.number }}</span>
-      <span class="title">{{ issue.title }}</span>
+      <img v-if="item.kind === 'person'" :src="item.avatar" alt="" class="avatar" />
+      <CircleDot v-else :size="14" class="icon" />
+      <span :class="item.kind === 'issue' ? 'number' : 'title'">{{ item.label }}</span>
+      <span v-if="item.detail" class="title">{{ item.detail }}</span>
     </div>
   </div>
 </template>
@@ -62,6 +64,12 @@ defineProps({
 .active .icon,
 .active .number {
   color: inherit;
+}
+
+.avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
 }
 
 .number {

@@ -361,3 +361,185 @@ textarea,
   border-radius: 10px;
   background: var(--pill-bg) padding-box;
 }
+
+/* Markdown as GitHub renders it, in issues and the Markdown editor's preview. */
+.markdown {
+  margin: 0;
+  padding: 12px 16px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table,
+.markdown details {
+  margin: 0 0 12px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 18px 0 10px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.5em;
+}
+
+.markdown h2 {
+  font-size: 1.3em;
+}
+
+.markdown h3 {
+  font-size: 1.12em;
+}
+
+.markdown a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 2em;
+}
+
+.markdown li + li {
+  margin-top: 3px;
+}
+
+.markdown .task-list-item {
+  list-style: none;
+}
+
+.markdown .task-list-item-checkbox {
+  margin: 0 6px 0 -1.4em;
+  vertical-align: middle;
+}
+
+.markdown code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--pill-bg);
+  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
+  font-size: 0.88em;
+}
+
+.markdown pre {
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--diff-gutter-bg);
+  border: 1px solid var(--border);
+  line-height: 1.45;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+}
+
+.markdown .highlight {
+  margin: 0 0 12px;
+}
+
+.markdown blockquote {
+  padding: 0 12px;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.markdown img,
+.markdown video {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown th,
+.markdown td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+}
+
+.markdown th {
+  font-weight: 600;
+  background: var(--diff-gutter-bg);
+}
+
+.markdown hr {
+  height: 1px;
+  margin: 16px 0;
+  border: 0;
+  background: var(--border);
+}
+
+.markdown summary {
+  cursor: pointer;
+}
+
+.markdown .user-mention,
+.markdown .team-mention {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Code GitHub has highlighted, in Palace's syntax colors (see above). */
+.markdown .pl-c {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.markdown .pl-k {
+  color: var(--syntax-keyword);
+}
+
+.markdown .pl-s,
+.markdown .pl-pds,
+.markdown .pl-sr {
+  color: var(--syntax-string);
+}
+
+.markdown .pl-c1,
+.markdown .pl-e {
+  color: var(--syntax-number);
+}
+
+.markdown .pl-en {
+  color: var(--syntax-title);
+}
+
+.markdown .pl-v,
+.markdown .pl-smi {
+  color: var(--syntax-type);
+}
+
+.markdown .pl-ent {
+  color: var(--syntax-tag);
+}

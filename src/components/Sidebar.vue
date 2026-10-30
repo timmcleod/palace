@@ -27,7 +27,9 @@ const props = defineProps({
   selected: { type: String, default: null },
   // Rows of the two revisions being compared, highlighted along with the selection.
   compared: { type: Array, default: () => [] },
-  // { count } when the repository is on GitHub, for the Issues row; null hides it.
+  // { count, fresh } when the repository is on GitHub, for the Issues row: how many
+  // are open, and how many of those are new since they were last looked at. Null
+  // hides the row.
   issues: { type: Object, default: null },
 });
 const emit = defineEmits([
@@ -80,6 +82,8 @@ const workspaceRows = computed(() =>
       icon: CircleDot,
       depth: 0,
       count: props.issues.count || null,
+      fresh: props.issues.fresh > 0,
+      title: props.issues.fresh > 0 ? `${props.issues.fresh} new since you last looked` : null,
     },
     { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
     { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
@@ -366,7 +370,7 @@ function onRowClick(row, event) {
                   <ArrowDown :size="12" :stroke-width="2.25" />{{ row.behind }}
                 </span>
               </span>
-              <span v-else-if="row.count" class="count">{{ row.count }}</span>
+              <span v-else-if="row.count" class="count" :class="{ fresh: row.fresh }">{{ row.count }}</span>
             </template>
           </div>
         </template>
@@ -616,6 +620,15 @@ function onRowClick(row, event) {
 .count {
   color: var(--text-tertiary);
   font-size: 12px;
+}
+
+/* New issues are waiting. */
+.count.fresh {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  font-weight: 600;
+  color: #fff;
 }
 
 .sidebar-footer {

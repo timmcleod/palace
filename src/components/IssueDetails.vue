@@ -1,14 +1,31 @@
+<script>
+// Comments being written, by repository and issue, so they're still there after
+// switching to another issue or view, until they're posted.
+const drafts = new Map();
+</script>
+
 <script setup>
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ChevronDown, CircleCheck, CircleDot, CircleSlash, GitCommitHorizontal, Pencil, Settings2 } from "lucide-vue-next";
+import {
+  ChevronDown,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  GitCommitHorizontal,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  Pencil,
+  Settings2,
+} from "lucide-vue-next";
 import { formatAgo, textColorOn } from "../lib/format.js";
 import { githubAccount } from "../lib/github.js";
 import { issueFilters } from "../lib/issues.js";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
-import { commandKey } from "../lib/platform.js";
 import IssueError from "./IssueError.vue";
+import MarkdownEditor from "./MarkdownEditor.vue";
 import Spinner from "./Spinner.vue";
 
 // One issue: its title, state, labels and assignees, then its description and
@@ -37,8 +54,14 @@ let loadSeq = 0;
 // While a change is being saved, and what went wrong with the last one.
 const busy = ref(false);
 const actionError = ref("");
-// The comment being written.
+// The comment being written, kept in `drafts` as it's typed.
 const draft = ref("");
+const draftKey = () => `${props.repo.owner}/${props.repo.repo}#${props.issue.number}`.toLowerCase();
+function setDraft(text) {
+  draft.value = text;
+  if (text) drafts.set(draftKey(), text);
+  else drafts.delete(draftKey());
+}
 // { id, text }: the post being edited ("issue" for the description).
 const editing = ref(null);
 
@@ -52,7 +75,8 @@ async function load() {
     thread.value = result;
     error.value = "";
   } catch (e) {
-    if (seq === loadSeq) error.value = String(e);
+    // A refresh that fails, offline say, keeps showing the conversation.
+    if (seq === loadSeq && !thread.value) error.value = String(e);
   }
 }
 
@@ -62,7 +86,7 @@ watch(
     thread.value = null;
     error.value = "";
     actionError.value = "";
-    draft.value = "";
+    draft.value = drafts.get(draftKey()) ?? "";
     editing.value = null;
     load();
   },
@@ -70,11 +94,12 @@ watch(
 );
 watch(() => props.refreshKey, load);
 
-// The commits on any branch whose messages mention the issue ("Fixes #42").
+// The commits on any branch whose messages mention the issue ("Fixes #42"). Looked
+// for when the issue opens, not on every refresh: in a big repository it takes a while.
 const MAX_MENTIONS = 50;
 const mentions = shallowRef([]);
 watch(
-  [() => props.issue.number, () => props.path, () => props.refreshKey],
+  [() => props.issue.number, () => props.path],
   async ([number, path]) => {
     const found = await invoke("commits_mentioning", { path, number, limit: MAX_MENTIONS }).catch(() => []);
     if (number === props.issue.number) mentions.value = found;
@@ -172,7 +197,7 @@ async function comment() {
     const added = await invoke("github_add_comment", { ...where(), number: props.issue.number, body });
     const issue = { ...thread.value.issue, comments: thread.value.issue.comments + 1 };
     thread.value = { issue, comments: [...thread.value.comments, added] };
-    draft.value = "";
+    setDraft("");
     emit("updated", issue);
   });
 }
@@ -180,7 +205,7 @@ async function comment() {
 // A comment being written goes in first, as on GitHub.
 async function setState(state, reason) {
   if (!(await comment())) return;
-  await update({ state, state_reason: reason });
+  await update(reason ? { state, state_reason: reason } : { state });
 }
 
 function closeMenu(event) {
@@ -188,13 +213,6 @@ function closeMenu(event) {
     { label: "Close as Completed", detail: "Done, fixed or answered", action: () => setState("closed", "completed") },
     { label: "Close as Not Planned", detail: "Won't fix, can't reproduce or stale", action: () => setState("closed", "not_planned") },
   ]);
-}
-
-function onDraftKeydown(event) {
-  if (event.key === "Enter" && commandKey(event)) {
-    event.preventDefault();
-    comment();
-  }
 }
 
 // --- Editing the description and comments --------------------------------------------
@@ -213,17 +231,6 @@ async function saveEdit() {
           thread.value = { ...thread.value, comments: thread.value.comments.map((c) => (c.id === id ? edited : c)) };
         });
   if (ok) editing.value = null;
-}
-
-// Ctrl+Enter (Cmd+Enter on a Mac) saves, and Escape cancels.
-function onEditKeydown(event) {
-  if (event.key === "Escape") {
-    event.stopPropagation();
-    editing.value = null;
-  } else if (event.key === "Enter" && commandKey(event)) {
-    event.preventDefault();
-    saveEdit();
-  }
 }
 
 async function deleteComment(post) {
@@ -257,7 +264,16 @@ const posts = computed(() =>
 
 const fullDate = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
 
+// "#123" can be a pull request's number, so it's shown as one: merged or not.
+const isPull = computed(() => !!shown.value.pull_request);
+const kind = computed(() => (isPull.value ? "pull request" : "issue"));
+
 function state(issue) {
+  if (issue.pull_request) {
+    if (issue.pull_request.merged_at) return { icon: GitMerge, class: "closed", label: "Merged" };
+    if (issue.state === "open") return { icon: GitPullRequest, class: "open", label: "Open" };
+    return { icon: GitPullRequestClosed, class: "not-planned", label: "Closed" };
+  }
   if (issue.state === "open") return { icon: CircleDot, class: "open", label: "Open" };
   if (issue.state_reason === "not_planned" || issue.state_reason === "duplicate") {
     return { icon: CircleSlash, class: "not-planned", label: "Closed as not planned" };
@@ -292,7 +308,7 @@ function onClick(event) {
           {{ state(shown).label }}
         </span>
         <span class="dim">
-          <strong>{{ shown.user?.login ?? "ghost" }}</strong> opened this issue
+          <strong>{{ shown.user?.login ?? "ghost" }}</strong> opened this {{ kind }}
           <span :title="fullDate.format(new Date(shown.created_at))">{{ formatAgo(shown.created_at) }}</span>
           · {{ shown.comments }} {{ shown.comments === 1 ? "comment" : "comments" }}
         </span>
@@ -365,7 +381,15 @@ function onClick(event) {
           </button>
         </div>
         <div v-if="editing?.id === post.id" class="editor">
-          <textarea v-model="editing.text" rows="8" spellcheck="true" @keydown="onEditKeydown" />
+          <MarkdownEditor
+            v-model="editing.text"
+            :repo="repo"
+            :rows="8"
+            :disabled="busy"
+            autofocus
+            @submit="saveEdit"
+            @cancel="editing = null"
+          />
           <div class="editor-buttons">
             <button class="secondary-button" :disabled="busy" @click="editing = null">Cancel</button>
             <button class="primary-button" :disabled="busy" @click="saveEdit">Save</button>
@@ -377,23 +401,38 @@ function onClick(event) {
       </article>
 
       <div class="composer">
-        <textarea
-          v-model="draft"
-          rows="4"
-          placeholder="Leave a comment. Markdown works here."
-          spellcheck="true"
+        <MarkdownEditor
+          :model-value="draft"
+          @update:model-value="setDraft"
+          :repo="repo"
+          :rows="4"
+          placeholder="Leave a comment"
           :disabled="busy"
-          @keydown="onDraftKeydown"
+          @submit="comment"
         />
+        <p class="attach-hint dim">
+          Images and files can be attached
+          <a :href="shown.html_url">on GitHub</a>.
+        </p>
         <IssueError v-if="actionError" :error="actionError" />
         <div class="composer-buttons">
           <Spinner v-if="busy" class="dim" />
-          <template v-if="canEdit">
-            <button v-if="shown.state === 'open'" class="secondary-button with-menu" :disabled="busy" @click="closeMenu">
+          <!-- A merged pull request can't be closed or reopened, and a pull request is
+               closed without a reason. -->
+          <template v-if="canEdit && !shown.pull_request?.merged_at">
+            <button
+              v-if="shown.state === 'open' && isPull"
+              class="secondary-button"
+              :disabled="busy"
+              @click="setState('closed', null)"
+            >
+              {{ draft.trim() ? "Close with Comment" : "Close Pull Request" }}
+            </button>
+            <button v-else-if="shown.state === 'open'" class="secondary-button with-menu" :disabled="busy" @click="closeMenu">
               {{ draft.trim() ? "Close with Comment" : "Close Issue" }} <ChevronDown :size="14" />
             </button>
-            <button v-else class="secondary-button" :disabled="busy" @click="setState('open', 'reopened')">
-              {{ draft.trim() ? "Reopen with Comment" : "Reopen Issue" }}
+            <button v-else class="secondary-button" :disabled="busy" @click="setState('open', isPull ? null : 'reopened')">
+              {{ draft.trim() ? "Reopen with Comment" : `Reopen ${isPull ? "Pull Request" : "Issue"}` }}
             </button>
           </template>
           <button class="primary-button" :disabled="busy || !draft.trim()" @click="comment">Comment</button>
@@ -584,26 +623,13 @@ h2 {
   padding: 10px 12px;
 }
 
-.editor textarea,
-.composer textarea {
-  width: 100%;
-  padding: 8px 10px;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  outline: none;
-  background: var(--input-bg);
-  font: inherit;
-  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-primary);
+.attach-hint {
+  margin: -2px 0 0;
+  font-size: 12px;
 }
 
-.editor textarea:focus,
-.composer textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+.attach-hint a {
+  color: var(--text-tertiary);
 }
 
 .editor-buttons,
@@ -687,187 +713,5 @@ h2 {
 .avatar.small {
   width: 18px;
   height: 18px;
-}
-
-/* GitHub's rendered Markdown. */
-.markdown {
-  margin: 0;
-  padding: 12px 16px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.markdown :deep(> :first-child) {
-  margin-top: 0;
-}
-
-.markdown :deep(> :last-child) {
-  margin-bottom: 0;
-}
-
-.markdown :deep(p),
-.markdown :deep(ul),
-.markdown :deep(ol),
-.markdown :deep(blockquote),
-.markdown :deep(pre),
-.markdown :deep(table),
-.markdown :deep(details) {
-  margin: 0 0 12px;
-}
-
-.markdown :deep(h1),
-.markdown :deep(h2),
-.markdown :deep(h3),
-.markdown :deep(h4) {
-  margin: 18px 0 10px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.markdown :deep(h1) {
-  font-size: 1.5em;
-}
-
-.markdown :deep(h2) {
-  font-size: 1.3em;
-}
-
-.markdown :deep(h3) {
-  font-size: 1.12em;
-}
-
-.markdown :deep(a) {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.markdown :deep(a:hover) {
-  text-decoration: underline;
-}
-
-.markdown :deep(ul),
-.markdown :deep(ol) {
-  padding-left: 2em;
-}
-
-.markdown :deep(li + li) {
-  margin-top: 3px;
-}
-
-.markdown :deep(.task-list-item) {
-  list-style: none;
-}
-
-.markdown :deep(.task-list-item-checkbox) {
-  margin: 0 6px 0 -1.4em;
-  vertical-align: middle;
-}
-
-.markdown :deep(code) {
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: var(--pill-bg);
-  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 0.88em;
-}
-
-.markdown :deep(pre) {
-  padding: 10px 12px;
-  overflow-x: auto;
-  border-radius: 6px;
-  background: var(--diff-gutter-bg);
-  border: 1px solid var(--border);
-  line-height: 1.45;
-}
-
-.markdown :deep(pre code) {
-  padding: 0;
-  background: none;
-  font-size: 12.5px;
-}
-
-.markdown :deep(.highlight) {
-  margin: 0 0 12px;
-}
-
-.markdown :deep(blockquote) {
-  padding: 0 12px;
-  border-left: 3px solid var(--border);
-  color: var(--text-secondary);
-}
-
-.markdown :deep(img),
-.markdown :deep(video) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 4px;
-}
-
-.markdown :deep(table) {
-  border-collapse: collapse;
-  display: block;
-  overflow-x: auto;
-}
-
-.markdown :deep(th),
-.markdown :deep(td) {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-}
-
-.markdown :deep(th) {
-  font-weight: 600;
-  background: var(--diff-gutter-bg);
-}
-
-.markdown :deep(hr) {
-  height: 1px;
-  margin: 16px 0;
-  border: 0;
-  background: var(--border);
-}
-
-.markdown :deep(summary) {
-  cursor: pointer;
-}
-
-.markdown :deep(.user-mention),
-.markdown :deep(.team-mention) {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-/* Code GitHub has highlighted, in Palace's syntax colors (see styles.css). */
-.markdown :deep(.pl-c) {
-  color: var(--syntax-comment);
-  font-style: italic;
-}
-
-.markdown :deep(.pl-k) {
-  color: var(--syntax-keyword);
-}
-
-.markdown :deep(.pl-s),
-.markdown :deep(.pl-pds),
-.markdown :deep(.pl-sr) {
-  color: var(--syntax-string);
-}
-
-.markdown :deep(.pl-c1),
-.markdown :deep(.pl-e) {
-  color: var(--syntax-number);
-}
-
-.markdown :deep(.pl-en) {
-  color: var(--syntax-title);
-}
-
-.markdown :deep(.pl-v),
-.markdown :deep(.pl-smi) {
-  color: var(--syntax-type);
-}
-
-.markdown :deep(.pl-ent) {
-  color: var(--syntax-tag);
 }
 </style>

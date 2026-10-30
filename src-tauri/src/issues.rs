@@ -2,7 +2,7 @@
 //! one with its comments, and opens, comments on, edits, closes and labels them.
 //! GitHub renders their Markdown, so they look as they do on the website.
 
-use crate::github::{api, api_get, api_get_html, api_html, blocking, token, Method};
+use crate::github::{api, api_get, api_get_html, api_html, api_post_text, blocking, token, Method};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +41,14 @@ pub struct Issue {
     body_html: Option<String>,
     #[serde(default)]
     body: Option<String>,
+    /// Set when the number is a pull request's, as "#123" in a commit message can be.
+    #[serde(default)]
+    pull_request: Option<PullRequestInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PullRequestInfo {
+    merged_at: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -246,6 +254,15 @@ pub async fn github_delete_comment(owner: String, repo: String, id: u64) -> Resu
     let token = token()?;
     let path = format!("/repos/{owner}/{repo}/issues/comments/{id}");
     blocking(move || api(&token, Method::Delete, &path).map_err(plain)).await
+}
+
+/// Markdown as GitHub will show it in the repository's issues, with "#123" and
+/// "@name" linked, for the editor's Preview.
+#[tauri::command]
+pub async fn github_render_markdown(owner: String, repo: String, text: String) -> Result<String, String> {
+    let token = token()?;
+    let body = serde_json::json!({ "text": text, "mode": "gfm", "context": format!("{owner}/{repo}") });
+    blocking(move || api_post_text(&token, "/markdown", body).map_err(plain)).await
 }
 
 /// Where the Issues view sends people whose token can't do what they asked.

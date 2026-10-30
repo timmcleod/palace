@@ -1,12 +1,13 @@
 <script setup>
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, CircleCheck, CircleDot, CircleSlash, MessageSquare, Plus } from "lucide-vue-next";
 import { githubAccount, signInWithToken } from "../lib/github.js";
-import { forgetIssueFilters, issueError, issueFilters } from "../lib/issues.js";
-import { openForm, openMenu, tell } from "../lib/overlays.js";
+import { issueFilters } from "../lib/issues.js";
+import { openMenu } from "../lib/overlays.js";
 import { formatAgo, textColorOn } from "../lib/format.js";
 import IssueError from "./IssueError.vue";
+import NewIssueDialog from "./NewIssueDialog.vue";
 import Spinner from "./Spinner.vue";
 
 // A GitHub repository's issues, newest first, narrowed by state, label, assignee,
@@ -20,6 +21,9 @@ const props = defineProps({
   refreshKey: { type: Number, default: 0 },
   // An issue changed in the issue view, to update its row.
   updated: { type: Object, default: null },
+  // When the issues were last looked at before now (an ISO time): newer ones are
+  // marked new.
+  seenAt: { type: String, default: null },
 });
 // "created" is a new issue, already selected.
 const emit = defineEmits(["select", "count", "created"]);
@@ -50,24 +54,42 @@ const filters = computed(() =>
 );
 
 let loadSeq = 0;
+// When the list was last loaded, so refreshes don't use up GitHub's 30 searches a
+// minute.
+let loadedAt = 0;
+const REFRESH_AFTER = 30 * 1000;
 
-// Loads the first page, or with `more`, the next one. A refresh keeps the list on
-// screen until the new one arrives.
-async function load({ more = false } = {}) {
+// Loads the first page, or with `more`, the next one. A `quiet` refresh, as when the
+// window regains focus, updates the list in place without a spinner, keeping any
+// further pages already shown.
+async function load({ more = false, quiet = false } = {}) {
   if (!githubAccount.value) return;
+  if (quiet && Date.now() - loadedAt < REFRESH_AFTER) return;
   const seq = ++loadSeq;
   const next = more ? page.value + 1 : 1;
-  loading.value = true;
+  loading.value = !quiet;
   try {
     const result = await invoke("github_issues", { owner: props.repo.owner, repo: props.repo.repo, filters: filters.value, page: next });
     if (seq !== loadSeq) return;
-    issues.value = more ? [...issues.value, ...result.issues] : result.issues;
+    if (more) {
+      issues.value = [...issues.value, ...result.issues];
+    } else if (quiet && issues.value) {
+      const fresh = new Set(result.issues.map((i) => i.number));
+      const rest = issues.value.slice(result.issues.length).filter((i) => !fresh.has(i.number));
+      issues.value = [...result.issues, ...rest];
+    } else {
+      issues.value = result.issues;
+    }
     total.value = result.total;
-    page.value = next;
+    loadedAt = Date.now();
+    // A refresh leaves the later pages, and so the next one to load, as they were.
+    if (!quiet) page.value = next;
     error.value = "";
     if (filters.value === "is:open") emit("count", result.total);
   } catch (e) {
     if (seq !== loadSeq) return;
+    // A refresh that fails, offline say, keeps showing what was there.
+    if (quiet && issues.value) return;
     error.value = String(e);
     if (!more) issues.value = null;
   } finally {
@@ -84,22 +106,23 @@ watch(
     typing = setTimeout(load, 400);
   },
 );
-watch([state, label, assignee, author], () => load());
+// Another repository starts afresh, with one search however many filters it clears.
+let resetting = false;
+watch([state, label, assignee, author], () => resetting || load());
 watch(
   [() => props.repo.owner, () => props.repo.repo, () => githubAccount.value?.login],
   () => {
     issues.value = null;
+    resetting = true;
     label.value = assignee.value = author.value = null;
+    nextTick(() => (resetting = false));
     load();
   },
   { immediate: true },
 );
 watch(
   () => props.refreshKey,
-  () => {
-    forgetIssueFilters();
-    load();
-  },
+  () => load({ quiet: true }),
 );
 
 watch(
@@ -109,33 +132,18 @@ watch(
   },
 );
 
-async function newIssue() {
-  const values = await openForm({
-    title: "New Issue",
-    message: `Opens an issue on ${props.repo.owner}/${props.repo.repo}. The description can use Markdown.`,
-    fields: [
-      { key: "title", label: "Title", type: "text", value: "" },
-      { key: "body", label: "Description", type: "textarea", value: "", optional: true },
-    ],
-    confirmLabel: "Create Issue",
-  });
-  if (!values) return;
-  try {
-    const issue = await invoke("github_create_issue", {
-      owner: props.repo.owner,
-      repo: props.repo.repo,
-      title: values.title,
-      body: values.body,
-    });
-    // GitHub's search takes a moment to find it, so it's added here.
-    if (state.value === "open") {
-      issues.value = [issue, ...(issues.value ?? [])];
-      total.value++;
-    }
-    emit("created", issue);
-  } catch (e) {
-    tell("Couldn't create the issue", issueError(e).text);
+// The New Issue dialog, while it's open.
+const creating = ref(false);
+
+function onCreated(issue) {
+  creating.value = false;
+  if (!issue) return;
+  // GitHub's search takes a moment to find it, so it's added here.
+  if (state.value === "open") {
+    issues.value = [issue, ...(issues.value ?? [])];
+    total.value++;
   }
+  emit("created", issue);
 }
 
 // GitHub's search goes no further than 1,000 results.
@@ -180,6 +188,8 @@ const personLabel = (value, none) => (value === "@me" ? "Me" : value === "none" 
 
 // --- Rows -----------------------------------------------------------------------------
 
+const isNew = (issue) => !!props.seenAt && Date.parse(issue.created_at) > Date.parse(props.seenAt);
+
 function stateIcon(issue) {
   if (issue.state === "open") return { icon: CircleDot, class: "open", title: "Open" };
   if (issue.state_reason === "not_planned" || issue.state_reason === "duplicate") {
@@ -206,6 +216,7 @@ async function signIn() {
 
 <template>
   <div class="issue-list">
+    <NewIssueDialog v-if="creating" :repo="repo" @close="onCreated" />
     <div v-if="githubAccount" class="filter-bar">
       <div class="segmented">
         <button :class="{ active: state === 'open' }" @click="state = 'open'">Open</button>
@@ -223,7 +234,7 @@ async function signIn() {
       <span class="spacer" />
       <Spinner v-if="loading && issues" :size="14" class="dim" />
       <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
-      <button class="icon-button small" title="New Issue…" @click="newIssue"><Plus :size="16" /></button>
+      <button class="icon-button small" title="New Issue…" @click="creating = true"><Plus :size="16" /></button>
     </div>
 
     <div class="rows" tabindex="0" @keydown="onKeydown">
@@ -246,7 +257,11 @@ async function signIn() {
         >
           <component :is="stateIcon(issue).icon" :size="16" class="state" :class="stateIcon(issue).class" />
           <div class="body">
-            <div class="title">{{ issue.title }}</div>
+            <div class="title">
+              <span v-if="isNew(issue)" class="new-dot" title="New since you last looked" />{{
+                issue.title
+              }}
+            </div>
             <div v-if="issue.labels.length" class="labels">
               <span
                 v-for="l in issue.labels"
@@ -425,6 +440,15 @@ async function signIn() {
 .title {
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.new-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .labels {

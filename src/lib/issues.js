@@ -1,27 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
+import { readJson, writeJson } from "./storage.js";
 
 // What the Issues view shares between its list and the open issue: each repository's
-// labels, assignable people and whether the account may triage, loaded once.
+// labels, assignable people and whether the account may triage. They're loaded again
+// after a few minutes, so labels added on GitHub show up.
+const FRESH_FOR = 5 * 60 * 1000;
 const filters = new Map();
 
 /** { labels, assignees, can_triage } for a repository ({ owner, repo }). */
 export function issueFilters({ owner, repo }) {
   const key = `${owner}/${repo}`.toLowerCase();
-  if (!filters.has(key)) {
-    filters.set(
-      key,
-      invoke("github_issue_filters", { owner, repo }).catch(() => {
-        filters.delete(key);
-        return { labels: [], assignees: [], can_triage: false };
-      }),
-    );
+  const cached = filters.get(key);
+  if (!cached || Date.now() - cached.at > FRESH_FOR) {
+    const loading = invoke("github_issue_filters", { owner, repo }).catch(() => {
+      filters.delete(key);
+      return { labels: [], assignees: [], can_triage: false };
+    });
+    filters.set(key, { at: Date.now(), loading });
   }
-  return filters.get(key);
-}
-
-/** Forgets what was loaded, so labels added on GitHub show up after a refresh. */
-export function forgetIssueFilters() {
-  filters.clear();
+  return filters.get(key).loading;
 }
 
 // Refusals about the token start with this (see issues.rs), for a way to change it.
@@ -52,4 +49,17 @@ export function splitIssueRefs(text) {
   }
   if (at < text.length) pieces.push({ text: text.slice(at) });
   return pieces;
+}
+
+// When each repository's issues were last looked at, so newer ones can be marked new.
+const SEEN_KEY = "palace.issuesSeen";
+
+/** When the repository's issues were last looked at (an ISO time), or null if never. */
+export function issuesSeenAt({ owner, repo }) {
+  return readJson(SEEN_KEY, {})[`${owner}/${repo}`.toLowerCase()] ?? null;
+}
+
+/** Records that the repository's issues have been looked at, as of now. */
+export function markIssuesSeen({ owner, repo }) {
+  writeJson(SEEN_KEY, { ...readJson(SEEN_KEY, {}), [`${owner}/${repo}`.toLowerCase()]: new Date().toISOString() });
 }

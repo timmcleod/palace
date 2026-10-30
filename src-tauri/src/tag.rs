@@ -35,7 +35,9 @@ pub async fn create_tag(path: String, name: String, target: Option<String>, mess
     let message = message.filter(|m| !m.trim().is_empty());
     let mut args = vec!["tag"];
     if let Some(message) = &message {
-        args.extend(["--annotate", "--message", message.as_str()]);
+        // Git otherwise drops lines starting with "#" as comments, such as "#12 fixed"
+        // or Markdown headings in release notes.
+        args.extend(["--annotate", "--cleanup=whitespace", "--message", message.as_str()]);
     }
     args.push(&name);
     if let Some(target) = &target {
@@ -83,12 +85,12 @@ mod tests {
         t.commit(&[("b.txt", Some("b\n"))], "Second");
 
         run(create_tag(t.path().into(), "v1".into(), Some(first.to_string()), None)).unwrap();
-        run(create_tag(t.path().into(), "v2".into(), None, Some("Second release".into()))).unwrap();
+        run(create_tag(t.path().into(), "v2".into(), None, Some("Second release\n\n#12 fixed".into()))).unwrap();
 
         let v1 = t.repo.find_reference("refs/tags/v1").unwrap();
         assert_eq!(v1.peel_to_commit().unwrap().id(), first);
         let v2 = t.repo.find_reference("refs/tags/v2").unwrap().peel_to_tag().unwrap();
-        assert_eq!(v2.message(), Ok(Some("Second release\n")));
+        assert_eq!(v2.message(), Ok(Some("Second release\n\n#12 fixed\n")));
 
         run(delete_tag(t.path().into(), "v1".into())).unwrap();
         assert!(t.repo.find_reference("refs/tags/v1").is_err());

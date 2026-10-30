@@ -4,9 +4,11 @@
 //
 //   npm run release -- 0.2.0       an exact version
 //   npm run release -- patch       0.1.0 → 0.1.1 (also: minor, major)
+//   npm run release -- 0.2.0 notes.md
+//                                  with release notes (Markdown), shown on the release
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { setVersion, VERSION_FILES } from "./set-version.mjs";
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -25,12 +27,19 @@ if (git("status", "--porcelain")) {
 if (git("tag", "--list", `v${next}`)) {
   fail(`the tag v${next} already exists.`);
 }
+const notes = process.argv[3];
+if (notes && !existsSync(notes)) {
+  fail(`there's no notes file at ${notes}.`);
+}
 
 setVersion(next);
 
 git("add", ...VERSION_FILES);
 git("commit", "--quiet", "--message", `Release v${next}`);
-git("tag", "--annotate", `v${next}`, "--message", `Palace v${next}`);
+// The workflow puts the tag's message on the release as its notes. "verbatim" keeps
+// lines starting with "#", which git would otherwise drop as comments.
+if (notes) git("tag", "--annotate", "--cleanup=verbatim", `v${next}`, "--file", notes);
+else git("tag", "--annotate", `v${next}`, "--message", `Palace v${next}`);
 
 console.log(`Prepared v${next} (was ${current}). Publish it with:\n\n  git push --follow-tags\n`);
 

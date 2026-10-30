@@ -113,6 +113,7 @@ pub fn run() {
             issues::github_add_comment,
             issues::github_edit_comment,
             issues::github_delete_comment,
+            issues::github_render_markdown,
             github::github_create_repo,
             github::github_keys,
             github::github_add_key,

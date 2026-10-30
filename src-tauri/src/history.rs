@@ -208,7 +208,15 @@ pub async fn search_commits(path: String, rev: Option<String>, query: String, li
 /// ("#42"), newest first, for that issue's view.
 #[tauri::command]
 pub async fn commits_mentioning(path: String, number: u64, limit: usize) -> Result<Vec<FoundCommit>, String> {
-    let repo = Repository::discover(&path).map_err(message)?;
+    // Walking every branch can take a while in a big repository, so it runs off the
+    // async runtime.
+    tauri::async_runtime::spawn_blocking(move || find_mentions(&path, number, limit))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn find_mentions(path: &str, number: u64, limit: usize) -> Result<Vec<FoundCommit>, String> {
+    let repo = Repository::discover(path).map_err(message)?;
     let mut revwalk = repo.revwalk().map_err(message)?;
     revwalk.set_sorting(Sort::TIME).map_err(message)?;
     for glob in ["refs/heads", "refs/remotes"] {

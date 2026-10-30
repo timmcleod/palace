@@ -81,7 +81,7 @@ import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
 import { githubRemotes, repoKey } from "./lib/githubRemote.js";
-import { issueError } from "./lib/issues.js";
+import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
 const overview = ref(null);
@@ -280,17 +280,62 @@ function chooseIssueRepo(repo) {
   writeJson(ISSUE_REPOS_KEY, { ...readJson(ISSUE_REPOS_KEY, {}), [overview.value.path]: issueChoice.value });
 }
 
+// How many issues are open, and how many of those are new: opened since the Issues
+// view was last looked at. They're checked when the repository opens, then every few
+// minutes in the background, as often as fetching.
+const freshIssues = ref(0);
+// When the issues were last looked at, as of opening the Issues view, so the issues
+// newer than that can be marked new in the list.
+const issuesSeenBefore = ref(null);
+let issuesCheckedAt = 0;
+
+async function checkIssues() {
+  const repo = issueRepo.value;
+  if (!repo || !githubAccount.value) return;
+  issuesCheckedAt = Date.now();
+  const found = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1 }).catch(
+    () => null,
+  );
+  if (!found || !issueRepo.value || repoKey(issueRepo.value) !== repoKey(repo)) return;
+  openIssues.value = found.total;
+  // The first check sets where "new" starts; until then, nothing is new.
+  const seen = issuesSeenAt(repo);
+  if (!seen) markIssuesSeen(repo);
+  const isNew = (i) => Date.parse(i.created_at) > Date.parse(seen);
+  freshIssues.value = isIssues.value || !seen ? 0 : found.issues.filter(isNew).length;
+}
+
 watch(
   [() => issueRepo.value?.owner, () => issueRepo.value?.repo, () => githubAccount.value?.login],
-  async ([owner, repo, login]) => {
+  () => {
     openIssues.value = null;
+    freshIssues.value = 0;
     selectedIssue.value = null;
-    if (!owner || !login) return;
-    const found = await invoke("github_issues", { owner, repo, filters: "is:open", page: 1 }).catch(() => null);
-    if (issueRepo.value?.owner === owner && issueRepo.value?.repo === repo) openIssues.value = found?.total ?? null;
+    checkIssues();
   },
   { immediate: true },
 );
+
+// Looking at the Issues view sees them: new ones are marked there until it's left.
+// (By key: the repository object is made afresh on every refresh.)
+const keyToRepo = (key) => key && { owner: key.split("/")[0], repo: key.split("/")[1] };
+watch(
+  [isIssues, () => issueRepo.value && repoKey(issueRepo.value)],
+  ([viewing, key], [wasViewing, previous]) => {
+    if (wasViewing && previous) markIssuesSeen(keyToRepo(previous));
+    if (!viewing || !key) return;
+    issuesSeenBefore.value = issuesSeenAt(keyToRepo(key));
+    markIssuesSeen(keyToRepo(key));
+    freshIssues.value = 0;
+  },
+);
+
+// In the background, as often as fetching, while the Issues view isn't showing them.
+const issuesTimer = setInterval(() => {
+  const due = Date.now() - issuesCheckedAt >= settings.fetchMinutes * 60_000;
+  if (due && settings.fetchInBackground && !isIssues.value && navigator.onLine) checkIssues();
+}, 30_000);
+onBeforeUnmount(() => clearInterval(issuesTimer));
 
 // A repository whose GitHub remotes go away leaves the Issues view.
 watch(
@@ -478,7 +523,8 @@ function onNavKeydown(event) {
     selected.value = "workspace:settings";
     return;
   }
-  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+  // In text fields, Alt+arrows move by word (on a Mac) and stay theirs.
+  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight") || inTextField(event.target)) return;
   event.preventDefault();
   go(event.key === "ArrowLeft" ? "back" : "forward");
 }
@@ -1047,7 +1093,7 @@ function startResize(event, pane, min, max) {
       v-model:selected="selected"
       :overview="overview"
       :compared="comparedKeys"
-      :issues="issueRemotes.length ? { count: openIssues } : null"
+      :issues="issueRemotes.length ? { count: openIssues, fresh: freshIssues } : null"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
@@ -1174,6 +1220,7 @@ function startResize(event, pane, min, max) {
         :selected="selectedIssue?.number"
         :refresh-key="refreshKey"
         :updated="updatedIssue"
+        :seen-at="issuesSeenBefore"
         @select="selectedIssue = $event"
         @count="openIssues = $event"
         @created="onIssueCreated"

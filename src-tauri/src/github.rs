@@ -220,6 +220,23 @@ pub(crate) fn api_html<T: serde::de::DeserializeOwned>(token: &str, method: Meth
     api_as(token, method, path, "application/vnd.github.full+json")
 }
 
+/// POSTs `body` to `path` for a reply that's text rather than JSON, such as rendered
+/// Markdown.
+pub(crate) fn api_post_text(token: &str, path: &str, body: serde_json::Value) -> Result<String, String> {
+    let mut response = agent()
+        .post(&format!("https://api.github.com{path}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("Authorization", format!("Bearer {token}"))
+        .send_json(&body)
+        .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
+    let status = response.status().as_u16();
+    if (200..300).contains(&status) {
+        return response.body_mut().read_to_string().map_err(|e| format!("Couldn't read GitHub's reply: {e}"));
+    }
+    let body: Option<serde_json::Value> = response.body_mut().read_json().ok();
+    Err(explain(status, body.as_ref()))
+}
+
 fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str, accept: &str) -> Result<T, String> {
     let url = format!("https://api.github.com{path}");
     let auth = format!("Bearer {token}");
