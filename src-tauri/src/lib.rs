@@ -7,6 +7,7 @@ mod config;
 mod git;
 mod github;
 mod history;
+mod issues;
 mod open;
 mod rebase;
 mod remote;
@@ -102,6 +103,10 @@ pub fn run() {
             github::github_scopes,
             github::github_starred_palace,
             github::github_star_palace,
+            issues::github_issues,
+            issues::github_issue,
+            issues::github_issue_filters,
+            issues::github_fork_parent,
             github::github_create_repo,
             github::github_keys,
             github::github_add_key,

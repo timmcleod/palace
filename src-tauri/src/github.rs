@@ -169,8 +169,13 @@ fn all_pages(token: &str, path: &str) -> Result<Vec<Repo>, String> {
     Ok(repos)
 }
 
+/// The signed-in account's token, for requests made elsewhere (see issues.rs).
+pub(crate) fn token() -> Result<String, String> {
+    saved().map(|s| s.token).ok_or_else(|| NOT_SIGNED_IN.to_string())
+}
+
 /// Runs a GitHub request off the async runtime, since the HTTP client blocks.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
@@ -192,15 +197,24 @@ enum Method {
 }
 
 /// GETs `path` from the GitHub API with the token, explaining failures in words.
-fn api_get<T: serde::de::DeserializeOwned>(token: &str, path: &str) -> Result<T, String> {
+pub(crate) fn api_get<T: serde::de::DeserializeOwned>(token: &str, path: &str) -> Result<T, String> {
     api(token, Method::Get, path)
 }
 
 /// Calls the GitHub API with the token. A reply with no body (as for a deletion)
 /// reads as `()`.
 fn api<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str) -> Result<T, String> {
+    api_as(token, method, path, "application/vnd.github+json")
+}
+
+/// GETs `path` with the Markdown in it (issues, comments) also rendered as HTML, in
+/// `body_html`.
+pub(crate) fn api_get_html<T: serde::de::DeserializeOwned>(token: &str, path: &str) -> Result<T, String> {
+    api_as(token, Method::Get, path, "application/vnd.github.full+json")
+}
+
+fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str, accept: &str) -> Result<T, String> {
     let url = format!("https://api.github.com{path}");
-    let accept = "application/vnd.github+json";
     let auth = format!("Bearer {token}");
     let sent = match method {
         Method::Get => agent().get(&url).header("Accept", accept).header("Authorization", &auth).call(),

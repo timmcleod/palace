@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  CircleDot,
   Cloud,
   Folder,
   FolderOpen,
@@ -26,6 +27,8 @@ const props = defineProps({
   selected: { type: String, default: null },
   // Rows of the two revisions being compared, highlighted along with the selection.
   compared: { type: Array, default: () => [] },
+  // { count } when the repository is on GitHub, for the Issues row; null hides it.
+  issues: { type: Object, default: null },
 });
 const emit = defineEmits([
   "update:selected",
@@ -54,24 +57,34 @@ const matches = (name) => !query.value || name.toLowerCase().includes(query.valu
 // While filtering, every folder opens so matches nested inside them stay visible.
 const isOpen = (key) => query.value !== "" || !collapsedFolders.has(key);
 
-const workspaceRows = computed(() => [
-  {
-    key: "workspace:working-copy",
-    label: "Working Copy",
-    icon: Folder,
-    depth: 0,
-    count: props.overview.changes || null,
-  },
-  {
-    key: "workspace:stashes",
-    label: "Stashes",
-    icon: Archive,
-    depth: 0,
-    count: props.overview.stashes.length || null,
-  },
-  { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
-  { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
-]);
+// Issues only for repositories on GitHub.
+const workspaceRows = computed(() =>
+  [
+    {
+      key: "workspace:working-copy",
+      label: "Working Copy",
+      icon: Folder,
+      depth: 0,
+      count: props.overview.changes || null,
+    },
+    {
+      key: "workspace:stashes",
+      label: "Stashes",
+      icon: Archive,
+      depth: 0,
+      count: props.overview.stashes.length || null,
+    },
+    props.issues && {
+      key: "workspace:issues",
+      label: "Issues",
+      icon: CircleDot,
+      depth: 0,
+      count: props.issues.count || null,
+    },
+    { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
+    { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
+  ].filter(Boolean),
+);
 
 // In the order they've been dragged into, with their dividers, though those stay
 // hidden while filtering.

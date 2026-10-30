@@ -1,18 +1,21 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   ArchiveRestore,
   ArrowDownToLine,
   ArrowUpFromLine,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
   CloudDownload,
+  ExternalLink,
   FolderGit2,
   GitBranch,
   GitMerge,
@@ -29,6 +32,8 @@ import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import GitHubView from "./components/GitHubView.vue";
+import IssueDetails from "./components/IssueDetails.vue";
+import IssueList from "./components/IssueList.vue";
 import Spinner from "./components/Spinner.vue";
 import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
@@ -74,6 +79,8 @@ import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
+import { githubAccount } from "./lib/github.js";
+import { githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
 const overview = ref(null);
@@ -133,12 +140,14 @@ const isFullView = computed(() => isSettings.value || isGitHub.value);
 // The GitHub view opened from the welcome screen, before any repository is open.
 const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
+const isIssues = computed(() => selected.value === "workspace:issues");
 // Comparing two revisions: the history lists what `head` has that `base` doesn't,
 // and with no commit chosen, the detail pane shows all of `head`'s changes.
 const isCompare = computed(() => selected.value === "workspace:compare");
 const comparison = ref(null);
 // Views without a history of their own to search or filter.
-const awayFromHistory = () => isWorkingCopy.value || isFullView.value || isStashes.value || isCompare.value;
+const awayFromHistory = () =>
+  isWorkingCopy.value || isFullView.value || isStashes.value || isIssues.value || isCompare.value;
 
 function openComparison({ base, head }) {
   comparison.value = { base, head };
@@ -181,6 +190,94 @@ const comparedKeys = computed(() => {
         : `remote-branch:${name}`;
   return [keyOf(c.base), keyOf(c.head)];
 });
+
+// The Issues view, for repositories with a remote on GitHub: whose issues, the chosen
+// issue, the search, and how many are open, for the sidebar.
+//
+// The issues are origin's repository's (or the first GitHub remote's), unless that's
+// a fork: then they're the parent's, where a project's issues usually are. Choosing
+// another in the menu is remembered for the repository.
+const ISSUE_REPOS_KEY = "palace.issueRepos";
+const issueRemotes = computed(() => githubRemotes(overview.value));
+// The fork's parent as { owner, repo }; null when it isn't a fork, and undefined until
+// GitHub has said.
+const forkParent = ref(undefined);
+// The chosen repository's key ("owner/repo"), or null for the usual one.
+const issueChoice = ref(null);
+
+const issueRepos = computed(() => {
+  const repos = issueRemotes.value;
+  const parent = forkParent.value;
+  if (!parent || repos.some((r) => repoKey(r) === repoKey(parent))) return repos;
+  return [...repos, { ...parent, remotes: [], forkedFrom: repos[0] }];
+});
+
+const issueRepo = computed(() => {
+  const repos = issueRepos.value;
+  const chosen = repos.find((r) => repoKey(r) === issueChoice.value);
+  if (chosen) return chosen;
+  // Waits for the fork check, so a fork's own issues don't show first.
+  if (forkParent.value === undefined && githubAccount.value) return null;
+  return (forkParent.value && repos.find((r) => repoKey(r) === repoKey(forkParent.value))) ?? repos[0] ?? null;
+});
+
+const selectedIssue = shallowRef(null);
+const issueQuery = ref("");
+const openIssues = ref(null);
+
+// Each repository starts with its remembered choice, and a check for a fork.
+watch(
+  [() => overview.value?.path, () => issueRemotes.value[0] && repoKey(issueRemotes.value[0]), () => githubAccount.value?.login],
+  async ([path, first, login]) => {
+    issueChoice.value = readJson(ISSUE_REPOS_KEY, {})[path] ?? null;
+    forkParent.value = first && login ? undefined : null;
+    if (!first || !login) return;
+    const [owner, repo] = first.split("/");
+    const parent = await invoke("github_fork_parent", { owner, repo }).catch(() => null);
+    if (overview.value?.path !== path) return;
+    const [parentOwner, parentRepo] = parent?.split("/") ?? [];
+    forkParent.value = parent ? { owner: parentOwner, repo: parentRepo } : null;
+  },
+  { immediate: true },
+);
+
+function chooseIssueRepo(repo) {
+  issueChoice.value = repoKey(repo);
+  writeJson(ISSUE_REPOS_KEY, { ...readJson(ISSUE_REPOS_KEY, {}), [overview.value.path]: issueChoice.value });
+}
+
+watch(
+  [() => issueRepo.value?.owner, () => issueRepo.value?.repo, () => githubAccount.value?.login],
+  async ([owner, repo, login]) => {
+    openIssues.value = null;
+    selectedIssue.value = null;
+    if (!owner || !login) return;
+    const found = await invoke("github_issues", { owner, repo, filters: "is:open", page: 1 }).catch(() => null);
+    if (issueRepo.value?.owner === owner && issueRepo.value?.repo === repo) openIssues.value = found?.total ?? null;
+  },
+  { immediate: true },
+);
+
+// A repository whose GitHub remotes go away leaves the Issues view.
+watch(
+  () => issueRemotes.value.length,
+  (count) => {
+    if (!count && isIssues.value) selected.value = headHistoryKey(overview.value);
+  },
+);
+
+function issueRepoMenu(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  openMenu(
+    { clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} },
+    issueRepos.value.map((r) => ({
+      label: `${r.owner}/${r.repo}`,
+      detail: r.forkedFrom ? `Forked into ${r.forkedFrom.owner}/${r.forkedFrom.repo}` : r.remotes.join(", "),
+      checked: r === issueRepo.value,
+      action: () => chooseIssueRepo(r),
+    })),
+  );
+}
 
 // The Stashes view: the chosen stash (by index) and the search for one by message.
 const selectedStash = ref(null);
@@ -309,6 +406,7 @@ function describe(place) {
   const view = {
     "workspace:working-copy": "Working Copy",
     "workspace:stashes": "Stashes",
+    "workspace:issues": "Issues",
     "workspace:github": "GitHub",
     "workspace:settings": "Settings",
     "workspace:history": "History",
@@ -665,6 +763,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       fileFilter.value = null;
       selectedStash.value = null;
       stashQuery.value = "";
+      issueQuery.value = "";
       historySearch.value = "";
       comparison.value = null;
       // Places belong to a repository.
@@ -802,6 +901,10 @@ const subtitle = computed(() => {
   const o = overview.value;
   if (!o) return "";
   if (isStashes.value) return `Stashes (${o.stashes.length} ${o.stashes.length === 1 ? "Stash" : "Stashes"})`;
+  if (isIssues.value && issueRepo.value) {
+    const open = openIssues.value == null ? "" : ` (${openIssues.value.toLocaleString()} Open)`;
+    return `Issues on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
+  }
   const where = o.head.branch ?? `detached at ${o.head.short_id}`;
   if (o.commit_count == null) return `${where} (no commits yet)`;
   return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
@@ -910,6 +1013,7 @@ function startResize(event, pane, min, max) {
       v-model:selected="selected"
       :overview="overview"
       :compared="comparedKeys"
+      :issues="issueRemotes.length ? { count: openIssues } : null"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
@@ -961,6 +1065,17 @@ function startResize(event, pane, min, max) {
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
         <span v-else-if="isStashes">Stashes</span>
+        <template v-else-if="isIssues">
+          <span>Issues</span>
+          <button
+            v-if="issueRepo && issueRepos.length > 1"
+            class="remote-choice"
+            title="Show another repository's issues"
+            @click="issueRepoMenu"
+          >
+            {{ issueRepo.owner }}/{{ issueRepo.repo }} <ChevronDown :size="13" />
+          </button>
+        </template>
         <span v-else-if="isCompare">Compare</span>
         <span v-else class="breadcrumb">
           <template v-for="(part, i) in breadcrumb" :key="i">
@@ -1017,6 +1132,17 @@ function startResize(event, pane, min, max) {
         @select="workingFile = $event"
         @changed="refresh"
       />
+      <IssueList
+        v-else-if="isIssues && issueRepo"
+        :repo="issueRepo"
+        :query="issueQuery"
+        :selected="selectedIssue?.number"
+        :refresh-key="refreshKey"
+        @select="selectedIssue = $event"
+        @count="openIssues = $event"
+      />
+      <!-- While Palace checks whether the repository is a fork. -->
+      <div v-else-if="isIssues" class="empty-state"><Spinner /></div>
       <StashList
         v-else-if="isStashes"
         :stashes="overview.stashes"
@@ -1026,7 +1152,7 @@ function startResize(event, pane, min, max) {
         @menu="(index, event) => openMenu(event, actions.stashMenu(index))"
       />
       <!-- Hidden rather than removed, so the history keeps its scroll position. -->
-      <div v-show="!isWorkingCopy && !isStashes" class="pane-body">
+      <div v-show="!isWorkingCopy && !isStashes && !isIssues" class="pane-body">
         <HistoryList
           :path="overview.path"
           :rev="isCompare ? comparison?.head : historyRev"
@@ -1140,6 +1266,16 @@ function startResize(event, pane, min, max) {
           <Search :size="15" :stroke-width="1.5" />
           <input v-model="stashQuery" placeholder="Search for Stash Message" spellcheck="false" @keydown.esc="stashQuery = ''" />
         </label>
+        <label v-else-if="isIssues" class="toolbar-search stash-search">
+          <Search :size="15" :stroke-width="1.5" />
+          <input
+            v-model="issueQuery"
+            placeholder="Search Issues"
+            title="Words to find, or GitHub search terms such as author:octocat"
+            spellcheck="false"
+            @keydown.esc="issueQuery = ''"
+          />
+        </label>
         <ToolbarSearch
           v-else
           ref="toolbarSearch"
@@ -1160,6 +1296,19 @@ function startResize(event, pane, min, max) {
         <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" @changed="refresh" />
         <div v-else class="empty-state">
           <p>Select a file to see its changes.</p>
+        </div>
+      </template>
+
+      <template v-else-if="isIssues">
+        <div class="subheader">
+          <span class="dim">{{ selectedIssue ? `#${selectedIssue.number}` : "" }}</span>
+          <button v-if="selectedIssue" class="link-button" @click="openUrl(selectedIssue.html_url)">
+            Open on GitHub <ExternalLink :size="13" />
+          </button>
+        </div>
+        <IssueDetails v-if="selectedIssue && issueRepo" :repo="issueRepo" :issue="selectedIssue" :refresh-key="refreshKey" />
+        <div v-else class="empty-state">
+          <p>Select an issue to read it.</p>
         </div>
       </template>
 
@@ -1380,6 +1529,31 @@ function startResize(event, pane, min, max) {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* In the Issues view: whose issues they are, when the repository has more than one
+   GitHub remote, and the link to the chosen one on GitHub. */
+.remote-choice,
+.subheader .link-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.subheader .link-button {
+  color: var(--accent);
+}
+
+.remote-choice:hover,
+.subheader .link-button:hover {
+  background: var(--button-hover);
 }
 
 .breadcrumb {
