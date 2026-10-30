@@ -13,9 +13,9 @@ struct Progress {
 }
 
 #[tauri::command]
-pub async fn fetch(app: AppHandle, path: String, remote: Option<String>) -> Result<String, String> {
+pub async fn fetch(app: AppHandle, path: String, remote: Option<String>, prune: Option<bool>) -> Result<String, String> {
     in_background(app, move |running, report| match remote {
-        Some(remote) => fetch_one(&path, &remote, running, report),
+        Some(remote) => fetch_one(&path, &remote, prune.unwrap_or(false), running, report),
         None => fetch_all(&path, running, report),
     })
     .await
@@ -42,7 +42,7 @@ pub async fn add_remote(app: AppHandle, path: String, name: String, url: String)
     }
     crate::cli::git(&path, &["remote", "add", &name, &url], None).map_err(|e| explain_remote_error(&name, e))?;
     in_background(app, move |running, report| {
-        fetch_one(&path, &name, running, report)
+        fetch_one(&path, &name, false, running, report)
             .map(|_| format!("Added {name} and fetched its branches."))
             .map_err(|e| format!("Added {name}, but couldn't fetch from it:\n{e}"))
     })
@@ -74,8 +74,10 @@ fn explain_remote_error(name: &str, error: String) -> String {
     }
 }
 
-fn fetch_one(path: &str, remote: &str, running: &Running, report: Report) -> Result<String, String> {
-    git_with_progress(path, &["fetch", "--progress", remote], running, report)?;
+/// With `prune`, remote branches deleted on the remote go here too.
+fn fetch_one(path: &str, remote: &str, prune: bool, running: &Running, report: Report) -> Result<String, String> {
+    let args: &[&str] = if prune { &["fetch", "--progress", "--prune", remote] } else { &["fetch", "--progress", remote] };
+    git_with_progress(path, args, running, report)?;
     Ok(format!("Fetched from {remote}."))
 }
 
@@ -633,7 +635,7 @@ mod tests {
 
         let names = |t: &TempRepo| crate::cli::git(t.path(), &["remote"], None).unwrap();
         crate::cli::git(local.path(), &["remote", "add", "upstream", other.path()], None).unwrap();
-        fetch_one(local.path(), "upstream", &Running::default(), &mut |_| {}).unwrap();
+        fetch_one(local.path(), "upstream", false, &Running::default(), &mut |_| {}).unwrap();
         assert!(local.repo.find_reference("refs/remotes/upstream/feature").is_ok());
 
         let taken = tauri::async_runtime::block_on(rename_remote(local.path().into(), "upstream".into(), "origin".into()));

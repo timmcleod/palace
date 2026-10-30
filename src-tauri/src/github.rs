@@ -193,7 +193,7 @@ pub(crate) enum Method {
     Post(serde_json::Value),
     Patch(serde_json::Value),
     // With no body, as for starring.
-    Put,
+    Put(Option<serde_json::Value>),
     Delete,
 }
 
@@ -243,7 +243,8 @@ fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &st
     let sent = match method {
         Method::Get => agent().get(&url).header("Accept", accept).header("Authorization", &auth).call(),
         Method::Delete => agent().delete(&url).header("Accept", accept).header("Authorization", &auth).call(),
-        Method::Put => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_empty(),
+        Method::Put(None) => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_empty(),
+        Method::Put(Some(body)) => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
         Method::Post(body) => agent().post(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
         Method::Patch(body) => agent().patch(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
     };
@@ -387,7 +388,7 @@ fn starred_from(status: u16) -> Option<bool> {
 #[tauri::command]
 pub async fn github_star_palace() -> Result<(), String> {
     let token = saved().ok_or(NOT_SIGNED_IN)?.token;
-    blocking(move || api(&token, Method::Put, &format!("/user/starred/{PALACE_REPO}"))).await
+    blocking(move || api(&token, Method::Put(None), &format!("/user/starred/{PALACE_REPO}"))).await
 }
 
 /// A public key in ~/.ssh, offered when adding a key to GitHub.

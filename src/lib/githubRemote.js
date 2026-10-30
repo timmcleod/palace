@@ -26,3 +26,12 @@ export function githubRemotes(overview) {
   const hasOrigin = (r) => r.remotes.includes("origin");
   return [...repos.values()].sort((a, b) => hasOrigin(b) - hasOrigin(a));
 }
+
+/** The remote that points to the GitHub repository `fullName` ("owner/repo"), if any. */
+export function githubRemoteOf(remotes, fullName) {
+  if (!fullName) return undefined;
+  return remotes.find((remote) => {
+    const found = githubRepoOf(remote.url);
+    return found && repoKey(found) === fullName.toLowerCase();
+  });
+}

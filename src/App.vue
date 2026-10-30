@@ -81,7 +81,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
-import { githubRemotes, repoKey } from "./lib/githubRemote.js";
+import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
 import { updateNoticeShown } from "./lib/updates.js";
@@ -270,6 +270,44 @@ function onPullUpdated(pull) {
   }
   selectedPull.value = pull;
   updatedPull.value = pull;
+}
+
+// After a pull request is merged here, the merge is fetched, and the local branch
+// that tracked it is offered for deleting: from wherever it's checked out, by going
+// to the branch it was merged into.
+async function onPullMerged({ base, head, headRepo, branchDeleted }) {
+  const number = selectedPull.value?.number ?? selectedIssue.value?.number;
+  const remotes = overview.value.remotes;
+  const headRemote = githubRemoteOf(remotes, headRepo);
+  const baseRemote = githubRemoteOf(remotes, issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`);
+  const local = headRemote && overview.value.branches.find((b) => b.upstream === `${headRemote.name}/${head}`);
+  for (const remote of new Set([baseRemote?.name, headRemote?.name].filter(Boolean))) {
+    await runGit(["Fetching…", "Fetched", "Fetch failed"], "fetch", { remote, prune: branchDeleted });
+  }
+
+  const offers = [];
+  if (local && local.name !== overview.value.head.branch) {
+    offers.push({ label: `Delete “${local.name}”`, run: () => actions.deleteMergedBranch(local.name) });
+  } else if (local) {
+    const into =
+      overview.value.branches.find((b) => baseRemote && b.upstream === `${baseRemote.name}/${base}`) ??
+      overview.value.branches.find((b) => b.name === base);
+    if (into) {
+      offers.push({
+        label: `Switch to “${into.name}” and Delete “${local.name}”`,
+        run: async () => (await actions.checkout("branch", into.name)) || actions.deleteMergedBranch(local.name),
+      });
+    }
+  }
+  clearTimeout(dismissTimer);
+  const op = reactive({
+    title: number ? `Merged pull request #${number}` : "Merged the pull request",
+    state: "done",
+    message: branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
+    actions: offers,
+  });
+  remoteOp.value = op;
+  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 15_000);
 }
 
 function onIssueCreated(issue) {
@@ -1545,6 +1583,7 @@ function startResize(event, pane, min, max) {
           :refresh-key="refreshKey"
           @updated="onIssueUpdated"
           @show-commit="showFoundCommit"
+          @merged="onPullMerged"
         />
         <div v-else class="empty-state">
           <p>Select an issue to read it.</p>
@@ -1566,6 +1605,7 @@ function startResize(event, pane, min, max) {
           :refresh-key="refreshKey"
           @updated="onPullUpdated"
           @show-commit="showFoundCommit"
+          @merged="onPullMerged"
         />
         <div v-else class="empty-state">
           <p>Select a pull request to read it.</p>

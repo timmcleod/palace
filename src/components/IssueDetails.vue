@@ -27,6 +27,7 @@ import { issueFilters } from "../lib/issues.js";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 import IssueError from "./IssueError.vue";
 import MarkdownEditor from "./MarkdownEditor.vue";
+import PullMergeBox from "./PullMergeBox.vue";
 import Spinner from "./Spinner.vue";
 
 // One issue: its title, state, labels and assignees, then its description and
@@ -43,8 +44,9 @@ const props = defineProps({
   refreshKey: { type: Number, default: 0 },
 });
 // "updated" is the issue after a change, for the list and the open count;
-// "show-commit" asks to show a commit that mentions it.
-const emit = defineEmits(["updated", "show-commit"]);
+// "show-commit" asks to show a commit that mentions it; "merged" is a pull request
+// merged here, with PullMergeBox's details.
+const emit = defineEmits(["updated", "show-commit", "merged"]);
 
 const thread = shallowRef(null);
 // The full issue once it's loaded, and the list's until then.
@@ -107,6 +109,17 @@ watch(
   },
   { immediate: true },
 );
+
+// After merging or marking ready, the pull request as it is now goes to the list.
+async function reload() {
+  await load();
+  if (thread.value) emit("updated", thread.value.issue);
+}
+
+async function onMerged(details) {
+  await reload();
+  emit("merged", details);
+}
 
 // --- What the account may change ----------------------------------------------------
 
@@ -401,6 +414,16 @@ function onClick(event) {
         <div v-else-if="post.body_html" class="markdown selectable" v-html="post.body_html" />
         <p v-else class="markdown dim"><em>No description provided.</em></p>
       </article>
+
+      <PullMergeBox
+        v-if="isPull && shown.state === 'open'"
+        :repo="repo"
+        :number="issue.number"
+        :url="shown.html_url"
+        :refresh-key="refreshKey"
+        @merged="onMerged"
+        @changed="reload"
+      />
 
       <div class="composer">
         <MarkdownEditor

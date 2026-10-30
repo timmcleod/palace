@@ -123,6 +123,14 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     if (!error) removeKey(overview.value.path, `branch:${name}`);
   }
 
+  // Deletes a branch whose pull request was merged on GitHub. A squash or rebase
+  // leaves it looking unmerged to git, so it's forced; Undo brings it back.
+  async function deleteMergedBranch(name) {
+    const error = await run(["Deleting branch…", "Deleted branch", "Couldn't delete the branch"], "delete_branch", { name, force: true });
+    if (!error) removeKey(overview.value.path, `branch:${name}`);
+    return error;
+  }
+
   // Asks how to merge `name` (or a branch to choose) into the current branch.
   async function merge(name = null) {
     const head = current();
@@ -690,6 +698,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
 
   return {
     checkout,
+    deleteMergedBranch,
     merge,
     commitsMenu,
     moveCommit,
