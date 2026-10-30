@@ -81,6 +81,7 @@ import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
 import { githubRemotes, repoKey } from "./lib/githubRemote.js";
+import { issueError } from "./lib/issues.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
 const overview = ref(null);
@@ -233,6 +234,24 @@ function onIssueUpdated(issue) {
   }
   selectedIssue.value = issue;
   updatedIssue.value = issue;
+}
+
+// From "#123" in a commit message to that issue: in the Issues view, or on GitHub
+// when Palace isn't signed in.
+async function showIssue(number) {
+  const repo = issueRepo.value ?? issueRemotes.value[0];
+  if (!repo) return;
+  if (!githubAccount.value) {
+    openUrl(`https://github.com/${repo.owner}/${repo.repo}/issues/${number}`);
+    return;
+  }
+  try {
+    const { issue } = await invoke("github_issue", { owner: repo.owner, repo: repo.repo, number });
+    selected.value = "workspace:issues";
+    selectedIssue.value = issue;
+  } catch (e) {
+    tell(`Couldn't open issue #${number}`, issueError(e).text);
+  }
 }
 
 function onIssueCreated(issue) {
@@ -1144,6 +1163,7 @@ function startResize(event, pane, min, max) {
         :refresh-key="refreshKey"
         :selected-path="workingFile?.path"
         :undoable="undoable"
+        :issue-repo="githubAccount ? issueRepo : null"
         @select="workingFile = $event"
         @changed="refresh"
       />
@@ -1326,9 +1346,11 @@ function startResize(event, pane, min, max) {
         <IssueDetails
           v-if="selectedIssue && issueRepo"
           :repo="issueRepo"
+          :path="overview.path"
           :issue="selectedIssue"
           :refresh-key="refreshKey"
           @updated="onIssueUpdated"
+          @show-commit="showFoundCommit"
         />
         <div v-else class="empty-state">
           <p>Select an issue to read it.</p>
@@ -1364,6 +1386,8 @@ function startResize(event, pane, min, max) {
             :commit="detailCommit"
             :stash="isStashes"
             :focus-file="focusFile"
+            :issue-links="issueRemotes.length > 0"
+            @show-issue="showIssue"
           />
         </template>
         <CommitDetails v-else-if="isCompare && comparison" :path="overview.path" :comparison="comparison" />

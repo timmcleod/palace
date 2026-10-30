@@ -5,6 +5,8 @@ import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { confirmDiscard } from "../lib/confirm.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 import { commandKey, fileManager, shortcut } from "../lib/platform.js";
+import { useIssueSuggestions } from "../lib/issueSuggestions.js";
+import IssueSuggestions from "./IssueSuggestions.vue";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -16,6 +18,8 @@ const props = defineProps({
   draft: { type: Object, required: true },
   // undoable(step, work): runs `work`, remembering how to undo it.
   undoable: { type: Function, default: (step, work) => work() },
+  // The GitHub repository ({ owner, repo }) whose issues "#" suggests, or null.
+  issueRepo: { type: Object, default: null },
 });
 const emit = defineEmits(["select", "changed"]);
 
@@ -270,9 +274,14 @@ const canCommit = computed(
     !busy.value,
 );
 
-// Ctrl+Enter (Cmd+Enter on a Mac) in the subject commits.
-function onSubjectEnter(event) {
-  if (!commandKey(event)) return;
+// Typing "#" in the message suggests issues to mention.
+const suggestions = useIssueSuggestions(() => props.issueRepo);
+
+// Ctrl+Enter (Cmd+Enter on a Mac) in the subject or description commits, unless an
+// issue suggestion takes the key.
+function onMessageKeydown(event) {
+  if (suggestions.onKeydown(event)) return;
+  if (event.key !== "Enter" || !commandKey(event)) return;
   event.preventDefault();
   commit();
 }
@@ -391,7 +400,9 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
           class="subject"
           placeholder="Commit subject"
           spellcheck="true"
-          @keydown.enter="onSubjectEnter"
+          @input="suggestions.onInput($event, (v) => (draft.subject = v))"
+          @keydown="onMessageKeydown"
+          @blur="suggestions.close()"
         />
         <span
           class="counter"
@@ -406,8 +417,11 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
         placeholder="Description (optional)"
         rows="4"
         spellcheck="true"
-        @keydown.ctrl.enter.prevent="commit"
+        @input="suggestions.onInput($event, (v) => (draft.body = v))"
+        @keydown="onMessageKeydown"
+        @blur="suggestions.close()"
       />
+      <IssueSuggestions :suggestions="suggestions" />
       <div class="composer-actions">
         <label class="amend">
           <input

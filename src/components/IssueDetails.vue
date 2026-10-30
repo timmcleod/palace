@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ChevronDown, CircleCheck, CircleDot, CircleSlash, Pencil, Settings2 } from "lucide-vue-next";
+import { ChevronDown, CircleCheck, CircleDot, CircleSlash, GitCommitHorizontal, Pencil, Settings2 } from "lucide-vue-next";
 import { formatAgo, textColorOn } from "../lib/format.js";
 import { githubAccount } from "../lib/github.js";
 import { issueFilters } from "../lib/issues.js";
@@ -16,14 +16,17 @@ import Spinner from "./Spinner.vue";
 // closing and reopening. What can be changed follows what GitHub allows the account:
 // its own issues and comments, or anything for those who can triage.
 const props = defineProps({
+  // The open repository's path, for the commits that mention the issue.
+  path: { type: String, required: true },
   // { owner, repo }
   repo: { type: Object, required: true },
   // The issue from the list, shown until the full one arrives.
   issue: { type: Object, required: true },
   refreshKey: { type: Number, default: 0 },
 });
-// "updated" is the issue after a change, for the list and the open count.
-const emit = defineEmits(["updated"]);
+// "updated" is the issue after a change, for the list and the open count;
+// "show-commit" asks to show a commit that mentions it.
+const emit = defineEmits(["updated", "show-commit"]);
 
 const thread = shallowRef(null);
 // The full issue once it's loaded, and the list's until then.
@@ -66,6 +69,18 @@ watch(
   { immediate: true },
 );
 watch(() => props.refreshKey, load);
+
+// The commits on any branch whose messages mention the issue ("Fixes #42").
+const MAX_MENTIONS = 50;
+const mentions = shallowRef([]);
+watch(
+  [() => props.issue.number, () => props.path, () => props.refreshKey],
+  async ([number, path]) => {
+    const found = await invoke("commits_mentioning", { path, number, limit: MAX_MENTIONS }).catch(() => []);
+    if (number === props.issue.number) mentions.value = found;
+  },
+  { immediate: true },
+);
 
 // --- What the account may change ----------------------------------------------------
 
@@ -307,6 +322,25 @@ function onClick(event) {
       </div>
     </header>
 
+    <section v-if="mentions.length" class="mentions">
+      <h3>
+        Mentioned in {{ mentions.length === MAX_MENTIONS ? "the newest" : "" }} {{ mentions.length }}
+        {{ mentions.length === 1 ? "commit" : "commits" }}
+      </h3>
+      <button
+        v-for="c in mentions"
+        :key="c.id"
+        class="mention"
+        :title="`Show ${c.short_id} in the history`"
+        @click="emit('show-commit', c)"
+      >
+        <GitCommitHorizontal :size="15" class="dim" />
+        <span class="mono dim">{{ c.short_id }}</span>
+        <span class="mention-summary">{{ c.summary }}</span>
+        <span class="dim mention-when">{{ c.author_name }}, {{ formatAgo(new Date(c.time * 1000).toISOString()) }}</span>
+      </button>
+    </section>
+
     <IssueError v-if="error" :error="error" />
     <p v-else-if="!thread" class="message dim"><Spinner /> Loading the conversation…</p>
 
@@ -487,6 +521,56 @@ h2 {
 
 .spacer {
   flex: 1;
+}
+
+.mentions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 18px;
+}
+
+.mentions h3 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.mention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.mention:hover {
+  background: var(--row-hover);
+}
+
+.mention .mono {
+  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
+  font-size: 12px;
+}
+
+.mention-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-when {
+  flex-shrink: 0;
+  font-size: 12px;
 }
 
 .editor,

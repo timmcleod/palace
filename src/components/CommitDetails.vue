@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
 import FileDiff from "./FileDiff.vue";
+import { splitIssueRefs } from "../lib/issues.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -16,7 +17,11 @@ const props = defineProps({
   focusFile: { type: String, default: null },
   // A stash: its changes are shown against the commit it was made on.
   stash: { type: Boolean, default: false },
+  // Whether "#123" in the message links to that GitHub issue.
+  issueLinks: { type: Boolean, default: false },
 });
+// "show-issue" asks to open an issue mentioned in the message, by number.
+const emit = defineEmits(["show-issue"]);
 
 const details = shallowRef(null);
 const error = ref("");
@@ -26,6 +31,10 @@ const scroller = ref(null);
 provide("diffScroller", scroller);
 
 let loadSeq = 0;
+
+const messagePieces = computed(() =>
+  props.issueLinks ? splitIssueRefs(details.value?.message ?? "") : [{ text: details.value?.message ?? "" }],
+);
 
 async function load() {
   const seq = ++loadSeq;
@@ -133,7 +142,8 @@ function splitPath(path) {
         <Avatar :name="details.author.name" :email="details.author.email" :size="72" />
       </section>
 
-      <section v-if="!comparison" class="commit-message">{{ details.message }}</section>
+      <!-- One line, as the section keeps its whitespace. -->
+      <section v-if="!comparison" class="commit-message"><template v-for="(piece, i) in messagePieces" :key="i"><a v-if="piece.issue" href="#" class="issue-ref" :title="`Show issue ${piece.text}`" @click.prevent="emit('show-issue', piece.issue)">{{ piece.text }}</a><template v-else>{{ piece.text }}</template></template></section>
 
       <div class="changes-bar">
         <button v-if="details.files.length" class="link-button" @click="toggleAll">
@@ -247,6 +257,15 @@ dd.mono {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.6;
+}
+
+.issue-ref {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.issue-ref:hover {
+  text-decoration: underline;
 }
 
 .changes-bar {

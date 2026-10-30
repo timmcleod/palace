@@ -204,6 +204,47 @@ pub async fn search_commits(path: String, rev: Option<String>, query: String, li
     Ok(found)
 }
 
+/// The commits on any branch, local or remote, whose messages mention issue `number`
+/// ("#42"), newest first, for that issue's view.
+#[tauri::command]
+pub async fn commits_mentioning(path: String, number: u64, limit: usize) -> Result<Vec<FoundCommit>, String> {
+    let repo = Repository::discover(&path).map_err(message)?;
+    let mut revwalk = repo.revwalk().map_err(message)?;
+    revwalk.set_sorting(Sort::TIME).map_err(message)?;
+    for glob in ["refs/heads", "refs/remotes"] {
+        revwalk.push_glob(glob).map_err(message)?;
+    }
+    let mut found = Vec::new();
+    for oid in revwalk {
+        let commit = repo.find_commit(oid.map_err(message)?).map_err(message)?;
+        if !mentions(commit.message().unwrap_or(""), number) {
+            continue;
+        }
+        let author = commit.author();
+        found.push(FoundCommit {
+            id: commit.id().to_string(),
+            short_id: commit.id().to_string()[..7].to_string(),
+            summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+            author_name: author.name().unwrap_or("").to_string(),
+            time: author.when().seconds(),
+        });
+        if found.len() == limit {
+            break;
+        }
+    }
+    Ok(found)
+}
+
+/// Whether `text` mentions issue `number` as "#42": not "#420", "abc#42" or "&#42;".
+fn mentions(text: &str, number: u64) -> bool {
+    let reference = format!("#{number}");
+    text.match_indices(&reference).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + reference.len()..].chars().next();
+        !before.is_some_and(|c| c.is_alphanumeric() || "_&/#".contains(c)) && !after.is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
 fn page(history: &History, offset: usize, limit: usize) -> Result<Vec<CommitRow>, git2::Error> {
     let repo = Repository::discover(&history.path)?;
 
@@ -505,6 +546,16 @@ fn ref_labels(repo: &Repository) -> Result<HashMap<Oid, Vec<RefLabel>>, git2::Er
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mentioning_issues() {
+        assert!(mentions("Fix scrolling (#42)", 42));
+        assert!(mentions("#42 at the start", 42));
+        assert!(mentions("Fixes #42.\n\nAlso #7", 7));
+        assert!(!mentions("Fixes #420", 42));
+        assert!(!mentions("abc#42 and &#42; and https://x.com/a#42", 42));
+        assert!(!mentions("No issue here", 42));
+    }
 
     fn oid(n: u8) -> Oid {
         Oid::from_bytes(&[n; 20]).unwrap()

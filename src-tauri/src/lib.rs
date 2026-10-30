@@ -43,6 +43,7 @@ pub fn run() {
             history::history_page,
             history::history_position,
             history::search_commits,
+            history::commits_mentioning,
             commit::commit_details,
             commit::file_diff,
             compare::compare,
