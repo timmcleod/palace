@@ -44,6 +44,7 @@ import ResetDialog from "./components/ResetDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
+import NewPullRequestDialog from "./components/NewPullRequestDialog.vue";
 import SettingsView from "./components/SettingsView.vue";
 import StarNotice from "./components/StarNotice.vue";
 import Sidebar from "./components/Sidebar.vue";
@@ -82,6 +83,7 @@ import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
 import { githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
+import { pullRequestPlan } from "./lib/pullRequests.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
 const overview = ref(null);
@@ -582,6 +584,7 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     op.state = "done";
     op.title = done;
     if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
+    if (command === "push" || command === "publish_branch") offerPullRequest(op, args.branch ?? overview.value.head.branch);
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") {
       loadAvatars(overview.value.path);
@@ -780,9 +783,81 @@ async function replay(stack, other, undoing) {
 
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
 const dialogOpen = () =>
-  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value);
+  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
 
-const actions = useGitActions({ overview, run: runGit, compare: openComparison });
+// --- Pull requests -----------------------------------------------------------------
+
+// They go where issues do: origin's repository, or the one it was forked from.
+const pullTarget = () => issueRepo.value ?? issueRemotes.value[0] ?? null;
+// The Create Pull Request dialog's plan (see pullRequestPlan), while it's open.
+const pullRequestDialog = shallowRef(null);
+
+// Opens the Create Pull Request dialog for a local branch. Without a GitHub account,
+// the branch is pushed if it needs to be, then GitHub's own page for it opens.
+async function createPullRequest(name) {
+  const plan = pullRequestPlan(overview.value, pullTarget(), name);
+  if (!plan) {
+    tell("Can't Create a Pull Request", `“${name}” is pushed to a remote that isn't on GitHub.`);
+    return;
+  }
+  if (githubAccount.value) {
+    pullRequestDialog.value = plan;
+    return;
+  }
+  if (plan.push && (await pushForPullRequest(plan))) return;
+  const { owner, repo } = plan.target;
+  openUrl(`https://github.com/${owner}/${repo}/compare/${encodeURIComponent(plan.head)}?expand=1`);
+}
+
+// Pushes the branch a pull request is for, resolving to an error message or null.
+// Toolbar pushes only go from the current branch; publishing goes from any.
+function pushForPullRequest(plan) {
+  if (plan.push === "push" && plan.branch === overview.value.head.branch) {
+    return runGit(["Pushing…", "Pushed", "Push failed"], "push");
+  }
+  return runGit(["Pushing…", "Pushed", "Push failed"], "publish_branch", { branch: plan.branch, remote: plan.remote, name: plan.name });
+}
+
+function onPullRequestClosed(pull) {
+  pullRequestDialog.value = null;
+  if (!pull) return;
+  clearTimeout(dismissTimer);
+  const op = reactive({
+    title: `Created pull request #${pull.number}`,
+    state: "done",
+    message: pull.title,
+    actions: [{ label: "Open on GitHub", run: () => openUrl(pull.html_url) }],
+  });
+  remoteOp.value = op;
+  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 10_000);
+}
+
+// After a branch is pushed, the status card offers to create a pull request for it,
+// or to view the one it has. Not for the repository's main branch, or while the
+// dialog is the one pushing.
+async function offerPullRequest(op, branch) {
+  if (!githubAccount.value || !branch || pullRequestDialog.value) return;
+  await loadRepository(overview.value.path, { quiet: true });
+  const plan = pullRequestPlan(overview.value, pullTarget(), branch);
+  if (!plan || plan.push) return;
+  const { owner, repo } = plan.target;
+  const info = await invoke("github_branch_pull", { owner, repo, head: plan.head }).catch(() => null);
+  if (!info || plan.head === info.default_branch || remoteOp.value !== op) return;
+  const offer = info.pull
+    ? { label: "View Pull Request", run: () => openUrl(info.pull.html_url) }
+    : { label: "Create Pull Request…", run: () => createPullRequest(branch) };
+  op.actions = [...(op.actions ?? []), offer];
+  // Long enough to be noticed.
+  clearTimeout(dismissTimer);
+  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 10_000);
+}
+
+const actions = useGitActions({
+  overview,
+  run: runGit,
+  compare: openComparison,
+  pullRequest: { available: () => issueRemotes.value.length > 0, create: createPullRequest },
+});
 
 // Context menus for sidebar rows, keyed the same way the sidebar keys them.
 function sidebarMenu(row, event) {
@@ -1507,6 +1582,13 @@ function startResize(event, pane, min, max) {
   <MergeDialog v-if="mergeDialog" :dialog="mergeDialog" />
   <ResetDialog v-if="resetDialog" :dialog="resetDialog" />
   <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
+  <NewPullRequestDialog
+    v-if="pullRequestDialog"
+    :path="overview.path"
+    :plan="pullRequestDialog"
+    :push="() => pushForPullRequest(pullRequestDialog)"
+    @close="onPullRequestClosed"
+  />
   <ConfirmDialog v-if="confirmDialog" :dialog="confirmDialog" />
   <UpdateNotice />
   <StarNotice v-if="starRequest && !updateNoticeShown" />

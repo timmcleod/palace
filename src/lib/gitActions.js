@@ -20,8 +20,9 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // Branch, merge, rebase and stash actions, and the context menus that offer them.
 // `run(titles, command, args, options)` performs a backend command with progress and
 // error reporting, resolving to the error message or null; `overview` is the
-// repository overview ref.
-export function useGitActions({ overview, run, compare }) {
+// repository overview ref. `pullRequest` is { available(), create(branch) }, for
+// branches' Create Pull Request.
+export function useGitActions({ overview, run, compare, pullRequest }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -470,6 +471,7 @@ export function useGitActions({ overview, run, compare }) {
     return [
       { label: "Check Out", action: () => checkout("branch", name), disabled: isCurrent },
       !upstream && { label: `Publish “${name}”…`, action: () => publishBranch(name), disabled: !overview.value.remotes.length },
+      pullRequest?.available() && { label: "Create Pull Request…", action: () => pullRequest.create(name) },
       { separator: true },
       // Merging or rebasing a branch onto itself means nothing, so the current branch
       // doesn't offer it.

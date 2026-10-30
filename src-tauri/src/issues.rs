@@ -109,7 +109,7 @@ fn terms(filters: &str) -> Vec<String> {
 }
 
 /// Percent-encodes a query string value.
-fn encode(text: &str) -> String {
+pub(crate) fn encode(text: &str) -> String {
     text.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),

@@ -9,6 +9,7 @@ mod github;
 mod history;
 mod issues;
 mod open;
+mod pulls;
 mod rebase;
 mod remote;
 mod reset;
@@ -114,6 +115,11 @@ pub fn run() {
             issues::github_edit_comment,
             issues::github_delete_comment,
             issues::github_render_markdown,
+            pulls::github_branch_pull,
+            pulls::github_branches,
+            pulls::github_create_pull,
+            pulls::branch_commit_messages,
+            pulls::pull_request_template,
             github::github_create_repo,
             github::github_keys,
             github::github_add_key,
