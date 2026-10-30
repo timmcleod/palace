@@ -29,6 +29,7 @@ import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import GitHubView from "./components/GitHubView.vue";
+import Spinner from "./components/Spinner.vue";
 import GitMissing from "./components/GitMissing.vue";
 import StashList from "./components/StashList.vue";
 import FormDialog from "./components/FormDialog.vue";
@@ -79,6 +80,9 @@ const overview = ref(null);
 const loading = ref(false);
 const error = ref("");
 const recents = ref(recentRepositories());
+// While the last repository reopens at startup, so the welcome screen doesn't flash up
+// first.
+const starting = ref(recents.value.length > 0);
 const selected = ref("workspace:history");
 // The ref whose history is shown, as { kind, name }; null means HEAD.
 const historyRef = ref(null);
@@ -787,8 +791,9 @@ async function checkGit() {
   }
   if (!gitMissing.value && !overview.value) {
     const last = recents.value[0];
-    if (last) loadRepository(last.path);
+    if (last) await loadRepository(last.path);
   }
+  starting.value = false;
 }
 
 onMounted(checkGit);
@@ -1202,6 +1207,10 @@ function startResize(event, pane, min, max) {
     <GitHubView standalone @clone="cloneRepository" @back="browsingGitHub = false" />
   </main>
 
+  <main v-else-if="starting" class="welcome">
+    <span class="starting"><Spinner :size="22" /></span>
+  </main>
+
   <main v-else class="welcome">
     <div class="welcome-card">
       <FolderGit2 :size="44" :stroke-width="1.25" class="welcome-icon" />
@@ -1469,6 +1478,20 @@ function startResize(event, pane, min, max) {
   justify-content: center;
   height: 100vh;
   background: var(--sidebar-bg);
+}
+
+/* Only shown if reopening the last repository takes a moment. */
+.starting {
+  display: flex;
+  color: var(--text-tertiary);
+  opacity: 0;
+  animation: appear 0.2s 0.5s forwards;
+}
+
+@keyframes appear {
+  to {
+    opacity: 1;
+  }
 }
 
 .welcome-card {

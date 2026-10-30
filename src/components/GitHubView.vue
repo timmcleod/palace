@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, ExternalLink, Folder, GitFork, Github, Lock, Se
 import { githubAccount, NEW_TOKEN_URL, signInWithToken } from "../lib/github.js";
 import { openForm } from "../lib/overlays.js";
 import GitHubAccount from "./GitHubAccount.vue";
+import Spinner from "./Spinner.vue";
 import GitHubKeys from "./GitHubKeys.vue";
 
 // Your GitHub account, organizations and collaborators on the left, the chosen one's
@@ -142,7 +143,7 @@ async function signIn() {
 
       <template v-if="githubAccount">
         <p v-if="ownersError" class="message error"><CircleAlert :size="15" /> {{ ownersError }}</p>
-        <p v-else-if="!owners" class="message dim">Loading…</p>
+        <p v-else-if="!owners" class="message dim"><Spinner /> Loading…</p>
         <template v-for="(o, i) in owners ?? []" :key="o.login">
           <div v-if="groupStart(i)" class="group-label">{{ GROUPS[o.kind] }}</div>
           <div class="owner" :class="{ selected: o.login === selected }" @click="selected = o.login">
@@ -203,7 +204,7 @@ async function signIn() {
 
         <GitHubKeys v-if="tab === 'keys' && scopes !== undefined" :scopes="scopes" />
         <GitHubAccount v-else-if="tab === 'account' && scopes !== undefined" :scopes="scopes" @token-changed="loadScopes" />
-        <p v-else-if="tab !== 'repositories'" class="message dim">Loading…</p>
+        <p v-else-if="tab !== 'repositories'" class="message dim"><Spinner /> Loading…</p>
 
         <template v-else>
         <div class="list-bar">
@@ -219,7 +220,7 @@ async function signIn() {
 
         <p v-if="createError" class="message error"><CircleAlert :size="15" /> {{ createError }}</p>
         <p v-if="listing?.error" class="message error"><CircleAlert :size="15" /> {{ listing.error }}</p>
-        <p v-else-if="!listing" class="message dim">Loading repositories…</p>
+        <p v-else-if="!listing" class="message dim"><Spinner /> Loading repositories…</p>
         <p v-else-if="!repos.length" class="message dim">
           {{ query.trim() ? `No repositories match “${query.trim()}”.` : "No repositories." }}
         </p>

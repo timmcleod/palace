@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { CircleAlert, KeyRound, Laptop } from "lucide-vue-next";
 import { NEW_TOKEN_URL } from "../lib/github.js";
 import { askConfirm, openForm } from "../lib/overlays.js";
+import Spinner from "./Spinner.vue";
 
 // The SSH keys on the signed-in GitHub account, and the ones on this computer that
 // could be added.
@@ -110,7 +111,7 @@ async function remove(key) {
         <span>SSH KEYS</span>
         <button class="secondary-button" :disabled="busy || !canWrite" @click="addPasted">Add Key…</button>
       </div>
-      <p v-if="!keys && !error" class="message dim">Loading…</p>
+      <p v-if="!keys && !error" class="message dim"><Spinner /> Loading…</p>
       <p v-else-if="keys && !keys.length" class="message dim">There are no SSH keys on your GitHub account.</p>
       <div v-for="key in keys ?? []" :key="key.id" class="key">
         <KeyRound :size="22" :stroke-width="1.5" class="key-icon" />
