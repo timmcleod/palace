@@ -8,6 +8,8 @@ import DiffTable from "./DiffTable.vue";
 const props = defineProps({
   path: { type: String, required: true },
   file: { type: Object, required: true },
+  // undoable(step, work): runs `work`, remembering how to undo it.
+  undoable: { type: Function, default: (step, work) => work() },
 });
 const emit = defineEmits(["changed"]);
 
@@ -61,11 +63,12 @@ async function showAll(staged) {
   }
 }
 
-async function run(command, args) {
+async function run(command, args, step) {
   busy.value = true;
   error.value = "";
   try {
-    await invoke(command, { path: props.path, ...args });
+    const work = () => invoke(command, { path: props.path, ...args });
+    await (step ? props.undoable(step, work) : work());
   } catch (e) {
     error.value = String(e);
   } finally {
@@ -78,8 +81,8 @@ async function run(command, args) {
 async function onHunk(staged, { action, index, lines }) {
   if (action === "discard") {
     const what = !lines ? "this chunk" : lines.length === 1 ? "this line" : "these lines";
-    const ok = await confirmDiscard(`Discard ${what}?`, "The change will be lost; it can't be recovered from the Trash.");
-    if (ok) run("discard_hunk", { file: props.file.path, hunk: index, lines });
+    const ok = await confirmDiscard(`Discard ${what}?`);
+    if (ok) run("discard_hunk", { file: props.file.path, hunk: index, lines }, discardStep());
   } else {
     run("stage_hunk", { file: props.file.path, oldPath: props.file.old_path, staged, hunk: index, lines });
   }
@@ -89,10 +92,13 @@ async function discardFile() {
   const name = props.file.path.split("/").at(-1);
   const ok = await confirmDiscard(
     `Discard all changes to “${name}”?`,
-    "Its staged and unstaged changes will be thrown away. The current version of the file will be moved to the Trash.",
+    "Its staged and unstaged changes will be thrown away.",
   );
-  if (ok) run("discard_files", { files: [props.file.path] });
+  if (ok) run("discard_files", { files: [props.file.path] }, discardStep());
 }
+
+// Discarding can be undone, with copies of the file as it was.
+const discardStep = () => ({ label: "Discard", mode: "keep", cover: { files: [props.file.path, props.file.old_path].filter(Boolean) } });
 
 function stageFile() {
   run("stage_files", { files: [props.file.path] });

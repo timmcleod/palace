@@ -1,6 +1,11 @@
 import { askConfirm } from "./overlays.js";
+import { shortcut } from "./platform.js";
 
 // Asks before throwing work away. Resolves to true when the user chooses Discard.
-export function confirmDiscard(question, detail) {
-  return askConfirm({ title: "Discard Changes", message: `${question}\n\n${detail}`, confirmLabel: "Discard", danger: true });
+// `detail` (optional) says what's thrown away; the dialog adds that it can be undone.
+export function confirmDiscard(question, detail = "") {
+  const message = `${question}\n\n${detail} ${undoHint()}`.trim();
+  return askConfirm({ title: "Discard Changes", message, confirmLabel: "Discard", danger: true });
 }
+
+export const undoHint = () => `You can undo this with ${shortcut("Ctrl+Z")}.`;

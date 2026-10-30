@@ -1,16 +1,19 @@
-//! Undo and redo. Before and after each operation that moves branches or tags, the UI
-//! takes a snapshot of where they all point and which branch HEAD is on; undoing puts
-//! the repository back from the second snapshot to the first, and redoing does the
-//! opposite. Only what the operation changed is touched, and only if nothing else
-//! has changed it since.
+//! Undo and redo. Before and after each operation that can be undone, the UI takes a
+//! snapshot of where every branch and tag points, which branch HEAD is on, the stash
+//! list, and the files the operation may change; undoing puts the repository back
+//! from the second snapshot to the first, and redoing does the opposite. Only what the
+//! operation changed is touched, and only if nothing else has changed it since.
 
 use crate::cli::git;
-use git2::{BranchType, Repository, RepositoryState};
+use crate::working::{read_status, remove_empty_parents};
+use git2::{BranchType, Index, ObjectType, Oid, Repository, RepositoryState, TreeWalkMode, TreeWalkResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Refs {
+pub struct Snapshot {
     /// The branch HEAD is on, or None when it's detached.
     head_branch: Option<String>,
     /// The commit HEAD is at; None on a branch with no commits yet.
@@ -19,11 +22,47 @@ pub struct Refs {
     refs: BTreeMap<String, String>,
     /// Each local branch's upstream as its config has it: (remote, merge).
     upstreams: BTreeMap<String, (String, String)>,
+    /// The stash list, newest first: each stash's commit and its description.
+    stashes: Vec<(String, String)>,
+    /// The files the operation may change, as they were.
+    files: Vec<FileState>,
 }
 
+/// One file in the index and the working copy. The contents are saved in the
+/// repository as blobs, which git keeps for at least two weeks once nothing uses them.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FileState {
+    path: String,
+    /// The index entry's mode and blob, or None when the file isn't in the index.
+    index: Option<(u32, String)>,
+    /// The working copy's file as a mode and blob, or None when there's no file.
+    worktree: Option<(u32, String)>,
+}
+
+/// The files a snapshot covers.
+#[derive(Deserialize, Default)]
+pub struct Cover {
+    #[serde(default)]
+    files: Vec<String>,
+    /// Every file with uncommitted changes.
+    #[serde(default)]
+    changed: bool,
+    /// Every file the stash at this index changes.
+    stash: Option<usize>,
+}
+
+/// Saving more than this much of the working copy makes the operation not undoable.
+const LIMIT: u64 = 256 * 1024 * 1024;
+
+const SYMLINK: u32 = 0o120000;
+const EXECUTABLE: u32 = 0o100755;
+const REGULAR: u32 = 0o100644;
+
 #[tauri::command]
-pub async fn ref_snapshot(path: String) -> Result<Refs, String> {
-    snapshot(&path).map_err(|e| e.message().to_string())
+pub async fn take_snapshot(path: String, cover: Option<Cover>) -> Result<Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || snapshot(&path, &cover.unwrap_or_default()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Moves the repository from the `from` snapshot to the `to` one. `mode` says what
@@ -31,12 +70,23 @@ pub async fn ref_snapshot(path: String) -> Result<Refs, String> {
 /// (undoing a commit leaves its changes staged), "mixed" keeps the files, and "keep"
 /// updates the files as `git reset --keep` does, keeping uncommitted changes.
 #[tauri::command]
-pub async fn restore_refs(path: String, from: Refs, to: Refs, mode: String) -> Result<String, String> {
-    restore(&path, &from, &to, &mode)
+pub async fn restore_snapshot(path: String, from: Snapshot, to: Snapshot, mode: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || restore(&path, &from, &to, &mode))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-fn snapshot(path: &str) -> Result<Refs, git2::Error> {
-    let repo = Repository::discover(path)?;
+fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
+    let mut repo = Repository::discover(path).map_err(message)?;
+    let (head_branch, head_id, refs, upstreams) = read_refs(&repo).map_err(message)?;
+    let stashes = stash_list(&mut repo).map_err(message)?;
+    let files = read_files(&repo, cover)?;
+    Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files })
+}
+
+type Refs = (Option<String>, Option<String>, BTreeMap<String, String>, BTreeMap<String, (String, String)>);
+
+fn read_refs(repo: &Repository) -> Result<Refs, git2::Error> {
     let head = repo.find_reference("HEAD")?;
     let head_branch = head.symbolic_target().ok().flatten().and_then(|t| t.strip_prefix("refs/heads/")).map(str::to_string);
     let head_id = repo.head().ok().and_then(|h| h.target()).map(|id| id.to_string());
@@ -61,18 +111,165 @@ fn snapshot(path: &str) -> Result<Refs, git2::Error> {
         }
     }
 
-    Ok(Refs { head_branch, head_id, refs, upstreams })
+    Ok((head_branch, head_id, refs, upstreams))
 }
 
-fn restore(path: &str, from: &Refs, to: &Refs, mode: &str) -> Result<String, String> {
+fn stash_list(repo: &mut Repository) -> Result<Vec<(String, String)>, git2::Error> {
+    let mut list = Vec::new();
+    repo.stash_foreach(|_, description, id| {
+        list.push((id.to_string(), description.to_string()));
+        true
+    })?;
+    Ok(list)
+}
+
+fn read_files(repo: &Repository, cover: &Cover) -> Result<Vec<FileState>, String> {
+    let paths = covered(repo, cover).map_err(message)?;
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
+    let index = repo.index().map_err(message)?;
+    let mut total = 0;
+    paths.iter().map(|path| file_state(repo, workdir, &index, path, true, &mut total)).collect()
+}
+
+fn covered(repo: &Repository, cover: &Cover) -> Result<BTreeSet<String>, git2::Error> {
+    let mut paths: BTreeSet<String> = cover.files.iter().cloned().collect();
+    if cover.changed {
+        for file in read_status(repo)? {
+            paths.extend(file.old_path);
+            paths.insert(file.path);
+        }
+    }
+    if let Some(index) = cover.stash {
+        // A stash is a commit of the working copy whose parents are HEAD, the index
+        // and, when it has them, a commit of just the untracked files.
+        let stash = repo.revparse_single(&format!("refs/stash@{{{index}}}"))?.peel_to_commit()?;
+        let base = stash.parent(0)?.tree()?;
+        for tree in [stash.tree()?, stash.parent(1)?.tree()?] {
+            for delta in repo.diff_tree_to_tree(Some(&base), Some(&tree), None)?.deltas() {
+                for file in [delta.old_file(), delta.new_file()] {
+                    paths.extend(file.path().and_then(Path::to_str).map(str::to_string));
+                }
+            }
+        }
+        if let Ok(untracked) = stash.parent(2) {
+            untracked.tree()?.walk(TreeWalkMode::PreOrder, |dir, entry| {
+                if entry.kind() == Some(ObjectType::Blob)
+                    && let Ok(name) = entry.name()
+                {
+                    paths.insert(format!("{dir}{name}"));
+                }
+                TreeWalkResult::Ok
+            })?;
+        }
+    }
+    Ok(paths)
+}
+
+/// Where `path` stands in the index and the working copy. With `save`, the contents
+/// are written to the repository so they can be put back later.
+fn file_state(repo: &Repository, workdir: &Path, index: &Index, path: &str, save: bool, total: &mut u64) -> Result<FileState, String> {
+    if (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some()) {
+        return Err(format!("{path} has conflicts."));
+    }
+    let blob = |bytes: &[u8]| {
+        let id = if save { repo.blob(bytes) } else { Oid::hash_object(ObjectType::Blob, bytes) };
+        id.map(|id| id.to_string()).map_err(message)
+    };
+    let full = workdir.join(path);
+    let worktree = match full.symlink_metadata() {
+        Err(_) => None,
+        Ok(meta) if meta.is_symlink() => {
+            let target = fs::read_link(&full).map_err(|e| format!("Couldn't read {path}: {e}"))?;
+            Some((SYMLINK, blob(target.as_os_str().as_encoded_bytes())?))
+        }
+        Ok(meta) if meta.is_file() => {
+            *total += meta.len();
+            if *total > LIMIT {
+                return Err("The changes are too large to keep a copy of.".into());
+            }
+            let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {path}: {e}"))?;
+            Some((if executable(&meta) { EXECUTABLE } else { REGULAR }, blob(&bytes)?))
+        }
+        // A directory, such as a submodule's.
+        Ok(_) => return Err(format!("{path} isn't a file.")),
+    };
+    let index = index.get_path(Path::new(path), 0).map(|entry| (entry.mode, entry.id.to_string()));
+    Ok(FileState { path: path.to_string(), index, worktree })
+}
+
+#[cfg(unix)]
+fn executable(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable(_: &fs::Metadata) -> bool {
+    false
+}
+
+fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<String, String> {
     if !["soft", "mixed", "keep"].contains(&mode) {
         return Err(format!("Unknown mode “{mode}”."));
     }
-    let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
-    if repo.state() != RepositoryState::Clean {
+    let mut repo = Repository::discover(path).map_err(message)?;
+    let moves_refs = (&from.head_branch, &from.head_id, &from.refs) != (&to.head_branch, &to.head_id, &to.refs);
+    if moves_refs && repo.state() != RepositoryState::Clean {
         return Err("Finish or abort the merge, rebase or other operation in progress first.".into());
     }
-    let now = snapshot(path).map_err(|e| e.message().to_string())?;
+
+    // The stash list and files the operation changed have to be as it left them, and
+    // everything to put back still saved, before anything changes.
+    let stashes_now = stash_list(&mut repo).map_err(message)?;
+    let moves_stashes = from.stashes != to.stashes;
+    if moves_stashes && stashes_now != from.stashes {
+        return Err("The stash list has changed since, so it can't be put back safely.".into());
+    }
+    let files: Vec<&FileState> = to.files.iter().filter(|file| !from.files.contains(file)).collect();
+    if !files.is_empty() {
+        let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
+        let index = repo.index().map_err(message)?;
+        for file in &files {
+            let was = from.files.iter().find(|f| f.path == file.path);
+            let now = file_state(&repo, workdir, &index, &file.path, false, &mut 0).ok();
+            if was.is_none() || now.as_ref() != was {
+                return Err(format!("{} has changed since, so it can't be put back safely.", file.path));
+            }
+            for (_, id) in file.index.iter().chain(&file.worktree) {
+                Oid::from_str(id).ok().and_then(|id| repo.find_blob(id).ok()).ok_or_else(|| {
+                    format!("The saved copy of {} is gone; git removes unused copies after a while.", file.path)
+                })?;
+            }
+        }
+    }
+
+    let mut done = Vec::new();
+    if moves_refs {
+        restore_refs(path, from, to, mode, &mut done)?;
+    }
+    if moves_stashes {
+        put_stashes(path, &stashes_now, &to.stashes)?;
+        done.push(match to.stashes.len().cmp(&stashes_now.len()) {
+            std::cmp::Ordering::Greater => "Restored the stash.".to_string(),
+            std::cmp::Ordering::Less => "Removed the stash.".to_string(),
+            std::cmp::Ordering::Equal => "Restored the stash list.".to_string(),
+        });
+    }
+    if !files.is_empty() {
+        put_files(&repo, path, &files)?;
+        done.push(match files.as_slice() {
+            [file] => format!("Put back {}.", file.path),
+            files => format!("Put back {} files.", files.len()),
+        });
+    }
+    Ok(done.join(" "))
+}
+
+fn restore_refs(path: &str, from: &Snapshot, to: &Snapshot, mode: &str, done: &mut Vec<String>) -> Result<(), String> {
+    let now = snapshot(path, &Cover::default())?;
 
     // Everything the operation changed has to be as it left it.
     let changed: BTreeSet<&String> = from
@@ -90,9 +287,7 @@ fn restore(path: &str, from: &Refs, to: &Refs, mode: &str) -> Result<String, Str
         return Err("HEAD has moved since, so it can't be put back safely.".into());
     }
 
-    let mut done = Vec::new();
     let mut pending: BTreeSet<&String> = changed;
-
     // A branch that went away while another appeared at the same commit was renamed,
     // which `git branch -m` undoes along with its upstream and HEAD.
     let gone: Vec<&String> = pending.iter().copied().filter(|n| is_branch(n) && !to.refs.contains_key(*n)).collect();
@@ -170,11 +365,76 @@ fn restore(path: &str, from: &Refs, to: &Refs, mode: &str) -> Result<String, Str
         let message = set_ref(path, name, now.refs.get(name), to.refs.get(name), to)?;
         done.push(message);
     }
-    Ok(done.join(" "))
+    Ok(())
+}
+
+/// Replaces the stash list `now` with `to`. Git keeps the list as the stash ref's log,
+/// so it's rebuilt from the oldest stash up; the stashes themselves are commits that
+/// stay in the repository.
+fn put_stashes(path: &str, now: &[(String, String)], to: &[(String, String)]) -> Result<(), String> {
+    if !now.is_empty() {
+        git(path, &["update-ref", "-d", "refs/stash"], None)?;
+    }
+    for (id, description) in to.iter().rev() {
+        git(path, &["stash", "store", "--quiet", "--message", description, id], None)?;
+    }
+    Ok(())
+}
+
+/// Puts files back in the index and the working copy as `files` has them.
+fn put_files(repo: &Repository, path: &str, files: &[&FileState]) -> Result<(), String> {
+    let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
+    // What's there goes first, so a file can come back where a folder of
+    // another's was emptied.
+    for file in files {
+        let full = workdir.join(&file.path);
+        if full.symlink_metadata().is_ok() {
+            fs::remove_file(&full).map_err(|e| format!("Couldn't replace {}: {e}", file.path))?;
+            remove_empty_parents(workdir, &full);
+        }
+    }
+    let mut entries = String::new();
+    for file in files {
+        if let Some((mode, id)) = &file.worktree {
+            let blob = repo.find_blob(Oid::from_str(id).map_err(message)?).map_err(message)?;
+            write_file(&workdir.join(&file.path), *mode, blob.content()).map_err(|e| format!("Couldn't write {}: {e}", file.path))?;
+        }
+        let (mode, id) = file.index.clone().unwrap_or((0, Oid::ZERO_SHA1.to_string()));
+        entries.push_str(&format!("{mode:o} {id}\t{}\0", file.path));
+    }
+    // Mode 0 takes a file out of the index.
+    git(path, &["update-index", "-z", "--index-info"], Some(&entries))?;
+    // The rewritten files' entries need fresh timestamps to show as unchanged.
+    let _ = git(path, &["update-index", "-q", "--refresh"], None);
+    Ok(())
+}
+
+fn write_file(full: &Path, mode: u32, content: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = full.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        if mode == SYMLINK {
+            return symlink(std::ffi::OsStr::from_bytes(content), full);
+        }
+        fs::write(full, content)?;
+        if mode == EXECUTABLE {
+            fs::set_permissions(full, fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = mode;
+        fs::write(full, content)
+    }
 }
 
 /// Creates, moves or deletes one branch or tag, checking it's still at `old`.
-fn set_ref(path: &str, name: &str, old: Option<&String>, new: Option<&String>, to: &Refs) -> Result<String, String> {
+fn set_ref(path: &str, name: &str, old: Option<&String>, new: Option<&String>, to: &Snapshot) -> Result<String, String> {
     match (old, new) {
         (Some(_), None) if is_branch(name) => {
             // Deleting it this way also drops its upstream from the config.
@@ -223,6 +483,10 @@ fn explain(error: &str) -> String {
     }
 }
 
+fn message(e: git2::Error) -> String {
+    e.message().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,18 +495,153 @@ mod tests {
     use tauri::async_runtime::block_on as run;
 
     /// Snapshots around `action`, returning (before, after).
-    fn around(t: &TempRepo, action: impl FnOnce()) -> (Refs, Refs) {
-        let before = snapshot(t.path()).unwrap();
-        action();
-        (before, snapshot(t.path()).unwrap())
+    fn around(t: &TempRepo, action: impl FnOnce()) -> (Snapshot, Snapshot) {
+        covering(t, Cover::default(), action)
     }
 
-    fn undo(t: &TempRepo, (before, after): &(Refs, Refs), mode: &str) -> Result<String, String> {
+    /// Snapshots `cover`'s files around `action`, as the UI does: the second snapshot
+    /// covers the files the first did.
+    fn covering(t: &TempRepo, cover: Cover, action: impl FnOnce()) -> (Snapshot, Snapshot) {
+        let before = snapshot(t.path(), &cover).unwrap();
+        action();
+        let files = before.files.iter().map(|f| f.path.clone()).collect();
+        (before, snapshot(t.path(), &Cover { files, ..Default::default() }).unwrap())
+    }
+
+    fn files(paths: &[&str]) -> Cover {
+        Cover { files: paths.iter().map(|p| p.to_string()).collect(), ..Default::default() }
+    }
+
+    fn undo(t: &TempRepo, (before, after): &(Snapshot, Snapshot), mode: &str) -> Result<String, String> {
         restore(t.path(), after, before, mode)
     }
 
-    fn redo(t: &TempRepo, (before, after): &(Refs, Refs), mode: &str) -> Result<String, String> {
+    fn redo(t: &TempRepo, (before, after): &(Snapshot, Snapshot), mode: &str) -> Result<String, String> {
         restore(t.path(), before, after, mode)
+    }
+
+    fn read(t: &TempRepo, file: &str) -> String {
+        read_to_string(t.dir.join(file)).unwrap()
+    }
+
+    fn stash_count(t: &TempRepo) -> usize {
+        git(t.path(), &["stash", "list"], None).unwrap().lines().count()
+    }
+
+    /// Discards the way the app does, except that files go nowhere instead of the Trash.
+    fn discard(t: &TempRepo, paths: &[&str]) {
+        let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        crate::working::discard(t.path(), &paths, &|f| fs::remove_file(f).map_err(|e| e.to_string())).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_discard_brings_back_staged_unstaged_and_new_files() {
+        let t = TempRepo::new("undo-discard");
+        t.commit(&[("a.txt", Some("1\n")), ("run.sh", Some("echo\n"))], "First");
+        t.write(&[("a.txt", Some("staged\n"))]);
+        git(t.path(), &["add", "a.txt"], None).unwrap();
+        t.write(&[("a.txt", Some("staged\nand not\n")), ("dir/new.txt", Some("new\n")), ("run.sh", None)]);
+        let was = status(&t);
+
+        let step = covering(&t, files(&["a.txt", "dir/new.txt", "run.sh"]), || discard(&t, &["a.txt", "dir/new.txt", "run.sh"]));
+        assert_eq!(status(&t), "");
+        assert!(!t.dir.join("dir").exists());
+
+        assert_eq!(undo(&t, &step, "keep").unwrap(), "Put back 3 files.");
+        assert_eq!(status(&t), was);
+        assert_eq!(read(&t, "a.txt"), "staged\nand not\n");
+        assert_eq!(read(&t, "dir/new.txt"), "new\n");
+
+        redo(&t, &step, "keep").unwrap();
+        assert_eq!(status(&t), "");
+    }
+
+    #[test]
+    fn undoing_a_discarded_chunk() {
+        let t = TempRepo::new("undo-hunk");
+        t.commit(&[("a.txt", Some("1\n2\n3\n"))], "First");
+        t.write(&[("a.txt", Some("1\ntwo\n3\n"))]);
+        let step = covering(&t, files(&["a.txt"]), || crate::working::discard_lines(t.path(), "a.txt", 0, None).unwrap());
+        assert_eq!(read(&t, "a.txt"), "1\n2\n3\n");
+
+        assert_eq!(undo(&t, &step, "keep").unwrap(), "Put back a.txt.");
+        assert_eq!(read(&t, "a.txt"), "1\ntwo\n3\n");
+        assert_eq!(status(&t), "M a.txt");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn undoing_a_discard_keeps_executables_and_links() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let t = TempRepo::new("undo-modes");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        t.write(&[("tool.sh", Some("echo\n"))]);
+        fs::set_permissions(t.dir.join("tool.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+        symlink("a.txt", t.dir.join("link")).unwrap();
+
+        let step = covering(&t, files(&["tool.sh", "link"]), || discard(&t, &["tool.sh", "link"]));
+        undo(&t, &step, "keep").unwrap();
+        assert_ne!(fs::metadata(t.dir.join("tool.sh")).unwrap().permissions().mode() & 0o111, 0);
+        assert_eq!(fs::read_link(t.dir.join("link")).unwrap(), Path::new("a.txt"));
+    }
+
+    #[test]
+    fn a_discard_edited_since_isnt_undone() {
+        let t = TempRepo::new("undo-discard-stale");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        t.write(&[("a.txt", Some("2\n"))]);
+        let step = covering(&t, files(&["a.txt"]), || discard(&t, &["a.txt"]));
+        t.write(&[("a.txt", Some("3\n"))]);
+
+        let error = undo(&t, &step, "keep").unwrap_err();
+        assert_eq!(error, "a.txt has changed since, so it can't be put back safely.");
+        assert_eq!(read(&t, "a.txt"), "3\n");
+    }
+
+    #[test]
+    fn undoing_a_stash_puts_the_changes_back() {
+        let t = TempRepo::new("undo-stash");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        t.write(&[("a.txt", Some("2\n")), ("new.txt", Some("new\n"))]);
+        let cover = Cover { changed: true, ..Default::default() };
+        let step = covering(&t, cover, || {
+            run(crate::stash::stash_save(t.path().into(), Some("Mine".into()), true, None)).unwrap();
+        });
+        assert_eq!((status(&t).as_str(), stash_count(&t)), ("", 1));
+
+        assert_eq!(undo(&t, &step, "keep").unwrap(), "Removed the stash. Put back 2 files.");
+        assert_eq!(stash_count(&t), 0);
+        assert_eq!(status(&t), "M a.txt\n?? new.txt");
+
+        redo(&t, &step, "keep").unwrap();
+        assert_eq!((status(&t).as_str(), stash_count(&t)), ("", 1));
+        assert!(git(t.path(), &["stash", "list"], None).unwrap().ends_with(": Mine"));
+    }
+
+    #[test]
+    fn undoing_a_pop_and_a_drop_brings_the_stash_back() {
+        let t = TempRepo::new("undo-pop");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        t.write(&[("a.txt", Some("older\n"))]);
+        git(t.path(), &["stash", "push", "-qm", "Older"], None).unwrap();
+        t.write(&[("a.txt", Some("2\n")), ("new.txt", Some("new\n"))]);
+        git(t.path(), &["stash", "push", "-qum", "Newer"], None).unwrap();
+        let list = git(t.path(), &["stash", "list"], None).unwrap();
+
+        let cover = Cover { stash: Some(0), ..Default::default() };
+        let pop = covering(&t, cover, || {
+            run(crate::stash::stash_apply(t.path().into(), 0, true)).unwrap();
+        });
+        assert_eq!(read(&t, "new.txt"), "new\n");
+        undo(&t, &pop, "keep").unwrap();
+        assert_eq!(git(t.path(), &["stash", "list"], None).unwrap(), list);
+        assert_eq!(status(&t), "");
+
+        let drop = around(&t, || {
+            run(crate::stash::stash_drop(t.path().into(), 1)).unwrap();
+        });
+        assert_eq!(undo(&t, &drop, "keep").unwrap(), "Restored the stash.");
+        assert_eq!(git(t.path(), &["stash", "list"], None).unwrap(), list);
     }
 
     /// `git status --porcelain`, trimmed.

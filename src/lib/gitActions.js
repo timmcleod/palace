@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
+import { undoHint } from "./confirm.js";
 import {
   addDivider,
   isArranged,
@@ -26,7 +27,7 @@ export function useGitActions({ overview, run, compare }) {
   // Git won't start a merge or rebase while another operation is waiting on the user.
   const midOperation = () => !!overview.value?.operation;
 
-  // Most of what's confirmed can't be undone; rebasing is the exception.
+  // Asks first. Most of what's asked about can be undone, except changes to a remote.
   const confirm = (message, title, confirmLabel, danger = true) => askConfirm({ title, message, confirmLabel, danger });
 
   function checkout(kind, name) {
@@ -178,7 +179,7 @@ export function useGitActions({ overview, run, compare }) {
   }
 
   async function stashDrop(index) {
-    const ok = await confirm(`Delete stash@{${index}}? Its changes will be lost.`, "Drop Stash", "Drop");
+    const ok = await confirm(`Delete stash@{${index}}?\n\n${undoHint()}`, "Drop Stash", "Drop");
     if (ok) await run(["Dropping stash…", "Dropped stash", "Couldn't drop the stash"], "stash_drop", { index });
   }
 

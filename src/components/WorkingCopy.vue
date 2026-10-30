@@ -51,12 +51,14 @@ async function load() {
 
 watch(() => [props.path, props.refreshKey], load, { immediate: true });
 
-// Runs a git operation, then has the whole window refresh.
-async function run(command, args) {
+// Runs a git operation, then has the whole window refresh. With `step`, it can be
+// undone (see undoable).
+async function run(command, args, step) {
   busy.value = true;
   error.value = "";
   try {
-    await invoke(command, { path: props.path, ...args });
+    const work = () => invoke(command, { path: props.path, ...args });
+    await (step ? props.undoable(step, work) : work());
   } catch (e) {
     error.value = String(e);
   } finally {
@@ -94,13 +96,15 @@ async function discard(list) {
     list.length === 1
       ? await confirmDiscard(
           `Discard all changes to “${list[0].path.split("/").at(-1)}”?`,
-          "Its staged and unstaged changes will be thrown away. The current version of the file will be moved to the Trash.",
+          "Its staged and unstaged changes will be thrown away.",
         )
       : await confirmDiscard(
           `Discard changes to ${list.length} files?`,
-          "All their staged and unstaged changes will be thrown away. The current versions of the files will be moved to the Trash.",
+          "All their staged and unstaged changes will be thrown away.",
         );
-  if (ok) run("discard_files", { files: list.map((f) => f.path) });
+  if (!ok) return;
+  const step = { label: "Discard", mode: "keep", cover: { files: list.flatMap(pathsOf) } };
+  run("discard_files", { files: list.map((f) => f.path) }, step);
 }
 
 // --- Selecting several files ------------------------------------------------------
@@ -224,7 +228,8 @@ async function stashFiles(list) {
     confirmLabel: "Stash",
   });
   if (!values) return;
-  run("stash_save", { message: values.message.trim() || null, includeUntracked: true, files: list.flatMap(pathsOf) });
+  const files = list.flatMap(pathsOf);
+  run("stash_save", { message: values.message.trim() || null, includeUntracked: true, files }, { label: "Stash", mode: "keep", cover: { files } });
 }
 
 // --- Amend -----------------------------------------------------------------------

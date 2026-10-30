@@ -575,10 +575,10 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
   try {
     await stopBackgroundFetch();
     const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
-    const label = !path && (undoLabel ?? UNDOABLE[command]);
+    const label = !path && (undoLabel ?? UNDOABLE[command]?.(args));
     const mode = command === "reset" && args.keepChanges ? "mixed" : "keep";
     const undone = undoStack.value.at(-1);
-    op.message = await (label ? undoable({ label, mode }, work) : work());
+    op.message = await (label ? undoable({ label, mode, cover: COVER[command]?.(args) }, work) : work());
     op.state = "done";
     op.title = done;
     if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
@@ -688,42 +688,56 @@ const fetchTitle = computed(() => {
 
 // --- Undo and redo -----------------------------------------------------------------
 
-// Operations that can be undone, and what Undo calls them. Committing is undoable
-// too, from the working copy. Network operations other than pull can't be: what they
-// changed is on the remote.
+// Operations that can be undone, and what Undo calls them, from their arguments.
+// Committing and discarding are undoable too, from the working copy. Network
+// operations other than pull can't be: what they changed is on the remote.
+const named = (label) => () => label;
 const UNDOABLE = {
-  checkout: "Checkout",
-  create_branch: "New Branch",
-  delete_branch: "Delete Branch",
-  rename_branch: "Rename Branch",
-  merge: "Merge",
-  rebase: "Rebase",
-  rebase_interactive: "Rebase",
-  cherry_pick: "Cherry-pick",
-  revert: "Revert",
-  reset: "Reset",
-  pull: "Pull",
-  create_tag: "New Tag",
-  delete_tag: "Delete Tag",
+  checkout: named("Checkout"),
+  create_branch: named("New Branch"),
+  delete_branch: named("Delete Branch"),
+  rename_branch: named("Rename Branch"),
+  merge: named("Merge"),
+  rebase: named("Rebase"),
+  rebase_interactive: named("Rebase"),
+  cherry_pick: named("Cherry-pick"),
+  revert: named("Revert"),
+  reset: named("Reset"),
+  pull: named("Pull"),
+  create_tag: named("New Tag"),
+  delete_tag: named("Delete Tag"),
+  stash_save: named("Stash"),
+  stash_apply: ({ pop }) => (pop ? "Pop Stash" : "Apply Stash"),
+  stash_drop: named("Drop Stash"),
+};
+// The files an operation can change in the working copy, which undo keeps copies of
+// (see take_snapshot).
+const COVER = {
+  stash_save: ({ files }) => (files ? { files } : { changed: true }),
+  stash_apply: ({ index }) => ({ stash: index }),
 };
 const MAX_UNDO = 50;
 
 // The open repository's steps, oldest first: { label, mode, before, after, message },
-// where before and after are ref_snapshot's snapshots and mode is restore_refs's.
+// where before and after are take_snapshot's snapshots and mode is restore_snapshot's.
 const undoStack = ref([]);
 const redoStack = ref([]);
+// Other repositories' steps, kept for when they're open again: path → [undo, redo].
+const otherStacks = new Map();
 
 /**
- * Runs `work`, and if it moved HEAD or any branch or tag, remembers how to undo it.
- * `step` is { label, mode } and, for a commit, its message.
+ * Runs `work`, and if it changed any branch, tag or stash, or the files `step.cover`
+ * names, remembers how to undo it. `step` is { label, mode, cover } and, for a
+ * commit, its message. cover is take_snapshot's: { files, changed, stash }.
  */
-async function undoable(step, work) {
+async function undoable({ cover, ...step }, work) {
   await stopBackgroundFetch();
   const path = overview.value.path;
-  const snapshot = () => invoke("ref_snapshot", { path }).catch(() => null);
-  const before = await snapshot();
+  const snapshot = (cover) => invoke("take_snapshot", { path, cover }).catch(() => null);
+  // Without a snapshot (the changes are too large to copy, say), it just isn't undoable.
+  const before = await snapshot(cover ?? null);
   const result = await work();
-  const after = before && (await snapshot());
+  const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
   if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
     undoStack.value = [...undoStack.value.slice(1 - MAX_UNDO), { ...step, before, after }];
     redoStack.value = [];
@@ -741,7 +755,7 @@ async function replay(stack, other, undoing) {
   const [verb, did] = undoing ? ["undo", "Undid"] : ["redo", "Redid"];
   const error = await runGit(
     [undoing ? "Undoing…" : "Redoing…", `${did} “${step.label}”`, `Couldn't ${verb} “${step.label}”`],
-    "restore_refs",
+    "restore_snapshot",
     undoing ? { from: step.after, to: step.before, mode: step.mode } : { from: step.before, to: step.after, mode: step.mode },
   );
   if (error) {
@@ -851,8 +865,9 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       nav.forward = [];
       here = null;
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
-      undoStack.value = [];
-      redoStack.value = [];
+      if (overview.value) otherStacks.set(overview.value.path, [undoStack.value, redoStack.value]);
+      [undoStack.value, redoStack.value] = otherStacks.get(data.path) ?? [[], []];
+      otherStacks.delete(data.path);
     }
     overview.value = data;
     error.value = "";
@@ -1377,7 +1392,7 @@ function startResize(event, pane, min, max) {
           <span class="file-title">{{ workingFile?.path }}</span>
         </div>
         <ConflictView v-if="workingFile?.conflicted" :path="overview.path" :file="workingFile" @changed="refresh" />
-        <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" @changed="refresh" />
+        <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" :undoable="undoable" @changed="refresh" />
         <div v-else class="empty-state">
           <p>Select a file to see its changes.</p>
         </div>

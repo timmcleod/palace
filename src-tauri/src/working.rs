@@ -12,9 +12,9 @@ use std::path::Path;
 
 #[derive(Serialize)]
 pub struct WorkingFile {
-    path: String,
+    pub(crate) path: String,
     /// The path before a staged rename.
-    old_path: Option<String>,
+    pub(crate) old_path: Option<String>,
     /// Change between HEAD and the index: "added", "modified", "deleted", "renamed"
     /// or "typechange".
     staged: Option<&'static str>,
@@ -302,7 +302,7 @@ fn apply_hunk(
     git(path, &args, Some(&patch)).map(drop)
 }
 
-fn discard_lines(path: &str, file: &str, hunk: usize, lines: Option<&[usize]>) -> Result<(), String> {
+pub(crate) fn discard_lines(path: &str, file: &str, hunk: usize, lines: Option<&[usize]>) -> Result<(), String> {
     let patch = hunk_patch(path, file, None, false, hunk, lines.map(|l| (l, true)))?;
     git(path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
 }
@@ -439,7 +439,7 @@ fn read_head_commit(path: &str) -> Result<Option<HeadCommit>, git2::Error> {
     }))
 }
 
-fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
     let repo = Repository::discover(path).map_err(message)?;
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
     let head = head_tree(&repo).map_err(message)?;
@@ -567,7 +567,7 @@ fn move_to_trash(file: &Path) -> Result<(), String> {
 }
 
 /// Removes directories left empty by discarding new files, as git clean would.
-fn remove_empty_parents(workdir: &Path, file: &Path) {
+pub(crate) fn remove_empty_parents(workdir: &Path, file: &Path) {
     let mut dir = file.parent();
     while let Some(d) = dir {
         if d == workdir || std::fs::remove_dir(d).is_err() {
