@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ChevronRight,
   CircleDot,
+  GitPullRequest,
   Cloud,
   Folder,
   FolderOpen,
@@ -31,6 +32,8 @@ const props = defineProps({
   // are open, and how many of those are new since they were last looked at. Null
   // hides the row.
   issues: { type: Object, default: null },
+  // { count } of open pull requests, for the Pull Requests row; null hides it.
+  pulls: { type: Object, default: null },
 });
 const emit = defineEmits([
   "update:selected",
@@ -59,7 +62,7 @@ const matches = (name) => !query.value || name.toLowerCase().includes(query.valu
 // While filtering, every folder opens so matches nested inside them stay visible.
 const isOpen = (key) => query.value !== "" || !collapsedFolders.has(key);
 
-// Issues only for repositories on GitHub.
+// Issues and pull requests only for repositories on GitHub.
 const workspaceRows = computed(() =>
   [
     {
@@ -84,6 +87,13 @@ const workspaceRows = computed(() =>
       count: props.issues.count || null,
       fresh: props.issues.fresh > 0,
       title: props.issues.fresh > 0 ? `${props.issues.fresh} new since you last looked` : null,
+    },
+    props.pulls && {
+      key: "workspace:pulls",
+      label: "Pull Requests",
+      icon: GitPullRequest,
+      depth: 0,
+      count: props.pulls.count || null,
     },
     { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
     { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },

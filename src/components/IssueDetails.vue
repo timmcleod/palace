@@ -17,6 +17,7 @@ import {
   GitMerge,
   GitPullRequest,
   GitPullRequestClosed,
+  GitPullRequestDraft,
   Pencil,
   Settings2,
 } from "lucide-vue-next";
@@ -271,6 +272,7 @@ const kind = computed(() => (isPull.value ? "pull request" : "issue"));
 function state(issue) {
   if (issue.pull_request) {
     if (issue.pull_request.merged_at) return { icon: GitMerge, class: "closed", label: "Merged" };
+    if (issue.state === "open" && issue.draft) return { icon: GitPullRequestDraft, class: "not-planned", label: "Draft" };
     if (issue.state === "open") return { icon: GitPullRequest, class: "open", label: "Open" };
     return { icon: GitPullRequestClosed, class: "not-planned", label: "Closed" };
   }

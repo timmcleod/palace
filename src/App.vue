@@ -144,13 +144,14 @@ const isFullView = computed(() => isSettings.value || isGitHub.value);
 const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
 const isIssues = computed(() => selected.value === "workspace:issues");
+const isPulls = computed(() => selected.value === "workspace:pulls");
 // Comparing two revisions: the history lists what `head` has that `base` doesn't,
 // and with no commit chosen, the detail pane shows all of `head`'s changes.
 const isCompare = computed(() => selected.value === "workspace:compare");
 const comparison = ref(null);
 // Views without a history of their own to search or filter.
 const awayFromHistory = () =>
-  isWorkingCopy.value || isFullView.value || isStashes.value || isIssues.value || isCompare.value;
+  isWorkingCopy.value || isFullView.value || isStashes.value || isIssues.value || isPulls.value || isCompare.value;
 
 function openComparison({ base, head }) {
   comparison.value = { base, head };
@@ -256,6 +257,21 @@ async function showIssue(number) {
   }
 }
 
+// The Pull Requests view, alongside: the same repository's pull requests, read the
+// way issues are.
+const selectedPull = shallowRef(null);
+const pullQuery = ref("");
+const openPulls = ref(null);
+const updatedPull = shallowRef(null);
+
+function onPullUpdated(pull) {
+  if (openPulls.value != null && selectedPull.value?.state !== pull.state) {
+    openPulls.value += pull.state === "open" ? 1 : -1;
+  }
+  selectedPull.value = pull;
+  updatedPull.value = pull;
+}
+
 function onIssueCreated(issue) {
   if (openIssues.value != null) openIssues.value++;
   selectedIssue.value = issue;
@@ -305,6 +321,10 @@ async function checkIssues() {
   if (!seen) markIssuesSeen(repo);
   const isNew = (i) => Date.parse(i.created_at) > Date.parse(seen);
   freshIssues.value = isIssues.value || !seen ? 0 : found.issues.filter(isNew).length;
+  const pulls = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1, pulls: true }).catch(
+    () => null,
+  );
+  if (pulls && issueRepo.value && repoKey(issueRepo.value) === repoKey(repo)) openPulls.value = pulls.total;
 }
 
 watch(
@@ -313,6 +333,8 @@ watch(
     openIssues.value = null;
     freshIssues.value = 0;
     selectedIssue.value = null;
+    openPulls.value = null;
+    selectedPull.value = null;
     checkIssues();
   },
   { immediate: true },
@@ -335,15 +357,15 @@ watch(
 // In the background, as often as fetching, while the Issues view isn't showing them.
 const issuesTimer = setInterval(() => {
   const due = Date.now() - issuesCheckedAt >= settings.fetchMinutes * 60_000;
-  if (due && settings.fetchInBackground && !isIssues.value && navigator.onLine) checkIssues();
+  if (due && settings.fetchInBackground && !isIssues.value && !isPulls.value && navigator.onLine) checkIssues();
 }, 30_000);
 onBeforeUnmount(() => clearInterval(issuesTimer));
 
-// A repository whose GitHub remotes go away leaves the Issues view.
+// A repository whose GitHub remotes go away leaves the Issues and Pull Requests views.
 watch(
   () => issueRemotes.value.length,
   (count) => {
-    if (!count && isIssues.value) selected.value = headHistoryKey(overview.value);
+    if (!count && (isIssues.value || isPulls.value)) selected.value = headHistoryKey(overview.value);
   },
 );
 
@@ -488,6 +510,7 @@ function describe(place) {
     "workspace:working-copy": "Working Copy",
     "workspace:stashes": "Stashes",
     "workspace:issues": "Issues",
+    "workspace:pulls": "Pull Requests",
     "workspace:github": "GitHub",
     "workspace:settings": "Settings",
     "workspace:history": "History",
@@ -795,6 +818,10 @@ const pullRequestDialog = shallowRef(null);
 // Opens the Create Pull Request dialog for a local branch. Without a GitHub account,
 // the branch is pushed if it needs to be, then GitHub's own page for it opens.
 async function createPullRequest(name) {
+  if (!name) {
+    tell("No Branch Checked Out", "Check out the branch you want to create a pull request for, then try again.");
+    return;
+  }
   const plan = pullRequestPlan(overview.value, pullTarget(), name);
   if (!plan) {
     tell("Can't Create a Pull Request", `“${name}” is pushed to a remote that isn't on GitHub.`);
@@ -933,6 +960,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       selectedStash.value = null;
       stashQuery.value = "";
       issueQuery.value = "";
+      pullQuery.value = "";
       historySearch.value = "";
       comparison.value = null;
       // Places belong to a repository.
@@ -1075,6 +1103,10 @@ const subtitle = computed(() => {
     const open = openIssues.value == null ? "" : ` (${openIssues.value.toLocaleString()} Open)`;
     return `Issues on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
   }
+  if (isPulls.value && issueRepo.value) {
+    const open = openPulls.value == null ? "" : ` (${openPulls.value.toLocaleString()} Open)`;
+    return `Pull requests on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
+  }
   const where = o.head.branch ?? `detached at ${o.head.short_id}`;
   if (o.commit_count == null) return `${where} (no commits yet)`;
   return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
@@ -1184,6 +1216,7 @@ function startResize(event, pane, min, max) {
       :overview="overview"
       :compared="comparedKeys"
       :issues="issueRemotes.length ? { count: openIssues, fresh: freshIssues } : null"
+      :pulls="issueRemotes.length ? { count: openPulls } : null"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
@@ -1235,12 +1268,12 @@ function startResize(event, pane, min, max) {
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
         <span v-else-if="isStashes">Stashes</span>
-        <template v-else-if="isIssues">
-          <span>Issues</span>
+        <template v-else-if="isIssues || isPulls">
+          <span>{{ isPulls ? "Pull Requests" : "Issues" }}</span>
           <button
             v-if="issueRepo && issueRepos.length > 1"
             class="remote-choice"
-            title="Show another repository's issues"
+            :title="isPulls ? 'Show another repository\'s pull requests' : 'Show another repository\'s issues'"
             @click="issueRepoMenu"
           >
             {{ issueRepo.owner }}/{{ issueRepo.repo }} <ChevronDown :size="13" />
@@ -1304,7 +1337,21 @@ function startResize(event, pane, min, max) {
         @changed="refresh"
       />
       <IssueList
+        v-else-if="isPulls && issueRepo"
+        key="pulls"
+        pulls
+        :repo="issueRepo"
+        :query="pullQuery"
+        :selected="selectedPull?.number"
+        :refresh-key="refreshKey"
+        :updated="updatedPull"
+        @select="selectedPull = $event"
+        @count="openPulls = $event"
+        @create="createPullRequest(overview.head.branch)"
+      />
+      <IssueList
         v-else-if="isIssues && issueRepo"
+        key="issues"
         :repo="issueRepo"
         :query="issueQuery"
         :selected="selectedIssue?.number"
@@ -1316,7 +1363,7 @@ function startResize(event, pane, min, max) {
         @created="onIssueCreated"
       />
       <!-- While Palace checks whether the repository is a fork. -->
-      <div v-else-if="isIssues" class="empty-state"><Spinner /></div>
+      <div v-else-if="isIssues || isPulls" class="empty-state"><Spinner /></div>
       <StashList
         v-else-if="isStashes"
         :stashes="overview.stashes"
@@ -1326,7 +1373,7 @@ function startResize(event, pane, min, max) {
         @menu="(index, event) => openMenu(event, actions.stashMenu(index))"
       />
       <!-- Hidden rather than removed, so the history keeps its scroll position. -->
-      <div v-show="!isWorkingCopy && !isStashes && !isIssues" class="pane-body">
+      <div v-show="!isWorkingCopy && !isStashes && !isIssues && !isPulls" class="pane-body">
         <HistoryList
           :path="overview.path"
           :rev="isCompare ? comparison?.head : historyRev"
@@ -1440,6 +1487,16 @@ function startResize(event, pane, min, max) {
           <Search :size="15" :stroke-width="1.5" />
           <input v-model="stashQuery" placeholder="Search for Stash Message" spellcheck="false" @keydown.esc="stashQuery = ''" />
         </label>
+        <label v-else-if="isPulls" class="toolbar-search stash-search">
+          <Search :size="15" :stroke-width="1.5" />
+          <input
+            v-model="pullQuery"
+            placeholder="Search Pull Requests"
+            title="Words to find, or GitHub search terms such as author:octocat"
+            spellcheck="false"
+            @keydown.esc="pullQuery = ''"
+          />
+        </label>
         <label v-else-if="isIssues" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
           <input
@@ -1491,6 +1548,27 @@ function startResize(event, pane, min, max) {
         />
         <div v-else class="empty-state">
           <p>Select an issue to read it.</p>
+        </div>
+      </template>
+
+      <template v-else-if="isPulls">
+        <div class="subheader">
+          <span class="dim">{{ selectedPull ? `#${selectedPull.number}` : "" }}</span>
+          <button v-if="selectedPull" class="link-button" @click="openUrl(selectedPull.html_url)">
+            Open on GitHub <ExternalLink :size="13" />
+          </button>
+        </div>
+        <IssueDetails
+          v-if="selectedPull && issueRepo"
+          :repo="issueRepo"
+          :path="overview.path"
+          :issue="selectedPull"
+          :refresh-key="refreshKey"
+          @updated="onPullUpdated"
+          @show-commit="showFoundCommit"
+        />
+        <div v-else class="empty-state">
+          <p>Select a pull request to read it.</p>
         </div>
       </template>
 

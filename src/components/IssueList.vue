@@ -1,7 +1,18 @@
 <script setup>
 import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, CircleCheck, CircleDot, CircleSlash, MessageSquare, Plus } from "lucide-vue-next";
+import {
+  ChevronDown,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  MessageSquare,
+  Plus,
+} from "lucide-vue-next";
 import { githubAccount, signInWithToken } from "../lib/github.js";
 import { issueFilters } from "../lib/issues.js";
 import { openMenu } from "../lib/overlays.js";
@@ -11,10 +22,12 @@ import NewIssueDialog from "./NewIssueDialog.vue";
 import Spinner from "./Spinner.vue";
 
 // A GitHub repository's issues, newest first, narrowed by state, label, assignee,
-// author and the toolbar's search. More load at the bottom, a page at a time.
+// author and the toolbar's search. More load at the bottom, a page at a time. With
+// `pulls`, its pull requests instead, narrowed by reviewer rather than assignee.
 const props = defineProps({
   // { owner, repo }
   repo: { type: Object, required: true },
+  pulls: { type: Boolean, default: false },
   // Words, or GitHub search terms such as "author:octocat", from the toolbar.
   query: { type: String, default: "" },
   selected: { type: Number, default: null },
@@ -25,14 +38,18 @@ const props = defineProps({
   // marked new.
   seenAt: { type: String, default: null },
 });
-// "created" is a new issue, already selected.
-const emit = defineEmits(["select", "count", "created"]);
+// "created" is a new issue, already selected; "create" asks for a new pull request.
+const emit = defineEmits(["select", "count", "created", "create"]);
 
+// "open" or "closed", and for pull requests, "merged".
 const state = ref("open");
 const label = ref(null);
-// A login, "@me" or "none".
+// A login, "@me" or "none". For pull requests, whose review was requested.
 const assignee = ref(null);
 const author = ref(null);
+
+const STATE_TERMS = { open: "is:open", closed: "is:closed", merged: "is:merged" };
+const noun = computed(() => (props.pulls ? "pull requests" : "issues"));
 
 const issues = shallowRef(null);
 const total = ref(0);
@@ -43,9 +60,14 @@ const error = ref("");
 // GitHub search terms for the filters and the search.
 const filters = computed(() =>
   [
-    `is:${state.value}`,
+    // A pull request that's closed without being merged is "closed".
+    props.pulls && state.value === "closed" ? "is:closed is:unmerged" : STATE_TERMS[state.value],
     label.value && `label:"${label.value}"`,
-    assignee.value === "none" ? "no:assignee" : assignee.value && `assignee:${assignee.value}`,
+    props.pulls
+      ? assignee.value && `review-requested:${assignee.value}`
+      : assignee.value === "none"
+        ? "no:assignee"
+        : assignee.value && `assignee:${assignee.value}`,
     author.value && `author:${author.value}`,
     props.query.trim(),
   ]
@@ -69,7 +91,8 @@ async function load({ more = false, quiet = false } = {}) {
   const next = more ? page.value + 1 : 1;
   loading.value = !quiet;
   try {
-    const result = await invoke("github_issues", { owner: props.repo.owner, repo: props.repo.repo, filters: filters.value, page: next });
+    const { owner, repo } = props.repo;
+    const result = await invoke("github_issues", { owner, repo, filters: filters.value, page: next, pulls: props.pulls });
     if (seq !== loadSeq) return;
     if (more) {
       issues.value = [...issues.value, ...result.issues];
@@ -146,6 +169,9 @@ function onCreated(issue) {
   emit("created", issue);
 }
 
+// Whether anything narrows the list beyond its state.
+const filtered = computed(() => !!(label.value || assignee.value || author.value || props.query.trim()));
+
 // GitHub's search goes no further than 1,000 results.
 const canLoadMore = computed(() => issues.value && issues.value.length < Math.min(total.value, 1000));
 
@@ -191,6 +217,12 @@ const personLabel = (value, none) => (value === "@me" ? "Me" : value === "none" 
 const isNew = (issue) => !!props.seenAt && Date.parse(issue.created_at) > Date.parse(props.seenAt);
 
 function stateIcon(issue) {
+  if (issue.pull_request) {
+    if (issue.pull_request.merged_at) return { icon: GitMerge, class: "closed", title: "Merged" };
+    if (issue.state !== "open") return { icon: GitPullRequestClosed, class: "not-planned", title: "Closed" };
+    if (issue.draft) return { icon: GitPullRequestDraft, class: "not-planned", title: "Draft" };
+    return { icon: GitPullRequest, class: "open", title: "Open" };
+  }
   if (issue.state === "open") return { icon: CircleDot, class: "open", title: "Open" };
   if (issue.state_reason === "not_planned" || issue.state_reason === "duplicate") {
     return { icon: CircleSlash, class: "not-planned", title: "Closed as not planned" };
@@ -220,12 +252,16 @@ async function signIn() {
     <div v-if="githubAccount" class="filter-bar">
       <div class="segmented">
         <button :class="{ active: state === 'open' }" @click="state = 'open'">Open</button>
+        <button v-if="pulls" :class="{ active: state === 'merged' }" @click="state = 'merged'">Merged</button>
         <button :class="{ active: state === 'closed' }" @click="state = 'closed'">Closed</button>
       </div>
       <button class="filter" :class="{ set: label }" @click="labelMenu">
         {{ label ?? "Label" }} <ChevronDown :size="13" />
       </button>
-      <button class="filter" :class="{ set: assignee }" @click="personMenu($event, 'assignee', { none: true })">
+      <button v-if="pulls" class="filter" :class="{ set: assignee }" @click="personMenu($event, 'assignee')">
+        {{ assignee ? `Review: ${personLabel(assignee)}` : "Reviewer" }} <ChevronDown :size="13" />
+      </button>
+      <button v-else class="filter" :class="{ set: assignee }" @click="personMenu($event, 'assignee', { none: true })">
         {{ assignee ? `Assigned: ${personLabel(assignee, "Nobody")}` : "Assignee" }} <ChevronDown :size="13" />
       </button>
       <button class="filter" :class="{ set: author }" @click="personMenu($event, 'author')">
@@ -234,18 +270,19 @@ async function signIn() {
       <span class="spacer" />
       <Spinner v-if="loading && issues" :size="14" class="dim" />
       <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
-      <button class="icon-button small" title="New Issue…" @click="creating = true"><Plus :size="16" /></button>
+      <button v-if="pulls" class="icon-button small" title="New Pull Request…" @click="emit('create')"><Plus :size="16" /></button>
+      <button v-else class="icon-button small" title="New Issue…" @click="creating = true"><Plus :size="16" /></button>
     </div>
 
     <div class="rows" tabindex="0" @keydown="onKeydown">
       <div v-if="!githubAccount" class="empty">
-        <CircleDot :size="28" :stroke-width="1.25" />
-        <p>Sign in to GitHub to see the issues for {{ repo.owner }}/{{ repo.repo }}.</p>
+        <component :is="pulls ? GitPullRequest : CircleDot" :size="28" :stroke-width="1.25" />
+        <p>Sign in to GitHub to see the {{ noun }} for {{ repo.owner }}/{{ repo.repo }}.</p>
         <button class="primary-button" @click="signIn">Sign In with Token…</button>
         <p v-if="signInError" class="error">{{ signInError }}</p>
       </div>
       <IssueError v-else-if="error && !issues" :error="error" class="message" />
-      <p v-else-if="!issues" class="message dim"><Spinner /> Loading issues…</p>
+      <p v-else-if="!issues" class="message dim"><Spinner /> Loading {{ noun }}…</p>
 
       <template v-else>
         <div
@@ -275,6 +312,7 @@ async function signIn() {
             <div class="meta">
               #{{ issue.number }}
               <template v-if="issue.state === 'open'">opened {{ formatAgo(issue.created_at) }}</template>
+              <template v-else-if="issue.pull_request?.merged_at">merged {{ formatAgo(issue.pull_request.merged_at) }}</template>
               <template v-else>closed {{ formatAgo(issue.closed_at ?? issue.created_at) }}</template>
               by {{ issue.user?.login ?? "ghost" }}
             </div>
@@ -297,8 +335,8 @@ async function signIn() {
         </div>
 
         <div v-if="!issues.length" class="empty">
-          <CircleDot :size="28" :stroke-width="1.25" />
-          <p>No {{ state }} issues{{ filters !== `is:${state}` ? " match" : "" }}.</p>
+          <component :is="pulls ? GitPullRequest : CircleDot" :size="28" :stroke-width="1.25" />
+          <p>No {{ state }} {{ noun }}{{ filtered ? " match" : "" }}.</p>
         </div>
         <IssueError v-if="error" :error="error" class="message" />
         <div v-if="canLoadMore" class="more">

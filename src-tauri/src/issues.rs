@@ -44,6 +44,9 @@ pub struct Issue {
     /// Set when the number is a pull request's, as "#123" in a commit message can be.
     #[serde(default)]
     pull_request: Option<PullRequestInfo>,
+    /// Whether a pull request is a draft.
+    #[serde(default)]
+    draft: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,21 +70,27 @@ struct SearchResults {
 /// GitHub's search allows 1,000 results, in pages of up to 100.
 const PAGE_SIZE: u32 = 50;
 
-/// One page of the repository's issues matching `filters`, which are GitHub search
-/// terms ("is:open label:bug crash"). Without words to match, the newest come first.
+/// One page of the repository's issues, or with `pulls`, its pull requests, matching
+/// `filters`, which are GitHub search terms ("is:open label:bug crash"). Without words
+/// to match, the newest come first.
 #[tauri::command]
-pub async fn github_issues(owner: String, repo: String, filters: String, page: u32) -> Result<IssuePage, String> {
+pub async fn github_issues(owner: String, repo: String, filters: String, page: u32, pulls: Option<bool>) -> Result<IssuePage, String> {
     let token = token()?;
+    let pulls = pulls.unwrap_or(false);
     blocking(move || {
-        let path = search_path(&owner, &repo, &filters, page);
-        let found: SearchResults = api_get(&token, &path).map_err(plain)?;
+        let path = search_path(&owner, &repo, if pulls { "pr" } else { "issue" }, &filters, page);
+        let found: SearchResults = api_get(&token, &path).map_err(|e| {
+            let e = plain(e);
+            if pulls { e.replace("the Issues permission", "the Pull requests permission").replace("'s issues", "'s pull requests") } else { e }
+        })?;
         Ok(IssuePage { total: found.total_count, issues: found.items })
     })
     .await
 }
 
-fn search_path(owner: &str, repo: &str, filters: &str, page: u32) -> String {
-    let query = format!("repo:{owner}/{repo} is:issue {}", filters.trim());
+/// `kind` is "issue" or "pr".
+fn search_path(owner: &str, repo: &str, kind: &str, filters: &str, page: u32) -> String {
+    let query = format!("repo:{owner}/{repo} is:{kind} {}", filters.trim());
     // Without any words, only qualifiers, best match means nothing; newest is
     // what GitHub's own list shows.
     let has_words = terms(filters).iter().any(|term| !term.contains(':'));
@@ -296,12 +305,13 @@ mod tests {
     #[test]
     fn searching_a_repository() {
         assert_eq!(
-            search_path("tim", "palace", "is:open label:\"good first issue\"", 2),
+            search_path("tim", "palace", "issue", "is:open label:\"good first issue\"", 2),
             "/search/issues?q=repo%3Atim%2Fpalace%20is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22\
              &per_page=50&page=2&sort=created&order=desc"
         );
         // Words to match are sorted by how well they match.
-        assert!(!search_path("tim", "palace", "is:open crash", 1).contains("sort="));
+        assert!(!search_path("tim", "palace", "pr", "is:open crash", 1).contains("sort="));
+        assert!(search_path("tim", "palace", "pr", "", 1).contains("is%3Apr"));
         assert_eq!(terms(r#"is:open  label:"good first issue" crash"#), ["is:open", r#"label:"good first issue""#, "crash"]);
     }
 
