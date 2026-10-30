@@ -186,6 +186,8 @@ fn agent() -> ureq::Agent {
 enum Method {
     Get,
     Post(serde_json::Value),
+    // With no body, as for starring.
+    Put,
     Delete,
 }
 
@@ -203,6 +205,7 @@ fn api<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &str) 
     let sent = match method {
         Method::Get => agent().get(&url).header("Accept", accept).header("Authorization", &auth).call(),
         Method::Delete => agent().delete(&url).header("Accept", accept).header("Authorization", &auth).call(),
+        Method::Put => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_empty(),
         Method::Post(body) => agent().post(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
     };
     let mut response = sent.map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
@@ -310,6 +313,42 @@ pub async fn github_add_key(title: String, key: String) -> Result<SshKey, String
 pub async fn github_delete_key(id: u64) -> Result<(), String> {
     let token = saved().ok_or(NOT_SIGNED_IN)?.token;
     blocking(move || api(&token, Method::Delete, &format!("/user/keys/{id}"))).await
+}
+
+// Palace's own repository, which Palace asks people to star once.
+const PALACE_REPO: &str = "timmcleod/palace";
+
+/// Whether the signed-in account has starred Palace's repository. None when GitHub
+/// won't say, as for fine-grained tokens without the starring permission.
+#[tauri::command]
+pub async fn github_starred_palace() -> Result<Option<bool>, String> {
+    let token = saved().ok_or(NOT_SIGNED_IN)?.token;
+    blocking(move || {
+        let response = agent()
+            .get(&format!("https://api.github.com/user/starred/{PALACE_REPO}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", format!("Bearer {token}"))
+            .call()
+            .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
+        Ok(starred_from(response.status().as_u16()))
+    })
+    .await
+}
+
+// GitHub answers 204 for starred and 404 for not; anything else means it won't say.
+fn starred_from(status: u16) -> Option<bool> {
+    match status {
+        204 => Some(true),
+        404 => Some(false),
+        _ => None,
+    }
+}
+
+/// Stars Palace's repository as the signed-in account.
+#[tauri::command]
+pub async fn github_star_palace() -> Result<(), String> {
+    let token = saved().ok_or(NOT_SIGNED_IN)?.token;
+    blocking(move || api(&token, Method::Put, &format!("/user/starred/{PALACE_REPO}"))).await
 }
 
 /// A public key in ~/.ssh, offered when adding a key to GitHub.
@@ -446,6 +485,13 @@ mod tests {
             token: "ghp_secret".into(),
             account: Account { login: "octocat".into(), name: None, avatar_url: String::new() },
         }
+    }
+
+    #[test]
+    fn reading_whether_starred() {
+        assert_eq!(starred_from(204), Some(true));
+        assert_eq!(starred_from(404), Some(false));
+        assert_eq!(starred_from(403), None);
     }
 
     #[test]

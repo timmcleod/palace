@@ -39,6 +39,7 @@ import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
 import SettingsView from "./components/SettingsView.vue";
+import StarNotice from "./components/StarNotice.vue";
 import Sidebar from "./components/Sidebar.vue";
 import TagDialog from "./components/TagDialog.vue";
 import ToolbarSearch from "./components/ToolbarSearch.vue";
@@ -71,6 +72,8 @@ import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
+import { starRequest } from "./lib/star.js";
+import { updateNoticeShown } from "./lib/updates.js";
 
 const overview = ref(null);
 const loading = ref(false);
@@ -1228,6 +1231,7 @@ function startResize(event, pane, min, max) {
   <CloneDialog v-if="cloneDialog" :dialog="cloneDialog" />
   <ConfirmDialog v-if="confirmDialog" :dialog="confirmDialog" />
   <UpdateNotice />
+  <StarNotice v-if="starRequest && !updateNoticeShown" />
   <ContextMenu v-if="contextMenu" :menu="contextMenu" />
 
   <RemoteStatus

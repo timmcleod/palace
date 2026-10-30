@@ -100,6 +100,8 @@ pub fn run() {
             github::github_owners,
             github::github_repos,
             github::github_scopes,
+            github::github_starred_palace,
+            github::github_star_palace,
             github::github_create_repo,
             github::github_keys,
             github::github_add_key,

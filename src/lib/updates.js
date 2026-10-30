@@ -1,4 +1,4 @@
-import { reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
@@ -19,6 +19,14 @@ export const updates = reactive({
   // Hidden with "Later" until Palace next starts or finds a newer version.
   dismissed: false,
 });
+
+// Whether the notice about an update is on screen.
+export const updateNoticeShown = computed(
+  () =>
+    (updates.state === "available" && !updates.dismissed) ||
+    updates.state === "installing" ||
+    (updates.state === "error" && updates.version && !updates.dismissed),
+);
 
 const RELEASES = "https://github.com/timmcleod/palace/releases";
 export const releaseNotesUrl = (version) => `${RELEASES}/tag/v${version}`;

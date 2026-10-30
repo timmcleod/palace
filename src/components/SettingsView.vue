@@ -7,6 +7,7 @@ import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as gi
 import { settings } from "../lib/settings.js";
 import { cloneFolder } from "../lib/clone.js";
 import { checkForUpdates, updates } from "../lib/updates.js";
+import { PALACE_URL } from "../lib/star.js";
 import { open } from "@tauri-apps/plugin-dialog";
 
 const props = defineProps({
@@ -192,7 +193,10 @@ const FETCH_MINUTES = [5, 15, 30];
 
       <section>
         <h2>Updates</h2>
-        <p class="note">You have Palace {{ updates.current || "…" }}.</p>
+        <p class="note">
+          You have Palace {{ updates.current || "…" }}. Like it?
+          <button class="link-button" @click="openUrl(PALACE_URL)">Star it on GitHub</button>
+        </p>
         <label class="choice">
           <input v-model="settings.checkForUpdates" type="checkbox" />
           Check for updates automatically

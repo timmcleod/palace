@@ -2,12 +2,9 @@
 import { computed } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowDownCircle, X } from "lucide-vue-next";
-import { installUpdate, releaseNotesUrl, updates } from "../lib/updates.js";
+import { installUpdate, releaseNotesUrl, updateNoticeShown as shown, updates } from "../lib/updates.js";
 
 // Says a new version is out, and installs it on request.
-const shown = computed(
-  () => (updates.state === "available" && !updates.dismissed) || updates.state === "installing" || (updates.state === "error" && updates.version && !updates.dismissed),
-);
 
 const percent = computed(() => (updates.total ? Math.min(100, Math.round((updates.downloaded / updates.total) * 100)) : null));
 </script>
