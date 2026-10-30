@@ -443,6 +443,13 @@ const REMOTE_TITLES = {
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
 
+// The Refresh button reloads the repository at once, then fetches from its remotes,
+// which reloads it again with what came in.
+function refreshAndFetch() {
+  refresh();
+  if (overview.value?.remotes.length && !remoteBusy.value) runRemote("fetch");
+}
+
 // --- Background fetch --------------------------------------------------------------
 
 // Every few minutes, the open repository's remotes are fetched quietly, so the counts
@@ -758,8 +765,8 @@ function removeRecent(path) {
   recents.value = recentRepositories();
 }
 
-// Until there's a file watcher, refreshing on focus catches changes made in a terminal
-// or editor, which covers the common case.
+// The file watcher catches most changes made elsewhere; refreshing on focus also
+// catches any it misses, such as on network drives where changes aren't reported.
 window.addEventListener("focus", refresh);
 onBeforeUnmount(() => window.removeEventListener("focus", refresh));
 
@@ -1117,8 +1124,12 @@ function startResize(event, pane, min, max) {
             <Redo2 :size="18" :stroke-width="1.5" />
           </button>
         </div>
-        <button class="icon-button" title="Refresh" @click="refresh">
-          <RefreshCw :size="17" :stroke-width="1.5" :class="{ spinning: loading }" />
+        <button class="icon-button" title="Refresh, and fetch from all remotes" @click="refreshAndFetch">
+          <RefreshCw
+            :size="17"
+            :stroke-width="1.5"
+            :class="{ spinning: loading || (remoteOp?.command === 'fetch' && remoteBusy) }"
+          />
         </button>
         <label v-if="isStashes" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
