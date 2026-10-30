@@ -5,6 +5,10 @@
 # publishes them as a GitHub release, then adds a macOS .dmg to it. Running the workflow by hand from the Actions
 # tab builds the packages without publishing anything, and attaches them to the run
 # instead. Once a release is published, the website shows its version.
+#
+# An annotated tag's message becomes the release's notes, above the install
+# instructions (`git tag -a v1.2.0 -F notes.md`). Without one, there are only the
+# instructions.
 
 name: Release
 
@@ -55,6 +59,25 @@ jobs:
         if: env.IS_RELEASE == 'true'
         run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
 
+      # actions/checkout leaves the tag without its message, so it's fetched again. The
+      # message `npm run release` gives a tag ("Palace v1.2.0") isn't a note.
+      - name: Read the release notes from the tag
+        id: notes
+        if: env.IS_RELEASE == 'true'
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          notes=""
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+            notes=$(git tag --list --format='%(contents)' "$GITHUB_REF_NAME" | sed '/^Palace v[0-9.]*$/d')
+          fi
+          {
+            echo "body<<END_OF_NOTES"
+            if [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+              printf "## What's new\n\n%s\n\n## Install\n\n" "$notes"
+            fi
+            echo "END_OF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
       # Releases also carry signed update files and a latest.json describing them,
       # which installed copies of Palace check for updates. The signing key lives in
       # the repository's secrets; Palace only installs updates signed with it.
@@ -71,7 +94,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Palace ${{ github.ref_name }}
           releaseBody: |
-            **Ubuntu / Debian:** download the `.deb`, then run
+            ${{ steps.notes.outputs.body }}**Ubuntu / Debian:** download the `.deb`, then run
             `sudo apt install ./Palace_*.deb` in the folder you saved it to.
 
             **Other distributions:** download the `.AppImage`, make it executable
