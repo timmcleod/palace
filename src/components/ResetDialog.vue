@@ -5,9 +5,10 @@ import { closeResetDialog } from "../lib/overlays.js";
 import RevisionInput from "./RevisionInput.vue";
 import { submitOnEnter } from "../lib/dialogKeys.js";
 
-// The Reset dialog: move HEAD, and the branch it's on, to another revision.
+// The Reset dialog: move HEAD, and the branch it's on, to another revision. Unless
+// `checkedOut` is false: then `branch` isn't checked out, and only it moves.
 const props = defineProps({
-  // { path, revision, branch, upstream, branches, tags, remoteBranches }
+  // { path, revision, branch, checkedOut, upstream, branches, tags, remoteBranches }
   dialog: { type: Object, required: true },
 });
 
@@ -34,7 +35,8 @@ watch(
         return;
       }
       try {
-        const result = await invoke("reset_preview", { path: props.dialog.path, revision: value });
+        const branch = props.dialog.checkedOut === false ? props.dialog.branch : null;
+        const result = await invoke("reset_preview", { path: props.dialog.path, revision: value, branch });
         if (seq !== previewSeq) return;
         preview.value = result;
         previewError.value = "";
@@ -77,10 +79,14 @@ function onKeydown(event) {
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>
-          <h2>Reset Working Copy to Revision</h2>
-          <p>
-            Resets your working copy to the selected revision. Currently uncommitted changes in your working copy will
-            be preserved.
+          <h2>Reset “{{ target }}” to Revision</h2>
+          <p v-if="dialog.checkedOut === false">
+            Moves <strong>{{ target }}</strong> to the selected revision. It isn't checked out, so your working copy
+            stays as it is, on <strong>{{ dialog.current ?? "HEAD" }}</strong>.
+          </p>
+          <p v-else>
+            Moves <strong>{{ target }}</strong>{{ dialog.branch ? ", the branch you have checked out," : "" }} and your
+            working copy to the selected revision. Currently uncommitted changes in your working copy will be preserved.
           </p>
         </div>
       </header>
@@ -107,8 +113,8 @@ function onKeydown(event) {
           </template>
         </div>
 
-        <span />
-        <div>
+        <span v-if="dialog.checkedOut !== false" />
+        <div v-if="dialog.checkedOut !== false">
           <label class="checkbox">
             <input v-model="keepChanges" type="checkbox" />
             Keep Changes
@@ -169,6 +175,11 @@ h2 {
   margin: 4px 0 6px;
   font-size: 16px;
   font-weight: 600;
+}
+
+header strong {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 header p {

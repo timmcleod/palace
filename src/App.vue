@@ -830,6 +830,7 @@ const UNDOABLE = {
   cherry_pick: named("Cherry-pick"),
   revert: named("Revert"),
   reset: named("Reset"),
+  reset_branch: named("Reset"),
   pull: named("Pull"),
   create_tag: named("New Tag"),
   delete_tag: named("Delete Tag"),
@@ -1019,6 +1020,10 @@ const actions = useGitActions({
   run: runGit,
   compare: openComparison,
   pullRequest: { available: () => issueRemotes.value.length > 0, create: createPullRequest },
+  viewedBranch: () => {
+    const r = historyRef.value;
+    return r?.kind === "branch" && r.name !== overview.value?.head.branch ? r.name : null;
+  },
 });
 
 // Context menus for sidebar rows, keyed the same way the sidebar keys them.

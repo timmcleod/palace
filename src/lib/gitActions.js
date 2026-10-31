@@ -24,8 +24,9 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // `run(titles, command, args, options)` performs a backend command with progress and
 // error reporting, resolving to the error message or null; `overview` is the
 // repository overview ref. `pullRequest` is { available(), create(branch) }, for
-// branches' Create Pull Request.
-export function useGitActions({ overview, run, compare, pullRequest }) {
+// branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
+// shown, when it isn't the current one.
+export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -325,16 +326,22 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     if (!error && values.push) await pushTag(values.name);
   }
 
-  // Moves HEAD, and the branch it's on, to another commit.
-  async function resetTo(revision) {
+  // Moves HEAD, and the branch it's on, to another commit. With `branch`, a branch
+  // that isn't checked out, moves only that branch.
+  async function resetTo(revision, branch = null) {
+    const other = branch && branch !== current();
+    const info = other ? overview.value.branches.find((b) => b.name === branch) : headBranchInfo();
     const values = await openResetDialog({
       path: overview.value.path,
       revision,
-      branch: current(),
-      upstream: headBranchInfo()?.upstream ?? null,
+      branch: other ? branch : current(),
+      checkedOut: !other,
+      current: current(),
+      upstream: info?.upstream ?? null,
       ...revisionChoices(),
     });
     if (!values) return;
+    if (other) return run(["Resetting…", "Reset", "Couldn't reset"], "reset_branch", { branch, revision: values.revision });
     return run(["Resetting…", "Reset", "Couldn't reset"], "reset", {
       revision: values.revision,
       keepChanges: values.keepChanges,
@@ -622,6 +629,9 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
   }
 
   function commitMenu(commit, rewritable) {
+    // Reset acts on the branch whose history this is, and says which.
+    const viewed = viewedBranch();
+    const resetting = viewed ?? current() ?? "HEAD";
     return [
       { label: "Check Out This Commit", action: () => checkout("commit", commit.id) },
       { label: "New Branch from Here…", action: () => newBranch(commit.id, commit.short_id) },
@@ -634,7 +644,11 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       },
       { label: `Revert “${commit.short_id}”`, action: () => revert(commit), disabled: midOperation() },
       { label: "Edit Message…", action: () => editMessage(commit), disabled: !rewritable || midOperation() },
-      { label: `Reset HEAD to “${commit.short_id}”…`, action: () => resetTo(commit.id), disabled: midOperation() },
+      {
+        label: `Reset “${resetting}” to “${commit.short_id}”…`,
+        action: () => resetTo(commit.id, viewed),
+        disabled: !viewed && midOperation(),
+      },
       { separator: true },
       { label: "Copy Commit Hash", action: () => navigator.clipboard.writeText(commit.id) },
     ];

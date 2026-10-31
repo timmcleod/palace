@@ -15,20 +15,28 @@ pub struct ResetPreview {
     pushed: usize,
 }
 
-/// What resetting to `revision` would do, for the Reset dialog.
+/// What resetting `branch` (HEAD's when omitted) to `revision` would do, for the
+/// Reset dialog.
 #[tauri::command]
-pub async fn reset_preview(path: String, revision: String) -> Result<ResetPreview, String> {
+pub async fn reset_preview(path: String, revision: String, branch: Option<String>) -> Result<ResetPreview, String> {
     let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
     let target = resolve(&repo, &revision)?;
     let commit = repo.find_commit(target).map_err(|e| e.message().to_string())?;
 
+    let tip = match &branch {
+        Some(name) => Some(local_branch(&repo, name)?.get().target().ok_or("That branch doesn't point at a commit.")?),
+        None => repo.head().ok().and_then(|h| h.target()),
+    };
     let mut rolled_back = Vec::new();
-    if let Some(head) = repo.head().ok().and_then(|h| h.target()) {
+    if let Some(head) = tip {
         let mut walk = repo.revwalk().map_err(|e| e.message().to_string())?;
         walk.push(head).and_then(|_| walk.hide(target)).map_err(|e| e.message().to_string())?;
         rolled_back = walk.flatten().collect();
     }
-    let upstream = upstream_tip(&repo);
+    let upstream = match &branch {
+        Some(name) => local_branch(&repo, name)?.upstream().ok().and_then(|u| u.get().target()),
+        None => upstream_tip(&repo),
+    };
     let pushed = rolled_back
         .iter()
         .filter(|oid| upstream.is_some_and(|u| u == **oid || repo.graph_descendant_of(u, **oid).unwrap_or(false)))
@@ -55,6 +63,23 @@ pub async fn reset(path: String, revision: String, keep_changes: bool) -> Result
 
     let head = repo.head().ok().filter(|h| h.is_branch()).and_then(|h| h.shorthand().ok().map(str::to_string));
     Ok(format!("Reset {} to {}.", head.unwrap_or_else(|| "HEAD".into()), &target[..7]))
+}
+
+/// Moves `branch`, which isn't checked out, to `revision`. Only the branch moves:
+/// the working copy belongs to the branch that is checked out.
+#[tauri::command]
+pub async fn reset_branch(path: String, branch: String, revision: String) -> Result<String, String> {
+    let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
+    if local_branch(&repo, &branch)?.is_head() {
+        return Err(format!("{branch} is checked out; reset it with its working copy instead."));
+    }
+    let target = resolve(&repo, &revision)?.to_string();
+    git(&path, &["branch", "--force", &branch, &target], None)?;
+    Ok(format!("Reset {branch} to {}.", &target[..7]))
+}
+
+fn local_branch<'r>(repo: &'r Repository, name: &str) -> Result<git2::Branch<'r>, String> {
+    repo.find_branch(name, BranchType::Local).map_err(|_| format!("There's no branch called {name}."))
 }
 
 fn resolve(repo: &Repository, revision: &str) -> Result<Oid, String> {
@@ -100,7 +125,7 @@ mod tests {
         t.commit(&[("b.txt", Some("2\n"))], "Second");
         t.write(&[("a.txt", Some("edited\n"))]);
 
-        let preview = run(reset_preview(t.path().into(), first.to_string())).unwrap();
+        let preview = run(reset_preview(t.path().into(), first.to_string(), None)).unwrap();
         assert_eq!((preview.rolled_back, preview.pushed), (1, 0));
 
         let message = run(reset(t.path().into(), first.to_string(), true)).unwrap();
@@ -141,8 +166,33 @@ mod tests {
         git(local.path(), &["push", "-u", "origin", "HEAD"], None).unwrap();
         local.commit(&[("c.txt", Some("3\n"))], "Not pushed");
 
-        let preview = run(reset_preview(local.path().into(), first.to_string())).unwrap();
+        let preview = run(reset_preview(local.path().into(), first.to_string(), None)).unwrap();
         assert_eq!((preview.rolled_back, preview.pushed), (2, 1));
-        assert!(run(reset_preview(local.path().into(), "nope".into())).is_err());
+        assert!(run(reset_preview(local.path().into(), "nope".into(), None)).is_err());
+    }
+
+    #[test]
+    fn resetting_a_branch_that_isnt_checked_out_leaves_the_working_copy() {
+        let t = TempRepo::new("reset-other");
+        let first = t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
+        t.commit(&[("f.txt", Some("f\n"))], "Feature");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        let head = t.commit(&[("m.txt", Some("m\n"))], "Main");
+        t.write(&[("a.txt", Some("edited\n"))]);
+
+        let preview = run(reset_preview(t.path().into(), first.to_string(), Some("feature".into()))).unwrap();
+        assert_eq!(preview.rolled_back, 1);
+        let message = run(reset_branch(t.path().into(), "feature".into(), first.to_string())).unwrap();
+        assert_eq!(message, format!("Reset feature to {}.", &first.to_string()[..7]));
+        let feature = t.repo.find_branch("feature", BranchType::Local).unwrap().get().target().unwrap();
+        assert_eq!(feature, first);
+        // HEAD's branch and the working copy are as they were.
+        assert_eq!((t.branch(), t.head()), (main.clone(), head));
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "edited\n");
+
+        let refused = run(reset_branch(t.path().into(), main, first.to_string())).unwrap_err();
+        assert!(refused.contains("is checked out"), "{refused}");
     }
 }

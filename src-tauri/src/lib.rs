@@ -87,6 +87,7 @@ pub fn run() {
             branch::revert,
             reset::reset,
             reset::reset_preview,
+            reset::reset_branch,
             stash::stash_save,
             stash::stash_apply,
             stash::stash_drop,

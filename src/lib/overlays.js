@@ -76,7 +76,8 @@ export const resetDialog = shallowRef(null);
 
 /**
  * Shows the Reset dialog and resolves to { revision, keepChanges }, or null if
- * canceled. options: { path, revision, branch, upstream, branches, tags, remoteBranches }
+ * canceled. options: { path, revision, branch, checkedOut, current, upstream, branches, tags,
+ * remoteBranches }: with checkedOut false, `branch` isn't checked out and only it moves.
  */
 export function openResetDialog(options) {
   return new Promise((resolve) => {
