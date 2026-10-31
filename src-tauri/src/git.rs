@@ -1,4 +1,4 @@
-use git2::{BranchType, ErrorCode, Repository, Sort};
+use git2::{BranchType, ErrorClass, ErrorCode, Repository, Sort};
 use serde::Serialize;
 use std::path::Path;
 
@@ -65,9 +65,24 @@ pub struct Submodule {
     path: String,
 }
 
+/// Starts the refusal for a folder that isn't in a repository, so Palace can offer to
+/// create one there.
+const NOT_A_REPOSITORY: &str = "NOT_A_REPOSITORY: ";
+
 #[tauri::command]
 pub async fn repo_overview(path: String) -> Result<RepoOverview, String> {
-    read_overview(Path::new(&path)).map_err(|e| e.message().to_string())
+    let path = Path::new(&path);
+    read_overview(path).map_err(|e| {
+        let outside = e.class() == ErrorClass::Repository && e.code() == ErrorCode::NotFound && path.is_dir();
+        format!("{}{}", if outside { NOT_A_REPOSITORY } else { "" }, e.message())
+    })
+}
+
+/// Creates a repository in a folder. With git, so the user's settings for new ones
+/// apply, such as what the first branch is called.
+#[tauri::command]
+pub async fn init_repo(path: String) -> Result<(), String> {
+    crate::cli::git_in(Path::new(&path), &["init"]).map(drop)
 }
 
 fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
@@ -293,6 +308,25 @@ fn read_submodules(repo: &Repository) -> Vec<Submodule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offering_to_create_a_repository() {
+        let dir = std::env::temp_dir().join(format!("palace-test-not-a-repository-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().into_owned();
+
+        let refused = tauri::async_runtime::block_on(repo_overview(path.clone())).err().unwrap();
+        assert!(refused.starts_with(NOT_A_REPOSITORY), "{refused}");
+        // A folder that's gone isn't one to create a repository in.
+        let gone = tauri::async_runtime::block_on(repo_overview(format!("{path}/gone"))).err().unwrap();
+        assert!(!gone.starts_with(NOT_A_REPOSITORY), "{gone}");
+
+        tauri::async_runtime::block_on(init_repo(path.clone())).unwrap();
+        let overview = tauri::async_runtime::block_on(repo_overview(path)).unwrap();
+        assert_eq!(overview.commit_count, None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn ordering_versions_naturally() {

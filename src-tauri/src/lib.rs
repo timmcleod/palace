@@ -49,6 +49,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             git::repo_overview,
+            git::init_repo,
             history::load_history,
             history::history_page,
             history::history_position,

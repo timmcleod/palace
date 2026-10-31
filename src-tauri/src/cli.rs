@@ -3,7 +3,7 @@
 
 use git2::Repository;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
@@ -33,6 +33,17 @@ pub(crate) fn git_input(path: &str, args: &[&str], stdin: Option<&[u8]>) -> Resu
     }
 
     let output = child.wait_with_output().map_err(|e| format!("git failed: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() { Ok(stdout) } else { Err(join_output(&stderr, &stdout)) }
+}
+
+/// Runs git in a folder that needn't be in a repository yet.
+pub(crate) fn git_in(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let output = command(&dir.to_path_buf(), args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Couldn't run git: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() { Ok(stdout) } else { Err(join_output(&stderr, &stdout)) }

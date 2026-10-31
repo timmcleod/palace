@@ -1122,6 +1122,10 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
     if (seq !== loadSeq) return;
     // A failed background refresh keeps showing the last good state.
     if (quiet) return;
+    if (String(e).startsWith(NOT_A_REPOSITORY)) {
+      offerToCreateRepository(path, { keepOnError });
+      return;
+    }
     if (keepOnError && overview.value) {
       clearTimeout(dismissTimer);
       remoteOp.value = reactive({
@@ -1139,6 +1143,27 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
   } finally {
     if (seq === loadSeq) loading.value = false;
   }
+}
+
+// Starts what repo_overview says about a folder that isn't in a repository.
+const NOT_A_REPOSITORY = "NOT_A_REPOSITORY: ";
+
+// A folder chosen to open that isn't a repository can become one, then open.
+async function offerToCreateRepository(path, options) {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  const ok = await askConfirm({
+    title: "Not a Git Repository",
+    message: `“${name}” isn't a Git repository yet. Create one in it?\n\n${path}`,
+    confirmLabel: "Create Repository",
+  });
+  if (!ok) return;
+  try {
+    await invoke("init_repo", { path });
+  } catch (e) {
+    tell("Couldn't Create the Repository", String(e));
+    return;
+  }
+  await loadRepository(path, options);
 }
 
 // Clones a repository (asking where to), then opens it.
