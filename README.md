@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="https://timmcleod.github.io/palace/assets/castle.webp" width="480" height="252" alt="">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/readme/castle-dark.webp">
+    <img src=".github/readme/castle-light.webp" width="560" height="320" alt="">
+  </picture>
 </p>
 
 <h1 align="center">Palace</h1>
