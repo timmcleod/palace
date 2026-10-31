@@ -13,6 +13,9 @@ const DEFAULTS = {
   tabSize: 4,
   // "unified" (one column) or "split" (old and new side by side).
   diffLayout: "unified",
+  // Wrap long lines in the unified layout rather than scroll sideways; side by side
+  // always wraps.
+  wrapLines: false,
   // Color code by language in diffs and file contents.
   syntaxHighlighting: true,
   githubAvatars: true,

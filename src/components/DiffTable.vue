@@ -73,6 +73,12 @@ const pieces = computed(() =>
 // the left and right, or null for a gap. Removed lines are lined up with the added
 // lines that follow them.
 const split = computed(() => settings.diffLayout === "split");
+
+// Wrapping, the line number columns are as wide as the longest number needs.
+const numberWidth = computed(() => {
+  const last = Math.max(0, ...(props.diff.hunks ?? []).flatMap((h) => h.lines.map((l) => Math.max(l.old ?? 0, l.new ?? 0))));
+  return `${Math.max(3, String(last).length)}ch`;
+});
 const splitHunks = computed(() => (split.value ? props.diff.hunks?.map((hunk) => splitRows(hunk.lines)) : null) ?? []);
 
 function splitRows(lines) {
@@ -243,7 +249,13 @@ function runAction(action, h) {
     </div>
 
     <div v-else class="scroller">
-      <table class="mono">
+      <table class="mono" :class="{ wrapped: settings.wrapLines }" :style="{ '--number-width': numberWidth }">
+        <colgroup v-if="settings.wrapLines">
+          <col class="number-col" />
+          <col class="number-col" />
+          <col class="sign-col" />
+          <col />
+        </colgroup>
         <tbody v-for="(hunk, h) in diff.hunks" :key="h">
           <tr class="hunk-header">
             <td class="gutter" />
@@ -251,7 +263,7 @@ function runAction(action, h) {
             <td class="sign" />
             <td class="text">
               <div class="hunk-bar">
-                <span>{{ hunk.header }}</span>
+                <span class="hunk-title">{{ hunk.header }}</span>
                 <span v-if="hunkActions.length" class="hunk-actions">
                   <button
                     v-for="action in hunkActions"
@@ -505,6 +517,27 @@ td {
   overflow-wrap: anywhere;
 }
 
+/* Unified, long lines wrap too when Settings says so. */
+.wrapped {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.number-col {
+  width: calc(var(--number-width) + 16px);
+}
+
+.wrapped .gutter {
+  min-width: 0;
+}
+
+.wrapped .text {
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wrapped .hunk-title,
 .split .hunk-title {
   overflow: hidden;
   text-overflow: ellipsis;
