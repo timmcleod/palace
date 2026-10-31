@@ -41,6 +41,12 @@ pub fn run() {
         .manage(store::Store::default())
         .manage(watch::RepoWatcher::default())
         .manage(avatars::AvatarCache::default())
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            no_pinch_zoom(app);
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             git::repo_overview,
             history::load_history,
@@ -162,4 +168,24 @@ pub fn run() {
 /// Runs Palace as git's credential helper instead of as the app; see `github`.
 pub fn git_credential(action: Option<&str>) -> i32 {
     github::credential_helper(action)
+}
+
+/// Pinching on a touchpad would zoom the whole window in WebKitGTK, which handles it
+/// in the web view's own event handler. Stopping the event first leaves it unzoomed,
+/// as Ctrl and +/- already do.
+#[cfg(target_os = "linux")]
+fn no_pinch_zoom(app: &tauri::App) {
+    use gtk::prelude::WidgetExt;
+    use tauri::Manager;
+    for window in app.webview_windows().values() {
+        let _ = window.with_webview(|webview| {
+            webview.inner().connect_event(|_, event| {
+                if event.event_type() == gtk::gdk::EventType::TouchpadPinch {
+                    gtk::glib::Propagation::Stop
+                } else {
+                    gtk::glib::Propagation::Proceed
+                }
+            });
+        });
+    }
 }

@@ -2839,6 +2839,7 @@ version = "0.11.2"
 dependencies = [
  "base64 0.23.1",
  "git2",
+ "gtk",
  "keyring",
  "libc",
  "notify",
