@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -29,32 +29,36 @@ const SECTIONS = [
 const scroller = ref(null);
 const current = ref(SECTIONS[0].id);
 
+// A section chosen in the list stays marked, even one near the end that the page can't
+// scroll up to the top, until the page is scrolled some other way.
+let chosen = null;
+
 function show(id) {
+  chosen = id;
+  current.value = id;
   scroller.value?.querySelector(`#settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// The list marks the topmost section on screen.
-let observer = null;
-onMounted(() => {
-  const visible = new Set();
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        const id = entry.target.id.replace("settings-", "");
-        if (entry.isIntersecting) visible.add(id);
-        else visible.delete(id);
-      }
-      const first = SECTIONS.find((s) => visible.has(s.id));
-      if (first) current.value = first.id;
-    },
-    { root: scroller.value, rootMargin: "-80px 0px -60% 0px" },
-  );
-  for (const s of SECTIONS) {
-    const el = scroller.value.querySelector(`#settings-${s.id}`);
-    if (el) observer.observe(el);
+// The list marks the last section to reach the top of the page, or at the bottom of the
+// page, the last section.
+function onScroll() {
+  const page = scroller.value;
+  if (chosen || !page) return;
+  if (page.scrollTop + page.clientHeight >= page.scrollHeight - 2) {
+    current.value = SECTIONS.at(-1).id;
+    return;
   }
-});
-onBeforeUnmount(() => observer?.disconnect());
+  const top = page.getBoundingClientRect().top + 80;
+  let id = SECTIONS[0].id;
+  for (const s of SECTIONS) {
+    if (page.querySelector(`#settings-${s.id}`)?.getBoundingClientRect().top <= top) id = s.id;
+  }
+  current.value = id;
+}
+
+function release() {
+  chosen = null;
+}
 
 // --- Commit identity -------------------------------------------------------------
 
@@ -201,7 +205,15 @@ const SAMPLE = {
 </script>
 
 <template>
-  <div ref="scroller" class="settings">
+  <div
+    ref="scroller"
+    class="settings"
+    @scroll.passive="onScroll"
+    @wheel.passive="release"
+    @touchstart.passive="release"
+    @pointerdown="release"
+    @keydown="release"
+  >
     <div class="layout">
       <nav class="section-list">
         <button
