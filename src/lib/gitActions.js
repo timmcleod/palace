@@ -233,7 +233,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     const branch = headBranchInfo();
     const target = branch?.upstream ?? "its remote";
     const ok = await confirm(
-      `Force push “${current()}” to ${target}?\n\nThis replaces the remote branch with your version, discarding the commits there that you've rewritten. If someone else has pushed commits you haven't fetched, Palace stops instead of overwriting them.`,
+      `Force push “${current()}” to ${target}?\n\nThis replaces the remote branch with your version, discarding the commits there that you've rewritten. If someone else has pushed commits you haven't pulled, Palace stops instead of overwriting them.`,
       "Force Push",
       "Force Push",
     );

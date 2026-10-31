@@ -195,6 +195,8 @@ pub(crate) enum Method {
     // With no body, as for starring.
     Put(Option<serde_json::Value>),
     Delete,
+    // With a body, as for removing assignees.
+    DeleteWith(serde_json::Value),
 }
 
 /// GETs `path` from the GitHub API with the token, explaining failures in words.
@@ -243,6 +245,9 @@ fn api_as<T: serde::de::DeserializeOwned>(token: &str, method: Method, path: &st
     let sent = match method {
         Method::Get => agent().get(&url).header("Accept", accept).header("Authorization", &auth).call(),
         Method::Delete => agent().delete(&url).header("Accept", accept).header("Authorization", &auth).call(),
+        Method::DeleteWith(body) => {
+            agent().delete(&url).header("Accept", accept).header("Authorization", &auth).force_send_body().send_json(&body)
+        }
         Method::Put(None) => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_empty(),
         Method::Put(Some(body)) => agent().put(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),
         Method::Post(body) => agent().post(&url).header("Accept", accept).header("Authorization", &auth).send_json(&body),

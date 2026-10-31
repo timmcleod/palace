@@ -59,6 +59,8 @@ import {
   readJson,
   recentRepositories,
   rememberRepository,
+  setStoreAside,
+  storeProblem,
   writeJson,
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
@@ -1171,6 +1173,35 @@ async function checkGit() {
 }
 
 onMounted(checkGit);
+
+// Saved settings that couldn't be read are left alone until a restart, rather than
+// replaced by whatever's changed meanwhile.
+onMounted(() => {
+  if (!storeProblem) return;
+  const op = reactive({
+    title: "Couldn't read your saved settings",
+    state: "failed",
+    message:
+      `${storeProblem}\n\nUntil Palace restarts, changes to settings, recent repositories and the like aren't ` +
+      "saved, so what's there isn't overwritten. If restarting doesn't help, Start Fresh renames the file, " +
+      "keeping it, and saves the settings in use now in its place.",
+    actions: [
+      { label: "Restart Palace", run: () => invoke("restart_after_update") },
+      {
+        label: "Start Fresh",
+        run: async () => {
+          try {
+            await setStoreAside();
+            remoteOp.value = null;
+          } catch (e) {
+            op.message = String(e);
+          }
+        },
+      },
+    ],
+  });
+  remoteOp.value = op;
+});
 
 const subtitle = computed(() => {
   const o = overview.value;

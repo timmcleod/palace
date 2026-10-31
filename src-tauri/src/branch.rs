@@ -115,6 +115,11 @@ pub async fn delete_branch(path: String, name: String, force: bool) -> Result<St
 #[tauri::command]
 pub async fn merge(path: String, branch: String, options: Option<MergeOptions>) -> Result<String, String> {
     let options = options.unwrap_or_default();
+    // Committing a squash commits everything staged, so changes already staged are set
+    // aside first and put back after, still staged.
+    if options.squash && options.commit.unwrap_or(true) && has_staged(&path)? {
+        return squash_around_staged(&path, &branch);
+    }
     let mut args = vec!["merge"];
     if options.autostash {
         args.push("--autostash");
@@ -148,6 +153,38 @@ pub async fn merge(path: String, branch: String, options: Option<MergeOptions>) 
     // Git has written a message listing the squashed commits; commit with it.
     git(&path, &["commit", "--no-edit"], None)?;
     Ok(format!("Squashed {branch} into one commit."))
+}
+
+fn has_staged(path: &str) -> Result<bool, String> {
+    Ok(git(path, &["diff", "--cached", "--quiet"], None).is_err() && git(path, &["rev-parse", "--verify", "-q", "HEAD"], None).is_ok())
+}
+
+fn squash_around_staged(path: &str, branch: &str) -> Result<String, String> {
+    git(path, &["stash", "push", "-q", "-m", &format!("Staged before squashing {branch}")], None)?;
+    let kept = "Your changes from before are in the stash list; apply it once you're done.";
+    let output = match git(path, &["merge", "--squash", branch], None) {
+        Ok(output) => output,
+        Err(e) => {
+            let error = squash_conflict_or(path, branch, e);
+            if error.starts_with("CONFLICT: ") {
+                return Err(format!("{error} {kept}"));
+            }
+            // Nothing changed: put them straight back.
+            return Err(match git(path, &["stash", "pop", "-q", "--index"], None) {
+                Ok(_) => error,
+                Err(_) => format!("{error}\n\n{kept}"),
+            });
+        }
+    };
+    if output.contains("Already up to date") || git(path, &["diff", "--cached", "--quiet"], None).is_ok() {
+        git(path, &["stash", "pop", "-q", "--index"], None)?;
+        return Ok(format!("Already up to date with {branch}."));
+    }
+    git(path, &["commit", "--no-edit"], None).map_err(|e| format!("{e}\n\n{kept}"))?;
+    match git(path, &["stash", "pop", "-q", "--index"], None) {
+        Ok(_) => Ok(format!("Squashed {branch} into one commit. Your staged changes are still staged.")),
+        Err(_) => Ok(format!("Squashed {branch} into one commit. Your changes from before didn't go back cleanly, so they're in the stash list.")),
+    }
 }
 
 /// Choices from the Merge dialog. Without them, a plain `git merge`.
@@ -553,6 +590,20 @@ mod tests {
         let staged = git(t.path(), &["diff", "--cached", "--name-only"], None).unwrap();
         assert_eq!(staged, "f.txt\ng.txt");
         assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn squashing_leaves_already_staged_changes_out_of_the_commit() {
+        let (t, _) = feature_ahead("merge-squash-mine");
+        t.write(&[("mine.txt", Some("new\n")), ("a.txt", Some("edited\n"))]);
+        git(t.path(), &["add", "mine.txt"], None).unwrap();
+        let message = run(merge(t.path().into(), "feature".into(), options(r#"{"squash":true,"autostash":true}"#))).unwrap();
+        assert_eq!(message, "Squashed feature into one commit. Your staged changes are still staged.");
+        let committed = git(t.path(), &["show", "--name-only", "--format="], None).unwrap();
+        assert_eq!(committed, "f.txt\ng.txt");
+        assert_eq!(git(t.path(), &["diff", "--cached", "--name-only"], None).unwrap(), "mine.txt");
+        assert_eq!(git(t.path(), &["diff", "--name-only"], None).unwrap(), "a.txt");
+        assert_eq!(git(t.path(), &["stash", "list"], None).unwrap(), "");
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod reset;
 #[cfg(any(target_os = "macos", test))]
 mod shell_path;
 mod stash;
+mod store;
 mod tag;
 mod tree;
 mod undo;
@@ -37,6 +38,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(history::HistoryState::default())
         .manage(cli::Running::default())
+        .manage(store::Store::default())
         .manage(watch::RepoWatcher::default())
         .manage(avatars::AvatarCache::default())
         .invoke_handler(tauri::generate_handler![
@@ -112,6 +114,11 @@ pub fn run() {
             issues::github_fork_parent,
             issues::github_create_issue,
             issues::github_update_issue,
+            issues::github_toggle_issue,
+            store::load_store,
+            store::save_store,
+            store::set_store_aside,
+            issues::github_edit_issue_body,
             issues::github_add_comment,
             issues::github_edit_comment,
             issues::github_delete_comment,

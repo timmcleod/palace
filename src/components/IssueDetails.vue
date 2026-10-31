@@ -84,7 +84,7 @@ async function load() {
 }
 
 watch(
-  () => props.issue.number,
+  draftKey,
   () => {
     thread.value = null;
     error.value = "";
@@ -153,14 +153,22 @@ async function change(work) {
   }
 }
 
-// Saves changes to the issue and shows it as GitHub returns it.
-async function update(changes) {
+// Whether the issue shown is still `key` (a draftKey()), once a change comes back:
+// one finishing after switching to another issue mustn't land on that one.
+const stillShowing = (key) => draftKey() === key;
+
+// Saves a change to the issue with `command` and shows it as GitHub returns it.
+async function save(command, args) {
+  const key = draftKey();
   return change(async () => {
-    const issue = await invoke("github_update_issue", { ...where(), number: props.issue.number, changes });
+    const issue = await invoke(command, { ...where(), number: props.issue.number, ...args });
+    if (!stillShowing(key)) return;
     thread.value = { ...thread.value, issue };
     emit("updated", issue);
   });
 }
+
+const update = (changes) => save("github_update_issue", { changes });
 
 async function editTitle() {
   const values = await openForm({
@@ -176,28 +184,33 @@ const below = (event) => {
   return { clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} };
 };
 
-// Each pick adds or removes one label or person.
+// Each pick adds or removes just that label or person, leaving whatever others
+// changed on GitHub meanwhile.
+const toggle = (field, name, add) => () => save("github_toggle_issue", { field, name, add });
+
 function labelMenu(event) {
   const current = shown.value.labels.map((l) => l.name);
-  const toggle = (name) => () =>
-    update({ labels: current.includes(name) ? current.filter((n) => n !== name) : [...current, name] });
   openMenu(
     below(event),
     choices.value.labels.length
-      ? choices.value.labels.map((l) => ({ label: l.name, detail: l.description, checked: current.includes(l.name), action: toggle(l.name) }))
+      ? choices.value.labels.map((l) => {
+          const checked = current.includes(l.name);
+          return { label: l.name, detail: l.description, checked, action: toggle("labels", l.name, !checked) };
+        })
       : [{ label: "This repository has no labels", disabled: true, action() {} }],
   );
 }
 
 function assigneeMenu(event) {
   const current = shown.value.assignees.map((p) => p.login);
-  const toggle = (login) => () =>
-    update({ assignees: current.includes(login) ? current.filter((l) => l !== login) : [...current, login] });
   const people = choices.value.assignees.map((p) => p.login);
   openMenu(
     below(event),
     people.length
-      ? people.map((login) => ({ label: login === me.value ? `${login} (me)` : login, checked: current.includes(login), action: toggle(login) }))
+      ? people.map((login) => {
+          const checked = current.includes(login);
+          return { label: login === me.value ? `${login} (me)` : login, checked, action: toggle("assignees", login, !checked) };
+        })
       : [{ label: "Nobody can be assigned", disabled: true, action() {} }],
   );
 }
@@ -207,11 +220,15 @@ function assigneeMenu(event) {
 async function comment() {
   const body = draft.value;
   if (!body.trim()) return true;
+  const key = draftKey();
   return change(async () => {
     const added = await invoke("github_add_comment", { ...where(), number: props.issue.number, body });
+    // Posted: its draft goes, whichever issue is showing now.
+    if (drafts.get(key) === body) drafts.delete(key);
+    if (!stillShowing(key)) return;
     const issue = { ...thread.value.issue, comments: thread.value.issue.comments + 1 };
     thread.value = { issue, comments: [...thread.value.comments, added] };
-    setDraft("");
+    if (draft.value === body) setDraft("");
     emit("updated", issue);
   });
 }
@@ -231,20 +248,23 @@ function closeMenu(event) {
 
 // --- Editing the description and comments --------------------------------------------
 
+// `was` is the text editing started from: saving checks it's still that on GitHub.
 function startEditing(post) {
-  editing.value = { id: post.id, text: post.body ?? "" };
+  editing.value = { id: post.id, text: post.body ?? "", was: post.body ?? "" };
 }
 
 async function saveEdit() {
-  const { id, text } = editing.value;
+  const { id, text, was } = editing.value;
+  const key = draftKey();
   const ok =
     id === "issue"
-      ? await update({ body: text })
+      ? await save("github_edit_issue_body", { body: text, was })
       : await change(async () => {
-          const edited = await invoke("github_edit_comment", { ...where(), id, body: text });
+          const edited = await invoke("github_edit_comment", { ...where(), id, body: text, was });
+          if (!stillShowing(key)) return;
           thread.value = { ...thread.value, comments: thread.value.comments.map((c) => (c.id === id ? edited : c)) };
         });
-  if (ok) editing.value = null;
+  if (ok && stillShowing(key) && editing.value?.id === id) editing.value = null;
 }
 
 async function deleteComment(post) {
@@ -255,8 +275,10 @@ async function deleteComment(post) {
     danger: true,
   });
   if (!ok) return;
+  const key = draftKey();
   change(async () => {
     await invoke("github_delete_comment", { ...where(), id: post.id });
+    if (!stillShowing(key)) return;
     const issue = { ...thread.value.issue, comments: thread.value.issue.comments - 1 };
     thread.value = { issue, comments: thread.value.comments.filter((c) => c.id !== post.id) };
     emit("updated", issue);

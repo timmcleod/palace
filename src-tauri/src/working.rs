@@ -840,6 +840,24 @@ mod tests {
     }
 
     #[test]
+    fn file_names_are_never_patterns() {
+        let t = TempRepo::new("discard-literal");
+        t.commit(&[("[id].tsx", Some("1\n")), ("i.tsx", Some("1\n")), ("d.tsx", Some("1\n"))], "First");
+        t.write(&[("[id].tsx", Some("2\n")), ("i.tsx", Some("2\n")), ("d.tsx", Some("2\n")), ("*.txt", Some("new\n")), ("a.txt", Some("new\n"))]);
+
+        stage(t.path(), &["*.txt".into()]).unwrap();
+        let backup = t.dir.with_extension("backup");
+        discard(t.path(), &["[id].tsx".into(), "*.txt".into()], &backup_into(&backup)).unwrap();
+        let _ = std::fs::remove_dir_all(&backup);
+
+        assert_eq!(read(&t, "[id].tsx").as_deref(), Some("1\n"));
+        assert_eq!(read(&t, "i.tsx").as_deref(), Some("2\n"));
+        assert_eq!(read(&t, "d.tsx").as_deref(), Some("2\n"));
+        assert_eq!(read(&t, "a.txt").as_deref(), Some("new\n"));
+        assert!(!t.dir.join("*.txt").exists());
+    }
+
+    #[test]
     fn discarding_a_staged_rename_brings_back_the_old_name() {
         let t = TempRepo::new("discard-rename");
         t.commit(&[("old.txt", Some("content\n"))], "First");

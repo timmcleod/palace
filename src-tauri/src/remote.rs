@@ -106,8 +106,8 @@ impl Default for PullOptions {
 }
 
 /// Pushes the current branch. With `force`, overwrites the remote branch, but only if
-/// it's still where this repository last saw it (`--force-with-lease`), so commits
-/// someone else pushed in the meantime are never thrown away unseen.
+/// everything on it has been in the local branch at some point, and it hasn't moved
+/// since, so commits someone else pushed are never thrown away unseen.
 #[tauri::command]
 pub async fn push(app: AppHandle, path: String, force: Option<bool>) -> Result<String, String> {
     let force = force.unwrap_or(false);
@@ -160,10 +160,19 @@ pub async fn delete_remote_branch(app: AppHandle, path: String, name: String) ->
 
 fn delete_on_remote(path: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
     let (remote, branch) = split_remote_branch(path, name)?;
-    match git_with_progress(path, &["push", "--progress", &remote, "--delete", &branch], running, report) {
+    let id = crate::cli::git(path, &["rev-parse", "--verify", &format!("refs/remotes/{name}")], None)?;
+    // Only while it's still where it was last fetched, so commits pushed since aren't
+    // deleted unseen; and as a branch, so a tag with the same name is never touched.
+    let unmoved = format!("--force-with-lease=refs/heads/{branch}:{id}");
+    let refspec = format!(":refs/heads/{branch}");
+    match git_with_progress(path, &["push", "--progress", &unmoved, &remote, &refspec], running, &mut *report) {
         Ok(_) => Ok(format!("Deleted {branch} from {remote}.")),
-        // Someone deleted it already: only the local copy of it is left to remove.
-        Err(e) if e.contains("remote ref does not exist") => {
+        Err(e) if e.contains("stale info") || e.contains("remote ref does not exist") => {
+            let heads = format!("refs/heads/{branch}");
+            if !git_with_progress(path, &["ls-remote", "--heads", &remote, &heads], running, &mut *report)?.trim().is_empty() {
+                return Err(format!("{branch} has changed on {remote} since it was last fetched. Fetch to see what's new on it first."));
+            }
+            // Someone deleted it already: only the local copy of it is left to remove.
             crate::cli::git(path, &["branch", "--delete", "--remotes", name], None)?;
             Ok(format!("{branch} was already gone from {remote}, so it's been removed from the list."))
         }
@@ -298,9 +307,10 @@ fn pull_current(path: &str, options: &PullOptions, running: &Running, report: Re
 
 fn push_current(path: &str, force: bool, running: &Running, report: Report) -> Result<String, String> {
     let plan = push_plan(path)?;
+    let lease = if force { Some(force_lease(path, &plan)?) } else { None };
     let mut args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
-    if force {
-        args.insert(2, "--force-with-lease");
+    if let Some(lease) = &lease {
+        args.insert(2, lease);
     }
     let output = git_with_progress(path, &args, running, report)?;
     Ok(if output.contains("Everything up-to-date") {
@@ -312,6 +322,42 @@ fn push_current(path: &str, force: bool, running: &Running, report: Report) -> R
     } else {
         format!("Pushed {} to {}.", plan.branch, plan.upstream)
     })
+}
+
+/// The `--force-with-lease` for force pushing the current branch: the remote branch must
+/// still be where it was last fetched. A bare lease isn't enough, since background
+/// fetches move that along without anyone looking, so the commit must also have been
+/// in the local branch at some point (what `--force-if-includes` checks, in git 2.30+).
+fn force_lease(path: &str, plan: &Plan) -> Result<String, String> {
+    let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
+    let merge = upstream_of(&repo, &plan.branch).map_or_else(|| plan.branch.clone(), |(_, merge)| merge);
+    let local = format!("refs/heads/{}", plan.branch);
+    let tracking = repo
+        .branch_upstream_name(&local)
+        .ok()
+        .and_then(|name| name.as_str().map(str::to_string).ok())
+        .and_then(|name| repo.refname_to_id(&name).ok());
+    let Some(tip) = tracking else {
+        // Never fetched: only push if the remote doesn't have the branch either.
+        return Ok(format!("--force-with-lease=refs/heads/{merge}:"));
+    };
+    if !has_included(&repo, &local, tip) {
+        return Err(format!(
+            "{} has commits that have never been in your {}, so someone else may have pushed to it. \
+             Pull them in first, then force push if you still need to.",
+            plan.upstream, plan.branch
+        ));
+    }
+    Ok(format!("--force-with-lease=refs/heads/{merge}:{tip}"))
+}
+
+/// Whether `tip` is in the history of the branch `local`, now or at any point its
+/// reflog remembers.
+fn has_included(repo: &Repository, local: &str, tip: git2::Oid) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let now = repo.refname_to_id(local).ok();
+    let past = repo.reflog(local).map(|log| log.iter().map(|e| e.id_new()).collect::<Vec<_>>()).unwrap_or_default();
+    now.into_iter().chain(past).filter(|id| seen.insert(*id)).any(|id| id == tip || repo.graph_descendant_of(id, tip).unwrap_or(false))
 }
 
 fn publish(path: &str, branch: &str, remote: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
@@ -460,6 +506,54 @@ mod tests {
         assert!(t.repo.find_reference("refs/remotes/origin/old-name").is_err());
         let local = t.repo.find_branch("new-name", git2::BranchType::Local).unwrap();
         assert_eq!(local.upstream().unwrap().name().unwrap(), Some("origin/new-name"));
+    }
+
+    #[test]
+    fn force_pushing_never_overwrites_commits_only_fetched() {
+        let (server, me) = setup("force-fetched");
+        let main = me.branch();
+        let other = TempRepo::clone_of("force-fetched-other", &server);
+        let theirs = other.commit(&[("b.txt", Some("1\n"))], "Theirs");
+        push_current(other.path(), false, &Running::default(), &mut |_| {}).unwrap();
+
+        // A background fetch brings their commit in without it reaching my branch.
+        crate::cli::git(me.path(), &["fetch", "-q", "origin"], None).unwrap();
+        crate::cli::git(me.path(), &["commit", "-q", "--amend", "-m", "Mine"], None).unwrap();
+        let error = push_current(me.path(), true, &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(error.contains("never been in your"), "{error}");
+        assert_eq!(server.repo.refname_to_id(&format!("refs/heads/{main}")).unwrap(), theirs);
+
+        // Once pulled in, rewriting it and force pushing is fine.
+        crate::cli::git(me.path(), &["pull", "-q", "--rebase", "origin", &main], None).unwrap();
+        crate::cli::git(me.path(), &["commit", "-q", "--amend", "-m", "Both"], None).unwrap();
+        push_current(me.path(), true, &Running::default(), &mut |_| {}).unwrap();
+        assert_eq!(server.repo.refname_to_id(&format!("refs/heads/{main}")).unwrap(), me.head());
+    }
+
+    #[test]
+    fn deleting_a_remote_branch_leaves_tags_and_new_commits() {
+        let (server, t) = setup("delete-leased");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/heads/topic", "HEAD:refs/tags/topic"], None).unwrap();
+        crate::cli::git(t.path(), &["fetch", "-q", "origin"], None).unwrap();
+
+        // Moved on the remote since it was fetched: kept.
+        let newer = t.commit(&[("b.txt", Some("1\n"))], "Newer");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/heads/topic"], None).unwrap();
+        crate::cli::git(t.path(), &["update-ref", "refs/remotes/origin/topic", "HEAD~"], None).unwrap();
+        let error = delete_on_remote(t.path(), "origin/topic", &Running::default(), &mut |_| {}).unwrap_err();
+        assert!(error.contains("has changed"), "{error}");
+        assert_eq!(server.repo.refname_to_id("refs/heads/topic").unwrap(), newer);
+
+        crate::cli::git(t.path(), &["fetch", "-q", "origin"], None).unwrap();
+        delete_on_remote(t.path(), "origin/topic", &Running::default(), &mut |_| {}).unwrap();
+        assert!(server.repo.find_reference("refs/heads/topic").is_err());
+        assert!(server.repo.find_reference("refs/tags/topic").is_ok());
+
+        // Already gone, with a tag of the same name left: the tag stays.
+        crate::cli::git(t.path(), &["update-ref", "refs/remotes/origin/topic", "HEAD"], None).unwrap();
+        let message = delete_on_remote(t.path(), "origin/topic", &Running::default(), &mut |_| {}).unwrap();
+        assert!(message.contains("already gone"), "{message}");
+        assert!(server.repo.find_reference("refs/tags/topic").is_ok());
     }
 
     #[test]

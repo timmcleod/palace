@@ -229,7 +229,10 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
     // The stash list and files the operation changed have to be as it left them, and
     // everything to put back still saved, before anything changes.
     let stashes_now = stash_list(&mut repo).map_err(message)?;
-    let moves_stashes = from.stashes != to.stashes;
+    // A stash is only removed when its changes go back into the files, as undoing a
+    // stash does. One a pull or merge left behind holds changes found nowhere else.
+    let leaves_stash = to.files.is_empty() && from.stashes.iter().any(|s| !to.stashes.contains(s));
+    let moves_stashes = from.stashes != to.stashes && !leaves_stash;
     if moves_stashes && stashes_now != from.stashes {
         return Err("The stash list has changed since, so it can't be put back safely.".into());
     }
@@ -262,6 +265,9 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
             std::cmp::Ordering::Less => "Removed the stash.".to_string(),
             std::cmp::Ordering::Equal => "Restored the stash list.".to_string(),
         });
+    }
+    if leaves_stash {
+        done.push("Kept the stash it left, which holds your changes.".to_string());
     }
     if !files.is_empty() {
         put_files(&repo, path, &files)?;
@@ -714,6 +720,30 @@ mod tests {
         assert_eq!(t.head(), first);
         assert!(!t.dir.join("b.txt").exists());
         assert_eq!(read_to_string(t.dir.join("a.txt")).unwrap(), "edited\n");
+    }
+
+    #[test]
+    fn undoing_a_merge_keeps_the_stash_it_left_behind() {
+        let t = TempRepo::new("undo-autostash");
+        let first = t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
+        t.commit(&[("a.txt", Some("feature\n"))], "Feature");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.write(&[("a.txt", Some("mine\n"))]);
+
+        // The changes set aside conflict when put back, so git keeps them as a stash.
+        let step = around(&t, || {
+            git(t.path(), &["merge", "-q", "--autostash", "feature"], None).unwrap();
+        });
+        assert_eq!(stash_count(&t), 1);
+        git(t.path(), &["checkout", "-q", "HEAD", "--", "a.txt"], None).unwrap();
+        git(t.path(), &["reset", "-q"], None).unwrap();
+
+        let message = undo(&t, &step, "keep").unwrap();
+        assert!(message.contains("Kept the stash"), "{message}");
+        assert_eq!(t.head(), first);
+        assert_eq!(stash_count(&t), 1);
     }
 
     #[test]

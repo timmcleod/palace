@@ -234,14 +234,72 @@ pub async fn github_create_issue(owner: String, repo: String, title: String, bod
     blocking(move || api_html(&token, Method::Post(fields), &format!("/repos/{owner}/{repo}/issues")).map_err(plain)).await
 }
 
-/// Changes an issue: any of title, body, state ("open" or "closed"), state_reason
-/// ("completed", "not_planned" or "reopened"), labels and assignees (whole lists of
-/// names and logins).
+/// Changes an issue: any of title, state ("open" or "closed") and state_reason
+/// ("completed", "not_planned" or "reopened"). Labels, assignees and the description
+/// have their own commands, which don't overwrite what others changed meanwhile.
 #[tauri::command]
 pub async fn github_update_issue(owner: String, repo: String, number: u64, changes: serde_json::Value) -> Result<Issue, String> {
     let token = token()?;
     let path = format!("/repos/{owner}/{repo}/issues/{number}");
     blocking(move || api_html(&token, Method::Patch(changes), &path).map_err(plain)).await
+}
+
+/// Adds or removes one label (`field` "labels") or assignee ("assignees"), leaving
+/// any others as they are now on GitHub, whoever changed them.
+#[tauri::command]
+pub async fn github_toggle_issue(
+    owner: String,
+    repo: String,
+    number: u64,
+    field: String,
+    name: String,
+    add: bool,
+) -> Result<Issue, String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/{number}");
+    blocking(move || {
+        let names = serde_json::json!({ field.as_str(): [name] });
+        let changed = match (field.as_str(), add) {
+            ("labels", true) => api::<serde_json::Value>(&token, Method::Post(names), &format!("{path}/labels")),
+            ("labels", false) => api(&token, Method::Delete, &format!("{path}/labels/{}", encode(&name))),
+            ("assignees", true) => api(&token, Method::Post(names), &format!("{path}/assignees")),
+            ("assignees", false) => api(&token, Method::DeleteWith(names), &format!("{path}/assignees")),
+            _ => return Err(format!("Unknown field “{field}”.")),
+        };
+        let issue: Issue = api_get_html(&token, &path).map_err(plain)?;
+        // Someone else may have made the same change first.
+        let has = match field.as_str() {
+            "labels" => issue.labels.iter().any(|l| l.name == name),
+            _ => issue.assignees.iter().any(|p| p.login.eq_ignore_ascii_case(&name)),
+        };
+        if has != add {
+            changed.map_err(plain)?;
+        }
+        Ok(issue)
+    })
+    .await
+}
+
+/// Saves an issue's description, as long as it's still `was`, the text the editing
+/// started from, so a change someone else saved meanwhile isn't overwritten.
+#[tauri::command]
+pub async fn github_edit_issue_body(owner: String, repo: String, number: u64, body: String, was: String) -> Result<Issue, String> {
+    let token = token()?;
+    let path = format!("/repos/{owner}/{repo}/issues/{number}");
+    blocking(move || {
+        let now: Issue = api_get_html(&token, &path).map_err(plain)?;
+        unchanged(now.body.as_deref(), &was)?;
+        api_html(&token, Method::Patch(serde_json::json!({ "body": body })), &path).map_err(plain)
+    })
+    .await
+}
+
+const EDITED_MEANWHILE: &str =
+    "Someone changed this on GitHub while you were editing it. Copy what you wrote, then refresh to see their version.";
+
+fn unchanged(now: Option<&str>, was: &str) -> Result<(), String> {
+    let normal = |text: &str| text.replace("\r\n", "\n").trim_end().to_string();
+    if normal(now.unwrap_or("")) == normal(was) { Ok(()) } else { Err(EDITED_MEANWHILE.into()) }
 }
 
 #[tauri::command]
@@ -251,11 +309,17 @@ pub async fn github_add_comment(owner: String, repo: String, number: u64, body: 
     blocking(move || api_html(&token, Method::Post(serde_json::json!({ "body": body })), &path).map_err(plain)).await
 }
 
+/// Saves a comment, as long as it's still `was`, as for the description.
 #[tauri::command]
-pub async fn github_edit_comment(owner: String, repo: String, id: u64, body: String) -> Result<Comment, String> {
+pub async fn github_edit_comment(owner: String, repo: String, id: u64, body: String, was: String) -> Result<Comment, String> {
     let token = token()?;
     let path = format!("/repos/{owner}/{repo}/issues/comments/{id}");
-    blocking(move || api_html(&token, Method::Patch(serde_json::json!({ "body": body })), &path).map_err(plain)).await
+    blocking(move || {
+        let now: Comment = api_get_html(&token, &path).map_err(plain)?;
+        unchanged(now.body.as_deref(), &was)?;
+        api_html(&token, Method::Patch(serde_json::json!({ "body": body })), &path).map_err(plain)
+    })
+    .await
 }
 
 #[tauri::command]

@@ -220,6 +220,12 @@ pub(crate) fn command(workdir: &PathBuf, args: &[&str]) -> Command {
         // Fail instead of prompting for a password nobody can see. Credential helpers
         // and SSH agents still work.
         .env("GIT_TERMINAL_PROMPT", "0");
+    // File names are only ever names, never patterns: discarding "[id].tsx" mustn't
+    // also discard "i.tsx". Except for stash, whose --include-untracked leaves
+    // untracked files behind with this set; it marks each name literal instead.
+    if args.first() != Some(&"stash") {
+        command.env("GIT_LITERAL_PATHSPECS", "1");
+    }
 
     // Start git in a new session with no controlling terminal. Otherwise, when Palace
     // is launched from a terminal, ssh would ask for a passphrase there and hang.

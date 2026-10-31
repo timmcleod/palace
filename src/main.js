@@ -1,9 +1,6 @@
 import { createApp } from "vue";
-import App from "./App.vue";
 import "./styles.css";
-// Applies the theme before the first paint.
-import "./lib/settings.js";
-import "./lib/titleBar.js";
+import { loadStore } from "./lib/storage.js";
 
 // Right-clicking where Palace has no menu of its own would show the web view's (Back,
 // Reload, Inspect Element). Keep it only where it's useful: in text fields, for Cut,
@@ -17,4 +14,11 @@ document.addEventListener("contextmenu", (event) => {
   if (!editable && !overSelection) event.preventDefault();
 });
 
-createApp(App).mount("#app");
+// The saved settings are read first: the rest of Palace reads them as it loads.
+loadStore().then(async () => {
+  // Applies the theme before the first paint.
+  await import("./lib/settings.js");
+  await import("./lib/titleBar.js");
+  const { default: App } = await import("./App.vue");
+  createApp(App).mount("#app");
+});

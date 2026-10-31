@@ -21,9 +21,10 @@ pub async fn stash_save(
     if let Some(message) = &message {
         args.extend(["--message", message.as_str()]);
     }
-    if let Some(files) = &files {
+    let literal: Vec<String> = files.iter().flatten().map(|f| format!(":(literal){f}")).collect();
+    if files.is_some() {
         args.push("--");
-        args.extend(files.iter().map(String::as_str));
+        args.extend(literal.iter().map(String::as_str));
     }
     let output = git(&path, &args, None)?;
     if output.contains("No local changes to save") {
@@ -118,9 +119,11 @@ mod tests {
             ("stashed.txt", Some("edited\n")),
             ("new-one.txt", Some("untracked\n")),
             ("new-two.txt", Some("untracked\n")),
+            ("new-*.txt", Some("untracked\n")),
         ]);
 
-        let files = vec!["stashed.txt".into(), "new-one.txt".into(), "new-two.txt".into()];
+        // A name that would match others as a pattern stands only for itself.
+        let files = vec!["stashed.txt".into(), "new-one.txt".into(), "new-*.txt".into()];
         let message = run(stash_save(t.path().into(), Some("Some files".into()), false, Some(files))).unwrap();
         assert_eq!(message, "Stashed 3 files.");
         assert_eq!(stash_count(&t), 1);
@@ -128,7 +131,8 @@ mod tests {
         let read = |f: &str| std::fs::read_to_string(t.dir.join(f)).ok();
         assert_eq!(read("kept.txt").as_deref(), Some("edited\n"));
         assert_eq!(read("stashed.txt").as_deref(), Some("b\n"));
-        assert_eq!((read("new-one.txt"), read("new-two.txt")), (None, None));
+        assert_eq!((read("new-one.txt"), read("new-*.txt")), (None, None));
+        assert_eq!(read("new-two.txt").as_deref(), Some("untracked\n"));
 
         run(stash_apply(t.path().into(), 0, true)).unwrap();
         assert_eq!(read("new-one.txt").as_deref(), Some("untracked\n"));
