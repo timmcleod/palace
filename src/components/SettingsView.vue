@@ -10,6 +10,7 @@ import { settings } from "../lib/settings.js";
 import { cloneFolder } from "../lib/clone.js";
 import { checkForUpdates, updates } from "../lib/updates.js";
 import { PALACE_URL } from "../lib/star.js";
+import castleUrl from "../assets/castle.webp";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -228,9 +229,12 @@ const SAMPLE = {
 
       <div class="page">
         <header class="hero">
-          <img src="/palace.svg" alt="" class="hero-icon" />
-          <div class="hero-text">
-            <h1>Palace</h1>
+          <img :src="castleUrl" alt="" class="hero-castle" />
+          <div class="hero-content">
+            <div class="hero-title">
+              <img src="/palace.svg" alt="" class="hero-icon" />
+              <h1>Palace</h1>
+            </div>
             <span class="hero-version">
               Version {{ updates.current || "…" }}
               <template v-if="updateStatus">
@@ -240,16 +244,16 @@ const SAMPLE = {
                 }}</span>
               </template>
             </span>
-          </div>
-          <div class="hero-actions">
-            <button
-              class="secondary-button"
-              :disabled="updates.state === 'checking' || updates.state === 'installing'"
-              @click="checkNow"
-            >
-              Check for Updates
-            </button>
-            <button class="secondary-button star" @click="openUrl(PALACE_URL)"><Star :size="14" /> Star on GitHub</button>
+            <div class="hero-actions">
+              <button
+                class="hero-button main"
+                :disabled="updates.state === 'checking' || updates.state === 'installing'"
+                @click="checkNow"
+              >
+                Check for Updates
+              </button>
+              <button class="hero-button" @click="openUrl(PALACE_URL)"><Star :size="14" /> Star on GitHub</button>
+            </div>
           </div>
         </header>
 
@@ -591,68 +595,126 @@ const SAMPLE = {
   }
 }
 
-/* --- Header ---------------------------------------------------------------------- */
+/* --- Header: a night-blue banner like the icon's, whatever the theme, with the castle
+   from the website at its right. ---------------------------------------------------- */
 
 .hero {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  min-height: 196px;
+  padding: 26px 28px;
+  overflow: hidden;
+  border: 1px solid rgba(95, 134, 201, 0.35);
+  border-radius: 16px;
   background:
-    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
-    var(--card-bg);
+    radial-gradient(50% 90% at 82% 100%, rgba(59, 143, 246, 0.42), transparent 70%),
+    linear-gradient(160deg, #2a4775 0%, #1b3053 55%, #111f38 100%);
+  color: #fff;
+}
+
+.hero-castle {
+  position: absolute;
+  right: -52px;
+  bottom: -34px;
+  width: min(370px, 56%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.hero-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 52%;
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .hero-icon {
-  width: 64px;
-  height: 64px;
-  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--accent) 35%, transparent));
-}
-
-.hero-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 180px;
+  width: 38px;
+  height: 38px;
+  margin: -3px;
 }
 
 h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .hero-version {
-  color: var(--text-secondary);
+  color: #b9c8e2;
   font-size: 13px;
 }
 
 .hero-version .fresh {
   font-weight: 600;
-  color: var(--accent);
+  color: #8ec5ff;
+}
+
+.hero-version .update-error {
+  color: #ff9d96;
 }
 
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 12px;
 }
 
-.hero-actions .secondary-button {
+.hero-button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  background: var(--content-bg);
+  padding: 6px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font: inherit;
+  white-space: nowrap;
+  color: #fff;
 }
 
-.hero-actions .star svg {
-  color: #e3a008;
+.hero-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.hero-button.main {
+  border-color: transparent;
+  background: #fff;
+  font-weight: 550;
+  color: #1b3053;
+}
+
+.hero-button.main:hover:not(:disabled) {
+  background: #e6eefb;
+}
+
+.hero-button:disabled {
+  opacity: 0.6;
+}
+
+.hero-button svg {
+  color: #f5c542;
+}
+
+/* Narrow, the castle steps back behind the text. */
+@media (max-width: 760px) {
+  .hero-castle {
+    opacity: 0.35;
+  }
+
+  .hero-content {
+    max-width: 100%;
+  }
 }
 
 /* --- Sections and cards ---------------------------------------------------------- */
