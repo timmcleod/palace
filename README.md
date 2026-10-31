@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/readme/castle-dark.webp">
-    <img src=".github/readme/castle-light.webp" width="560" height="320" alt="">
+    <img src=".github/readme/castle-light.webp" width="560" height="360" alt="Palace">
   </picture>
 </p>
-
-<h1 align="center">Palace</h1>
 
 <p align="center">
   A fast, beautifully simple Git client for Linux and macOS.<br>
