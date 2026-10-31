@@ -245,6 +245,14 @@ const sortLabel = computed(() => {
 
 const personLabel = (value, none) => (value === "@me" ? "Me" : value === "none" ? none : value);
 
+// What the filter buttons say: what they filter by, or what they're set to.
+const labelText = computed(() => label.value ?? "Label");
+const assigneeText = computed(() => {
+  if (props.pulls) return assignee.value ? `Review: ${personLabel(assignee.value)}` : "Reviewer";
+  return assignee.value ? `Assigned: ${personLabel(assignee.value, "Nobody")}` : "Assignee";
+});
+const authorText = computed(() => (author.value ? `By ${personLabel(author.value)}` : "Author"));
+
 // --- Rows -----------------------------------------------------------------------------
 
 const isNew = (issue) => !!props.seenAt && Date.parse(issue.created_at) > Date.parse(props.seenAt);
@@ -283,37 +291,44 @@ async function signIn() {
   <div class="issue-list">
     <NewIssueDialog v-if="creating" :repo="repo" @close="onCreated" />
     <div v-if="githubAccount" class="filter-bar">
-      <div class="segmented">
-        <button :class="{ active: state === 'open' }" @click="state = 'open'">Open</button>
-        <button v-if="pulls" :class="{ active: state === 'merged' }" @click="state = 'merged'">Merged</button>
-        <button :class="{ active: state === 'closed' }" @click="state = 'closed'">Closed</button>
+      <div class="filter-row">
+        <div class="segmented">
+          <button :class="{ active: state === 'open' }" @click="state = 'open'">Open</button>
+          <button v-if="pulls" :class="{ active: state === 'merged' }" @click="state = 'merged'">Merged</button>
+          <button :class="{ active: state === 'closed' }" @click="state = 'closed'">Closed</button>
+        </div>
+        <span class="spacer" />
+        <Spinner v-if="loading && issues" :size="14" class="dim" />
+        <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
+        <button v-if="pulls" class="icon-button small" title="New Pull Request…" @click="emit('create')"><Plus :size="16" /></button>
+        <button v-else class="icon-button small" title="New Issue…" @click="creating = true"><Plus :size="16" /></button>
       </div>
-      <button class="filter" :class="{ set: label }" @click="labelMenu">
-        {{ label ?? "Label" }} <ChevronDown :size="13" />
-      </button>
-      <button v-if="pulls" class="filter" :class="{ set: assignee }" @click="personMenu($event, 'assignee')">
-        {{ assignee ? `Review: ${personLabel(assignee)}` : "Reviewer" }} <ChevronDown :size="13" />
-      </button>
-      <button v-else class="filter" :class="{ set: assignee }" @click="personMenu($event, 'assignee', { none: true })">
-        {{ assignee ? `Assigned: ${personLabel(assignee, "Nobody")}` : "Assignee" }} <ChevronDown :size="13" />
-      </button>
-      <button class="filter" :class="{ set: author }" @click="personMenu($event, 'author')">
-        {{ author ? `By ${personLabel(author)}` : "Author" }} <ChevronDown :size="13" />
-      </button>
-      <button
-        class="filter"
-        :class="{ set: !bestMatch && (sort !== 'created' || oldest) }"
-        :disabled="bestMatch"
-        :title="bestMatch ? 'Searches show the best matches first' : 'Sort'"
-        @click="sortMenu"
-      >
-        {{ sortLabel }} <ChevronDown :size="13" />
-      </button>
-      <span class="spacer" />
-      <Spinner v-if="loading && issues" :size="14" class="dim" />
-      <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
-      <button v-if="pulls" class="icon-button small" title="New Pull Request…" @click="emit('create')"><Plus :size="16" /></button>
-      <button v-else class="icon-button small" title="New Issue…" @click="creating = true"><Plus :size="16" /></button>
+      <!-- Narrow, the buttons shrink, their names cut short, rather than wrap. -->
+      <div class="filter-row">
+        <button class="filter" :class="{ set: label }" :title="labelText" @click="labelMenu">
+          <span class="filter-name">{{ labelText }}</span> <ChevronDown :size="13" />
+        </button>
+        <button
+          class="filter"
+          :class="{ set: assignee }"
+          :title="assigneeText"
+          @click="personMenu($event, 'assignee', { none: !pulls })"
+        >
+          <span class="filter-name">{{ assigneeText }}</span> <ChevronDown :size="13" />
+        </button>
+        <button class="filter" :class="{ set: author }" :title="authorText" @click="personMenu($event, 'author')">
+          <span class="filter-name">{{ authorText }}</span> <ChevronDown :size="13" />
+        </button>
+        <button
+          class="filter"
+          :class="{ set: !bestMatch && (sort !== 'created' || oldest) }"
+          :disabled="bestMatch"
+          :title="bestMatch ? 'Searches show the best matches first' : `Sort: ${sortLabel}`"
+          @click="sortMenu"
+        >
+          <span class="filter-name">{{ sortLabel }}</span> <ChevronDown :size="13" />
+        </button>
+      </div>
     </div>
 
     <div class="rows" tabindex="0" @keydown="onKeydown">
@@ -402,11 +417,17 @@ async function signIn() {
 
 .filter-bar {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .segmented {
@@ -432,19 +453,29 @@ async function signIn() {
 
 .filter {
   display: flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 3px;
+  min-width: 0;
   max-width: 160px;
   padding: 3px 7px;
-  overflow: hidden;
   border: 0;
   border-radius: 6px;
   background: none;
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--text-secondary);
+}
+
+.filter-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter svg {
+  flex-shrink: 0;
 }
 
 .filter:hover:not(:disabled) {
