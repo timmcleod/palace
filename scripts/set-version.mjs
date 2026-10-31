@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 export const VERSION_FILES = [
   "package.json",
+  "package-lock.json",
   "src-tauri/tauri.conf.json",
   "src-tauri/Cargo.toml",
   "src-tauri/Cargo.lock",
@@ -17,6 +18,12 @@ export const VERSION_FILES = [
 
 const PATTERNS = {
   "package.json": /("version":\s*")[^"]+(")/,
+  // Palace's own version, at the top and in its entry among the packages; npm
+  // install would otherwise change both to match package.json. Not a dependency's.
+  "package-lock.json": [
+    /(^\{\s*"name":\s*"palace",\s*"version":\s*")[^"]+(")/,
+    /("packages":\s*\{\s*"":\s*\{\s*"name":\s*"palace",\s*"version":\s*")[^"]+(")/,
+  ],
   "src-tauri/tauri.conf.json": /("version":\s*")[^"]+(")/,
   // Only the package's own version, under [package], not a dependency's.
   "src-tauri/Cargo.toml": /(\[package\][^[]*?\nversion\s*=\s*")[^"]+(")/,
@@ -28,9 +35,12 @@ export function setVersion(version) {
     throw new Error(`“${version}” isn't a version like 1.2.3.`);
   }
   for (const file of VERSION_FILES) {
-    const text = readFileSync(file, "utf8");
-    if (!PATTERNS[file].test(text)) throw new Error(`couldn't find the version in ${file}.`);
-    writeFileSync(file, text.replace(PATTERNS[file], `$1${version}$2`));
+    let text = readFileSync(file, "utf8");
+    for (const pattern of [PATTERNS[file]].flat()) {
+      if (!pattern.test(text)) throw new Error(`couldn't find the version in ${file}.`);
+      text = text.replace(pattern, `$1${version}$2`);
+    }
+    writeFileSync(file, text);
   }
 }
 
