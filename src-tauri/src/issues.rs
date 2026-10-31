@@ -34,6 +34,8 @@ pub struct Issue {
     assignees: Vec<Person>,
     comments: u64,
     created_at: String,
+    #[serde(default)]
+    updated_at: Option<String>,
     closed_at: Option<String>,
     html_url: String,
     /// The description, as HTML and as written; only when reading one issue.
@@ -71,14 +73,28 @@ struct SearchResults {
 const PAGE_SIZE: u32 = 50;
 
 /// One page of the repository's issues, or with `pulls`, its pull requests, matching
-/// `filters`, which are GitHub search terms ("is:open label:bug crash"). Without words
-/// to match, the newest come first.
+/// `filters`, which are GitHub search terms ("is:open label:bug crash"). Words to
+/// match put the best matches first. Otherwise `sort` orders them by when they were
+/// "created" (the default) or last "updated", newest first unless `oldest`.
 #[tauri::command]
-pub async fn github_issues(owner: String, repo: String, filters: String, page: u32, pulls: Option<bool>) -> Result<IssuePage, String> {
+pub async fn github_issues(
+    owner: String,
+    repo: String,
+    filters: String,
+    page: u32,
+    pulls: Option<bool>,
+    sort: Option<String>,
+    oldest: Option<bool>,
+) -> Result<IssuePage, String> {
     let token = token()?;
     let pulls = pulls.unwrap_or(false);
+    let order = match sort.as_deref() {
+        Some(by @ ("created" | "updated")) => Some(Order { by, oldest: oldest.unwrap_or(false) }),
+        Some(other) => return Err(format!("Issues can't be sorted by \"{other}\".")),
+        None => None,
+    };
+    let path = search_path(&owner, &repo, if pulls { "pr" } else { "issue" }, &filters, page, order);
     blocking(move || {
-        let path = search_path(&owner, &repo, if pulls { "pr" } else { "issue" }, &filters, page);
         let found: SearchResults = api_get(&token, &path).map_err(|e| {
             let e = plain(e);
             if pulls { e.replace("the Issues permission", "the Pull requests permission").replace("'s issues", "'s pull requests") } else { e }
@@ -88,13 +104,24 @@ pub async fn github_issues(owner: String, repo: String, filters: String, page: u
     .await
 }
 
+/// How to order search results: `by` is "created" or "updated".
+#[derive(Clone, Copy)]
+struct Order<'a> {
+    by: &'a str,
+    oldest: bool,
+}
+
 /// `kind` is "issue" or "pr".
-fn search_path(owner: &str, repo: &str, kind: &str, filters: &str, page: u32) -> String {
+fn search_path(owner: &str, repo: &str, kind: &str, filters: &str, page: u32, order: Option<Order>) -> String {
     let query = format!("repo:{owner}/{repo} is:{kind} {}", filters.trim());
     // Without any words, only qualifiers, best match means nothing; newest is
     // what GitHub's own list shows.
     let has_words = terms(filters).iter().any(|term| !term.contains(':'));
-    let sort = if has_words { "" } else { "&sort=created&order=desc" };
+    let sort = match order {
+        _ if has_words => String::new(),
+        Some(Order { by, oldest }) => format!("&sort={by}&order={}", if oldest { "asc" } else { "desc" }),
+        None => "&sort=created&order=desc".into(),
+    };
     format!("/search/issues?q={}&per_page={PAGE_SIZE}&page={page}{sort}", encode(&query))
 }
 
@@ -369,13 +396,19 @@ mod tests {
     #[test]
     fn searching_a_repository() {
         assert_eq!(
-            search_path("tim", "palace", "issue", "is:open label:\"good first issue\"", 2),
+            search_path("tim", "palace", "issue", "is:open label:\"good first issue\"", 2, None),
             "/search/issues?q=repo%3Atim%2Fpalace%20is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22\
              &per_page=50&page=2&sort=created&order=desc"
         );
         // Words to match are sorted by how well they match.
-        assert!(!search_path("tim", "palace", "pr", "is:open crash", 1).contains("sort="));
-        assert!(search_path("tim", "palace", "pr", "", 1).contains("is%3Apr"));
+        assert!(!search_path("tim", "palace", "pr", "is:open crash", 1, None).contains("sort="));
+        assert!(search_path("tim", "palace", "pr", "", 1, None).contains("is%3Apr"));
+        // Even when an order is chosen.
+        let updated = Order { by: "updated", oldest: false };
+        assert!(!search_path("tim", "palace", "issue", "is:open crash", 1, Some(updated)).contains("sort="));
+        assert!(search_path("tim", "palace", "issue", "is:open", 1, Some(updated)).ends_with("&sort=updated&order=desc"));
+        let oldest = Order { by: "created", oldest: true };
+        assert!(search_path("tim", "palace", "issue", "", 1, Some(oldest)).ends_with("&sort=created&order=asc"));
         assert_eq!(terms(r#"is:open  label:"good first issue" crash"#), ["is:open", r#"label:"good first issue""#, "crash"]);
     }
 

@@ -21,8 +21,8 @@ import IssueError from "./IssueError.vue";
 import NewIssueDialog from "./NewIssueDialog.vue";
 import Spinner from "./Spinner.vue";
 
-// A GitHub repository's issues, newest first, narrowed by state, label, assignee,
-// author and the toolbar's search. More load at the bottom, a page at a time. With
+// A GitHub repository's issues, newest first or as sorted, narrowed by state, label,
+// assignee, author and the toolbar's search. More load at the bottom, a page at a time. With
 // `pulls`, its pull requests instead, narrowed by reviewer rather than assignee.
 const props = defineProps({
   // { owner, repo }
@@ -47,6 +47,13 @@ const label = ref(null);
 // A login, "@me" or "none". For pull requests, whose review was requested.
 const assignee = ref(null);
 const author = ref(null);
+// "created" or "updated", and which come first. Words in the search put the best
+// matches first instead.
+const sort = ref("created");
+const oldest = ref(false);
+// Terms split at spaces, except within quotes ("label:\"good first issue\"").
+const searchTerms = computed(() => props.query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []);
+const bestMatch = computed(() => searchTerms.value.some((term) => !term.includes(":")));
 
 const STATE_TERMS = { open: "is:open", closed: "is:closed", merged: "is:merged" };
 const noun = computed(() => (props.pulls ? "pull requests" : "issues"));
@@ -92,7 +99,15 @@ async function load({ more = false, quiet = false } = {}) {
   loading.value = !quiet;
   try {
     const { owner, repo } = props.repo;
-    const result = await invoke("github_issues", { owner, repo, filters: filters.value, page: next, pulls: props.pulls });
+    const result = await invoke("github_issues", {
+      owner,
+      repo,
+      filters: filters.value,
+      page: next,
+      pulls: props.pulls,
+      sort: sort.value,
+      oldest: oldest.value,
+    });
     if (seq !== loadSeq) return;
     if (more) {
       issues.value = [...issues.value, ...result.issues];
@@ -131,13 +146,15 @@ watch(
 );
 // Another repository starts afresh, with one search however many filters it clears.
 let resetting = false;
-watch([state, label, assignee, author], () => resetting || load());
+watch([state, label, assignee, author, sort, oldest], () => resetting || load());
 watch(
   [() => props.repo.owner, () => props.repo.repo, () => githubAccount.value?.login],
   () => {
     issues.value = null;
     resetting = true;
     label.value = assignee.value = author.value = null;
+    sort.value = "created";
+    oldest.value = false;
     nextTick(() => (resetting = false));
     load();
   },
@@ -210,6 +227,22 @@ async function personMenu(event, which, { none = false } = {}) {
   ]);
 }
 
+function sortMenu(event) {
+  openMenu(below(event), [
+    { label: "Created On", checked: sort.value === "created", action: () => (sort.value = "created") },
+    { label: "Last Updated", checked: sort.value === "updated", action: () => (sort.value = "updated") },
+    { separator: true },
+    { label: "Newest", checked: !oldest.value, action: () => (oldest.value = false) },
+    { label: "Oldest", checked: oldest.value, action: () => (oldest.value = true) },
+  ]);
+}
+
+const sortLabel = computed(() => {
+  if (bestMatch.value) return "Best Match";
+  if (sort.value === "updated") return oldest.value ? "Least Recently Updated" : "Recently Updated";
+  return oldest.value ? "Oldest" : "Newest";
+});
+
 const personLabel = (value, none) => (value === "@me" ? "Me" : value === "none" ? none : value);
 
 // --- Rows -----------------------------------------------------------------------------
@@ -267,6 +300,15 @@ async function signIn() {
       <button class="filter" :class="{ set: author }" @click="personMenu($event, 'author')">
         {{ author ? `By ${personLabel(author)}` : "Author" }} <ChevronDown :size="13" />
       </button>
+      <button
+        class="filter"
+        :class="{ set: !bestMatch && (sort !== 'created' || oldest) }"
+        :disabled="bestMatch"
+        :title="bestMatch ? 'Searches show the best matches first' : 'Sort'"
+        @click="sortMenu"
+      >
+        {{ sortLabel }} <ChevronDown :size="13" />
+      </button>
       <span class="spacer" />
       <Spinner v-if="loading && issues" :size="14" class="dim" />
       <span v-else-if="issues" class="count">{{ total.toLocaleString() }}</span>
@@ -311,7 +353,8 @@ async function signIn() {
             </div>
             <div class="meta">
               #{{ issue.number }}
-              <template v-if="issue.state === 'open'">opened {{ formatAgo(issue.created_at) }}</template>
+              <template v-if="sort === 'updated' && !bestMatch && issue.updated_at">updated {{ formatAgo(issue.updated_at) }}</template>
+              <template v-else-if="issue.state === 'open'">opened {{ formatAgo(issue.created_at) }}</template>
               <template v-else-if="issue.pull_request?.merged_at">merged {{ formatAgo(issue.pull_request.merged_at) }}</template>
               <template v-else>closed {{ formatAgo(issue.closed_at ?? issue.created_at) }}</template>
               by {{ issue.user?.login ?? "ghost" }}
@@ -404,8 +447,12 @@ async function signIn() {
   color: var(--text-secondary);
 }
 
-.filter:hover {
+.filter:hover:not(:disabled) {
   background: var(--button-hover);
+}
+
+.filter:disabled {
+  opacity: 0.6;
 }
 
 .filter.set {
