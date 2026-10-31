@@ -270,15 +270,19 @@ fn squash_conflict_or(path: &str, branch: &str, error: String) -> String {
     }
 }
 
-/// Rebases the current branch onto `onto`.
+/// Rebases the current branch onto `onto`. With `autostash`, uncommitted changes are
+/// set aside while rebasing and put back after.
 #[tauri::command]
-pub async fn rebase(path: String, onto: String) -> Result<String, String> {
-    let output = git(&path, &["rebase", &onto], None).map_err(|e| stopped_or(&path, e))?;
-    Ok(if output.contains("is up to date") {
+pub async fn rebase(path: String, onto: String, autostash: Option<bool>) -> Result<String, String> {
+    let stash = crate::stash::newest(&path);
+    let set_aside = if autostash.unwrap_or(false) { "--autostash" } else { "--no-autostash" };
+    let output = git(&path, &["rebase", set_aside, &onto], None).map_err(|e| stopped_or(&path, e))?;
+    let done = if output.contains("is up to date") {
         format!("Already up to date with {onto}.")
     } else {
         format!("Rebased onto {onto}.")
-    })
+    };
+    Ok(crate::stash::unless_left_behind(&path, stash, done))
 }
 
 /// Applies the changes commit `id` made on top of the current branch, as a new commit.
@@ -521,7 +525,7 @@ mod tests {
         let (t, main) = conflicting("rebase-conflict");
         run(checkout(t.path().into(), "branch".into(), "theirs".into())).unwrap();
 
-        let stopped = run(rebase(t.path().into(), main)).unwrap_err();
+        let stopped = run(rebase(t.path().into(), main, None)).unwrap_err();
         assert!(stopped.starts_with("CONFLICT: The rebase stopped"), "{stopped}");
         assert_eq!(operation(&t.repo), Some("rebase"));
 
@@ -730,5 +734,23 @@ mod tests {
         git(t.path(), &["branch", "-f", "feature", &merged], None).unwrap();
         run(delete_merged_branch(t.path().into(), "feature".into(), merged)).unwrap();
         assert!(t.repo.find_branch("feature", git2::BranchType::Local).is_err());
+    }
+
+    #[test]
+    fn rebasing_with_uncommitted_changes_set_aside() {
+        let t = TempRepo::new("rebase-autostash");
+        t.commit(&[("a.txt", Some("1\n")), ("b.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
+        t.commit(&[("f.txt", Some("f\n"))], "Feature");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("2\n"))], "Main");
+        git(t.path(), &["switch", "-q", "feature"], None).unwrap();
+        t.write(&[("b.txt", Some("mine\n"))]);
+
+        let refused = run(rebase(t.path().into(), main.clone(), Some(false))).unwrap_err();
+        assert!(refused.contains("unstaged changes") || refused.contains("uncommitted"), "{refused}");
+        assert_eq!(run(rebase(t.path().into(), main.clone(), Some(true))).unwrap(), format!("Rebased onto {main}."));
+        assert_eq!(std::fs::read_to_string(t.dir.join("b.txt")).unwrap(), "mine\n");
     }
 }

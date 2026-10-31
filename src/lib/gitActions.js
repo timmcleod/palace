@@ -185,30 +185,33 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     return error;
   }
 
-  // Asks how to merge `name` (or a branch to choose) into the current branch.
-  async function merge(name = null) {
+  // The Merge or Rebase dialog, starting with `name` or the first other branch.
+  function chooseBranch(name, rebase) {
     const head = current();
     const choices = revisionChoices();
     const branches = choices.branches.filter((b) => b !== head);
-    const values = await openMergeDialog({
+    return openMergeDialog({
       head,
       branch: name ?? branches[0] ?? choices.remoteBranches[0] ?? null,
       branches,
       remoteBranches: choices.remoteBranches,
       tags: choices.tags,
+      rebase,
     });
+  }
+
+  // Asks how to merge `name` (or a branch to choose) into the current branch.
+  async function merge(name = null) {
+    const values = await chooseBranch(name, false);
     if (!values) return;
     await run(["Merging…", "Merged", "Merge failed"], "merge", { branch: values.branch, options: values.options });
   }
 
-  async function rebase(onto) {
-    const ok = await confirm(
-      `Rebase “${current()}” onto “${onto}”?\n\nThis replays ${current()}'s own commits on top of ${onto}, giving them new hashes. If they've already been pushed, you'll need to force push afterwards.`,
-      "Rebase",
-      "Rebase",
-      false,
-    );
-    if (ok) await run(["Rebasing…", "Rebased", "Rebase failed"], "rebase", { onto });
+  // Asks to rebase the current branch onto `onto` (or a branch to choose).
+  async function rebase(onto = null) {
+    const values = await chooseBranch(onto, true);
+    if (!values) return;
+    await run(["Rebasing…", "Rebased", "Rebase failed"], "rebase", { onto: values.branch, autostash: values.options.autostash });
   }
 
   // The toolbar's Merge button: the Merge dialog, with a branch to choose.
@@ -546,7 +549,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       // Merging or rebasing a branch onto itself means nothing, so the current branch
       // doesn't offer it.
       !isCurrent && { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
-      !isCurrent && { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
+      !isCurrent && { label: `Rebase “${head}” onto “${name}”…`, action: () => rebase(name), disabled: !head || midOperation() },
       !isCurrent && { separator: true },
       !isCurrent && head && { label: `Compare “${name}” with “${head}”`, action: () => compare({ head: name, base: head }) },
       isCurrent && upstream && { label: `Compare “${name}” with “${upstream}”`, action: () => compare({ head: name, base: upstream }) },
@@ -571,7 +574,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       { label: "Check Out as Local Branch", action: () => checkout("remote-branch", name) },
       { separator: true },
       { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
-      { label: `Rebase “${head}” onto “${name}”`, action: () => rebase(name), disabled: !head || midOperation() },
+      { label: `Rebase “${head}” onto “${name}”…`, action: () => rebase(name), disabled: !head || midOperation() },
       { separator: true },
       { label: `Pull into “${head}”…`, action: () => pull(name), disabled: !head || midOperation() },
       { separator: true },
@@ -776,6 +779,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     dividerMenu,
     newBranch,
     mergeInto,
+    rebase,
     stashSave,
     stashApply,
     controlOperation,

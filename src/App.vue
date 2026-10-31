@@ -18,6 +18,7 @@ import {
   ExternalLink,
   FolderGit2,
   GitBranch,
+  GitCommitVertical,
   GitMerge,
   Redo2,
   RefreshCw,
@@ -1581,6 +1582,14 @@ function startResize(event, pane, min, max) {
             @click="actions.mergeInto()"
           >
             <GitMerge :size="18" :stroke-width="1.5" />
+          </button>
+          <button
+            class="icon-button"
+            :title="overview.head.branch ? `Rebase ${overview.head.branch} onto another branch` : 'Check out a branch to rebase it'"
+            :disabled="remoteBusy || !overview.head.branch || !!overview.operation"
+            @click="actions.rebase()"
+          >
+            <GitCommitVertical :size="18" :stroke-width="1.5" />
           </button>
         </div>
         <div class="action-group">

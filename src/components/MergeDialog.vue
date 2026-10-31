@@ -4,9 +4,10 @@ import { ChevronRight } from "lucide-vue-next";
 import { closeMergeDialog } from "../lib/overlays.js";
 import { focusDialog, submitOnEnter } from "../lib/dialogKeys.js";
 
-// The Merge dialog: which branch to merge into the current one, and how.
+// The Merge dialog: which branch to merge into the current one, and how. With
+// `rebase`, the Rebase dialog: which branch to rebase the current one onto.
 const props = defineProps({
-  // { head, branch, branches, remoteBranches, tags }
+  // { head, branch, branches, remoteBranches, tags, rebase }
   dialog: { type: Object, required: true },
 });
 
@@ -26,7 +27,9 @@ function submit() {
   if (!ready.value) return;
   closeMergeDialog({
     branch: branch.value,
-    options: { squash: squash.value, no_ff: noFf.value, commit: commit.value, autostash: autostash.value },
+    options: props.dialog.rebase
+      ? { autostash: autostash.value }
+      : { squash: squash.value, no_ff: noFf.value, commit: commit.value, autostash: autostash.value },
   });
 }
 
@@ -41,16 +44,25 @@ function onKeydown(event) {
       <header>
         <img src="/palace.svg" alt="" class="app-icon" />
         <div>
-          <h2>Merge</h2>
-          <p>
-            Integrates the changes from the chosen branch into your current HEAD branch,
-            <strong>{{ dialog.head }}</strong>.
-          </p>
+          <template v-if="dialog.rebase">
+            <h2>Rebase</h2>
+            <p>
+              Replays the commits of your current HEAD branch, <strong>{{ dialog.head }}</strong>, on top of the chosen
+              branch. They get new hashes, so if they've already been pushed, you'll need to force push afterwards.
+            </p>
+          </template>
+          <template v-else>
+            <h2>Merge</h2>
+            <p>
+              Integrates the changes from the chosen branch into your current HEAD branch,
+              <strong>{{ dialog.head }}</strong>.
+            </p>
+          </template>
         </div>
       </header>
 
       <div class="fields">
-        <label for="merge-branch">Branch:</label>
+        <label for="merge-branch">{{ dialog.rebase ? "Onto:" : "Branch:" }}</label>
         <select id="merge-branch" v-model="branch">
           <optgroup v-if="dialog.branches.length" label="Branches">
             <option v-for="name in dialog.branches" :key="name" :value="name">{{ name }}</option>
@@ -63,8 +75,8 @@ function onKeydown(event) {
           </optgroup>
         </select>
 
-        <span />
-        <div class="choices">
+        <span v-if="!dialog.rebase" />
+        <div v-if="!dialog.rebase" class="choices">
           <div>
             <label class="checkbox">
               <input v-model="squash" type="checkbox" />
@@ -97,15 +109,16 @@ function onKeydown(event) {
         <div v-if="showOptions" class="option-list">
           <label class="checkbox">
             <input v-model="autostash" type="checkbox" />
-            Set aside uncommitted changes while merging
+            Set aside uncommitted changes while {{ dialog.rebase ? "rebasing" : "merging" }}
           </label>
-          <p class="hint">They're put back afterwards. Without this, git won't merge over changes to the same files.</p>
+          <p v-if="dialog.rebase" class="hint">They're put back afterwards. Without this, git won't rebase with uncommitted changes.</p>
+          <p v-else class="hint">They're put back afterwards. Without this, git won't merge over changes to the same files.</p>
         </div>
       </div>
 
       <div class="buttons">
         <button type="button" class="secondary-button" @click="closeMergeDialog(null)">Cancel</button>
-        <button type="submit" class="primary-button" :disabled="!ready">Merge</button>
+        <button type="submit" class="primary-button" :disabled="!ready">{{ dialog.rebase ? "Rebase" : "Merge" }}</button>
       </div>
     </form>
   </div>
