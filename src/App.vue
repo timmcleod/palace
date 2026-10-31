@@ -347,6 +347,24 @@ watch(
   { immediate: true },
 );
 
+// Whether the history shows only the mainline, each merge standing for the commits it
+// brought in, as `git log --first-parent` does. Remembered for each repository.
+const FIRST_PARENT_KEY = "palace.firstParent";
+const firstParent = ref(false);
+watch(
+  () => overview.value?.path,
+  (path) => (firstParent.value = !!readJson(FIRST_PARENT_KEY, {})[path]),
+  { immediate: true },
+);
+
+function toggleFirstParent() {
+  firstParent.value = !firstParent.value;
+  const saved = readJson(FIRST_PARENT_KEY, {});
+  if (firstParent.value) saved[overview.value.path] = true;
+  else delete saved[overview.value.path];
+  writeJson(FIRST_PARENT_KEY, saved);
+}
+
 function chooseIssueRepo(repo) {
   issueChoice.value = repoKey(repo);
   writeJson(ISSUE_REPOS_KEY, { ...readJson(ISSUE_REPOS_KEY, {}), [overview.value.path]: issueChoice.value });
@@ -1293,7 +1311,9 @@ const rewritable = computed(() => {
   const o = overview.value;
   const r = historyRef.value;
   const own = !r || (r.kind === "branch" && r.name === o?.head.branch);
-  return !!(o?.head.branch && own && !isCompare.value && !fileFilter.value && !historySearch.value && !o.operation);
+  // Not in the mainline view, where commits next to each other in the list may not be.
+  const whole = !fileFilter.value && !historySearch.value && !firstParent.value;
+  return !!(o?.head.branch && own && !isCompare.value && whole && !o.operation);
 });
 
 const historyRev = computed(() => {
@@ -1448,6 +1468,21 @@ function startResize(event, pane, min, max) {
             <X :size="13" />
           </button>
         </span>
+        <button
+          v-if="!awayFromHistory() && !fileFilter"
+          class="mainline-toggle"
+          :class="{ on: firstParent }"
+          :aria-pressed="firstParent"
+          :title="
+            firstParent
+              ? 'Showing only the mainline: each merge stands for the commits it brought in. Click to show every commit.'
+              : 'Show only the mainline, with each merge standing for the commits it brought in'
+          "
+          @click="toggleFirstParent"
+        >
+          <GitCommitVertical :size="14" :stroke-width="1.75" />
+          Mainline
+        </button>
       </div>
 
       <OperationBanner
@@ -1524,6 +1559,7 @@ function startResize(event, pane, min, max) {
           :hide="isCompare ? comparison?.base : null"
           :file="isCompare ? null : fileFilter"
           :search="isCompare ? '' : historySearch"
+          :first-parent="!isCompare && firstParent"
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           :editable="rewritable"
@@ -2012,6 +2048,34 @@ function startResize(event, pane, min, max) {
 .breadcrumb {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mainline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.mainline-toggle:hover {
+  background: var(--button-hover);
+}
+
+.mainline-toggle.on {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.file-filter + .mainline-toggle {
+  margin-left: 8px;
 }
 
 .file-filter {

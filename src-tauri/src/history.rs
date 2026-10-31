@@ -22,6 +22,9 @@ struct History {
     file: Option<String>,
     /// Set when only the commits matching this search are listed.
     search: Option<String>,
+    /// Only the commits along first parents, so each merge stands for the commits it
+    /// brought in.
+    first_parent: bool,
     fingerprint: String,
     rows: Vec<GraphRow>,
     times: Vec<i64>,
@@ -83,8 +86,9 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Loads the history reachable from `rev` (HEAD when omitted), or with `file`, only
 /// the commits that changed that file, and with `search`, only the commits matching
 /// it. With `hide`, the commits reachable from that revision are left out, as in
-/// `git log hide..rev`. If nothing has changed since the last load of the same
-/// history, the cached walk is reused.
+/// `git log hide..rev`, and with `first_parent`, those only reached through a merge's
+/// other parents, as in `git log --first-parent`. If nothing has changed since the
+/// last load of the same history, the cached walk is reused.
 #[tauri::command]
 pub async fn load_history(
     path: String,
@@ -92,8 +96,10 @@ pub async fn load_history(
     hide: Option<String>,
     file: Option<String>,
     search: Option<String>,
+    first_parent: Option<bool>,
     state: State<'_, HistoryState>,
 ) -> Result<HistorySummary, String> {
+    let first_parent = first_parent.unwrap_or(false);
     let rev = rev.unwrap_or_else(|| "HEAD".to_string());
     let search = search.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
     let repo = Repository::discover(&path).map_err(message)?;
@@ -106,13 +112,14 @@ pub async fn load_history(
             && h.hide == hide
             && h.file == file
             && h.search == search
+            && h.first_parent == first_parent
             && h.fingerprint == fingerprint
         {
             return Ok(summary(h));
         }
     }
 
-    let mut history = walk(&repo, path, rev, hide, file, fingerprint).map_err(message)?;
+    let mut history = walk(&repo, path, rev, hide, file, first_parent, fingerprint).map_err(message)?;
     if let Some(search) = search {
         keep_matches(&repo, &mut history, &search).map_err(message)?;
         history.search = Some(search);
@@ -312,6 +319,7 @@ fn walk(
     rev: String,
     hide: Option<String>,
     file: Option<String>,
+    first_parent: bool,
     fingerprint: String,
 ) -> Result<History, git2::Error> {
     let mut history = History {
@@ -321,6 +329,7 @@ fn walk(
         hide,
         file,
         search: None,
+        first_parent,
         fingerprint,
         rows: Vec::new(),
         times: Vec::new(),
@@ -366,6 +375,9 @@ fn walk(
     for oid in &starts {
         revwalk.push(*oid)?;
     }
+    if first_parent {
+        revwalk.simplify_first_parent()?;
+    }
     if let Some(hide) = &history.hide {
         revwalk.hide(repo.revparse_single(hide)?.peel_to_commit()?.id())?;
     }
@@ -373,7 +385,7 @@ fn walk(
     let mut lanes = Vec::new();
     for oid in revwalk {
         let commit = repo.find_commit(oid?)?;
-        let parents: Vec<Oid> = commit.parent_ids().collect();
+        let parents: Vec<Oid> = commit.parent_ids().take(if first_parent { 1 } else { usize::MAX }).collect();
         let graph = place(&mut lanes, commit.id(), &parents);
 
         let widest = graph.pass.iter().chain(&graph.merge_in).chain(&graph.out).max().copied();
@@ -578,11 +590,36 @@ mod tests {
         let edited = t.commit(&[("new.txt", Some("one\ntwo\nthree\nfour\nfive\n"))], "Edit");
 
         let repo = Repository::open(t.path()).unwrap();
-        let history = walk(&repo, t.path().into(), "HEAD".into(), None, Some("new.txt".into()), String::new()).unwrap();
+        let history = walk(&repo, t.path().into(), "HEAD".into(), None, Some("new.txt".into()), false, String::new()).unwrap();
         let ids: Vec<Oid> = history.rows.iter().map(|r| r.oid).collect();
         assert_eq!(ids, [edited, moved, first]);
         assert_eq!(history.rows[0].graph.out, [0]);
         assert!(history.rows[2].graph.out.is_empty());
+    }
+
+    #[test]
+    fn first_parent_history_shows_each_merge_as_one_commit() {
+        use crate::cli::git;
+        let t = crate::test_support::TempRepo::new("first-parent");
+        let first = t.commit(&[("a.txt", Some("a"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
+        let side = t.commit(&[("f.txt", Some("f"))], "On the branch");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        let mainline = t.commit(&[("m.txt", Some("m"))], "On main");
+        git(t.path(), &["merge", "-q", "--no-ff", "--no-edit", "feature"], None).unwrap();
+        let merge = t.head();
+
+        let repo = Repository::open(t.path()).unwrap();
+        let all = walk(&repo, t.path().into(), "HEAD".into(), None, None, false, String::new()).unwrap();
+        assert!(all.rows.iter().any(|r| r.oid == side));
+        assert_eq!(all.lanes, 2);
+
+        let mainline_only = walk(&repo, t.path().into(), "HEAD".into(), None, None, true, String::new()).unwrap();
+        let ids: Vec<Oid> = mainline_only.rows.iter().map(|r| r.oid).collect();
+        assert_eq!(ids, [merge, mainline, first]);
+        assert_eq!(mainline_only.lanes, 1);
+        assert_eq!(mainline_only.rows[0].graph.out, [0]);
     }
 
     #[test]
@@ -594,7 +631,7 @@ mod tests {
 
         let repo = Repository::open(t.path()).unwrap();
         let search = |query: &str| {
-            let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
+            let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, false, String::new()).unwrap();
             keep_matches(&repo, &mut history, query).unwrap();
             history.rows.iter().map(|r| r.oid).collect::<Vec<_>>()
         };
@@ -606,7 +643,7 @@ mod tests {
         assert_eq!(search("ada@example.com lovelace").len(), 3);
         assert!(search("nothing like this").is_empty());
 
-        let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
+        let mut history = walk(&repo, t.path().into(), "HEAD".into(), None, None, false, String::new()).unwrap();
         keep_matches(&repo, &mut history, "hidden").unwrap();
         assert_eq!(history.times.len(), 2);
         assert_eq!(history.rows[0].graph.out, [0]);
@@ -633,13 +670,13 @@ mod tests {
         let local = mine.commit(&[("c.txt", Some("3"))], "Mine");
         crate::cli::git(mine.path(), &["fetch"], None).unwrap();
 
-        let history = walk(&mine.repo, mine.path().into(), "HEAD".into(), None, None, String::new()).unwrap();
+        let history = walk(&mine.repo, mine.path().into(), "HEAD".into(), None, None, false, String::new()).unwrap();
         let ids: HashSet<Oid> = history.rows.iter().map(|r| r.oid).collect();
         assert!(ids.contains(&pushed) && ids.contains(&local));
         assert_eq!(history.incoming, HashSet::from([pushed]));
 
         // A remote branch's own history has nothing "incoming".
-        let remote_history = walk(&mine.repo, mine.path().into(), "refs/remotes/origin/main".into(), None, None, String::new());
+        let remote_history = walk(&mine.repo, mine.path().into(), "refs/remotes/origin/main".into(), None, None, false, String::new());
         assert!(remote_history.map(|h| h.incoming.is_empty()).unwrap_or(true));
     }
 
@@ -654,7 +691,7 @@ mod tests {
         crate::cli::git(mine.path(), &["switch", "-q", "-c", "feature"], None).unwrap();
         let added = mine.commit(&[("b.txt", Some("2"))], "Feature");
 
-        let history = walk(&mine.repo, mine.path().into(), "feature".into(), Some(main), None, String::new()).unwrap();
+        let history = walk(&mine.repo, mine.path().into(), "feature".into(), Some(main), None, false, String::new()).unwrap();
         assert_eq!(history.rows.iter().map(|r| r.oid).collect::<Vec<_>>(), [added]);
         assert!(history.incoming.is_empty());
     }

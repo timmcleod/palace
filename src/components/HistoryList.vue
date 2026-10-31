@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, History, Search } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
+import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -14,6 +15,8 @@ const props = defineProps({
   file: { type: String, default: null },
   // Only commits matching this search.
   search: { type: String, default: "" },
+  // Only the commits along first parents, each merge standing for what it brought in.
+  firstParent: { type: Boolean, default: false },
   refreshKey: { type: Number, default: 0 },
   selectedId: { type: String, default: null },
   // Whether commits can be dragged to reorder them: only in the current branch's own
@@ -56,6 +59,7 @@ async function load({ resetScroll }) {
       hide: props.hide,
       file: props.file,
       search: props.search || null,
+      firstParent: props.firstParent,
     });
     if (seq !== loadSeq) return;
     error.value = "";
@@ -106,7 +110,7 @@ function commitAt(index) {
 }
 
 watch(
-  () => [props.path, props.rev, props.hide, props.file, props.search],
+  () => [props.path, props.rev, props.hide, props.file, props.search, props.firstParent],
   () => load({ resetScroll: true }),
   { immediate: true },
 );
@@ -395,7 +399,33 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 
 // --- Presentation ----------------------------------------------------------
 
-const graphWidth = computed(() => Math.max(1, summary.value?.lanes ?? 1) * 14 + 10);
+// The graph is as wide as the rows on screen need, not the whole history: the newest
+// commits may be one straight line where older ones had dozens of branches. It widens
+// at once, and narrows only once scrolling has paused, so it doesn't jitter.
+const needed = computed(() => {
+  let lanes = 0;
+  for (const item of visible.value) {
+    if (item.commit) lanes = Math.max(lanes, lanesOf(item.commit.graph));
+  }
+  return lanes;
+});
+const lanes = ref(1);
+let narrowing = null;
+watch(needed, (need) => {
+  clearTimeout(narrowing);
+  if (!need) return;
+  if (need >= lanes.value) lanes.value = need;
+  else narrowing = setTimeout(() => (lanes.value = need), 600);
+});
+watch(
+  () => summary.value?.generation,
+  () => {
+    clearTimeout(narrowing);
+    lanes.value = Math.max(1, needed.value);
+  },
+);
+onBeforeUnmount(() => clearTimeout(narrowing));
+const graphWidth = computed(() => graphLayout(lanes.value).width);
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
 const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
@@ -440,7 +470,7 @@ const MAX_REFS = 3;
           <CommitGraph
             class="graph"
             :graph="item.commit?.graph"
-            :width="graphWidth"
+            :lanes="lanes"
             :height="HEADER_HEIGHT"
             through
           />
@@ -462,7 +492,7 @@ const MAX_REFS = 3;
           @dragend="onDragEnd"
         >
           <template v-if="item.commit">
-            <CommitGraph class="graph" :graph="item.commit.graph" :width="graphWidth" :height="ROW_HEIGHT" />
+            <CommitGraph class="graph" :graph="item.commit.graph" :lanes="lanes" :height="ROW_HEIGHT" />
             <Avatar class="avatar" :name="item.commit.author_name" :email="item.commit.author_email" />
             <div class="body">
               <div class="line">
