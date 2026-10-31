@@ -9,10 +9,11 @@ export const formDialog = shallowRef(null);
  * Shows a modal form and resolves to its values, or null if canceled.
  *
  * fields: [{ key, label, type: "text" | "password" | "textarea" | "select" | "checkbox", value, options, placeholder }]
+ * draft: a key for what's typed (see drafts.js): canceling keeps it for next time.
  */
-export function openForm({ title, message = "", fields = [], confirmLabel = "OK", danger = false }) {
+export function openForm({ title, message = "", fields = [], confirmLabel = "OK", danger = false, draft = null }) {
   return new Promise((resolve) => {
-    formDialog.value = { title, message, fields, confirmLabel, danger, resolve };
+    formDialog.value = { title, message, fields, confirmLabel, danger, draft, resolve };
   });
 }
 

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { undoHint } from "./confirm.js";
+import { keepDraft } from "./drafts.js";
 import { githubAccount } from "./github.js";
 import { githubRepoOf } from "./githubRemote.js";
 import {
@@ -369,11 +370,13 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       return;
     }
 
+    const draft = `squash:${overview.value.path}:${[...ids].sort().join(",")}`;
     const values = await openForm({
       title,
       message: `They become one commit, where the oldest of them is now.${pushedNote(plan)}`,
       fields: [{ key: "message", label: "Message", type: "textarea", value: squashed.map((c) => c.message).join("\n\n") }],
       confirmLabel: "Squash",
+      draft,
     });
     if (!values) return;
 
@@ -387,7 +390,9 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       ...rest.map((c) => ({ id: c.id, action: "fixup", message: null })),
       ...plan.commits.filter((c) => !ids.has(c.id)).map((c) => ({ id: c.id, action: "pick", message: null })),
     ];
-    await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps }, { undo: "Squash" });
+    const error = await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps }, { undo: "Squash" });
+    // The message written is offered again next time, unless it's in the commit now.
+    if (error && !error.startsWith("CONFLICT: ")) keepDraft(draft, values);
   }
 
   // Gives a commit on the current branch a new message. The commits after it are
@@ -408,18 +413,21 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       // The edited commit is the oldest, so if any are pushed, it is.
       plan.pushed && `It's already on ${plan.upstream}, so you'll need to force push afterwards.`,
     ];
+    const draft = `message:${overview.value.path}:${commit.id}`;
     const values = await openForm({
       title: "Edit Commit Message",
       message: notes.filter(Boolean).join("\n\n") || null,
       fields: [{ key: "message", label: "Message", type: "textarea", value: edited.message }],
       confirmLabel: "Save",
+      draft,
     });
     if (!values || values.message.trim() === edited.message.trim()) return;
 
     const steps = plan.commits.map((c) => ({ id: c.id, action: "pick", message: c === edited ? values.message : null }));
-    await run(["Editing message…", "Edited message", "Couldn't edit the message"], "rebase_interactive", { base: plan.base, steps }, {
+    const error = await run(["Editing message…", "Edited message", "Couldn't edit the message"], "rebase_interactive", { base: plan.base, steps }, {
       undo: "Edit Message",
     });
+    if (error && !error.startsWith("CONFLICT: ")) keepDraft(draft, values);
   }
 
   // Moves a commit to just above (newer than) or below (older than) another.

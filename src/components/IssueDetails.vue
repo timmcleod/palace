@@ -2,10 +2,12 @@
 // Comments being written, by repository and issue, so they're still there after
 // switching to another issue or view, until they're posted.
 const drafts = new Map();
+// Unsaved edits to a description or comment, by repository and issue, the same way.
+const edits = new Map();
 </script>
 
 <script setup>
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -83,18 +85,27 @@ async function load() {
   }
 }
 
+// An edit with changes is kept for when its issue is shown again.
+const changed = (edit) => !!edit && edit.text !== edit.was;
+function keepEdit(key) {
+  if (key && changed(editing.value)) edits.set(key, editing.value);
+}
+
 watch(
   draftKey,
-  () => {
+  (key, previous) => {
+    keepEdit(previous);
     thread.value = null;
     error.value = "";
     actionError.value = "";
-    draft.value = drafts.get(draftKey()) ?? "";
-    editing.value = null;
+    draft.value = drafts.get(key) ?? "";
+    editing.value = edits.get(key) ?? null;
+    edits.delete(key);
     load();
   },
   { immediate: true },
 );
+onBeforeUnmount(() => keepEdit(draftKey()));
 watch(() => props.refreshKey, load);
 
 // The commits on any branch whose messages mention the issue ("Fixes #42"). Looked
@@ -253,6 +264,20 @@ function startEditing(post) {
   editing.value = { id: post.id, text: post.body ?? "", was: post.body ?? "" };
 }
 
+// Escape or Cancel asks first when there are changes to throw away.
+async function cancelEdit() {
+  if (changed(editing.value)) {
+    const ok = await askConfirm({
+      title: "Discard Changes",
+      message: "Discard your changes to this post?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  editing.value = null;
+}
+
 async function saveEdit() {
   const { id, text, was } = editing.value;
   const key = draftKey();
@@ -265,6 +290,8 @@ async function saveEdit() {
           thread.value = { ...thread.value, comments: thread.value.comments.map((c) => (c.id === id ? edited : c)) };
         });
   if (ok && stillShowing(key) && editing.value?.id === id) editing.value = null;
+  // Saved after switching away: the copy kept for coming back isn't needed.
+  if (ok && edits.get(key)?.id === id) edits.delete(key);
 }
 
 async function deleteComment(post) {
@@ -425,10 +452,10 @@ function onClick(event) {
             :disabled="busy"
             autofocus
             @submit="saveEdit"
-            @cancel="editing = null"
+            @cancel="cancelEdit"
           />
           <div class="editor-buttons">
-            <button class="secondary-button" :disabled="busy" @click="editing = null">Cancel</button>
+            <button class="secondary-button" :disabled="busy" @click="cancelEdit">Cancel</button>
             <button class="primary-button" :disabled="busy" @click="saveEdit">Save</button>
           </div>
         </div>

@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { issueError } from "../lib/issues.js";
 import { commandKey } from "../lib/platform.js";
 import { startingText } from "../lib/pullRequests.js";
+import { draftFor, dropDraft, keepDraft } from "../lib/drafts.js";
 import MarkdownEditor from "./MarkdownEditor.vue";
 import Spinner from "./Spinner.vue";
 
@@ -40,6 +41,11 @@ const pushed = ref(false);
 const titleField = ref(null);
 const editor = ref(null);
 
+// What was written when the dialog was last canceled for this branch, and the text it
+// started with, to tell whether anything was written.
+const draftKey = `pull:${props.path}:${props.plan.head}`;
+let started = { title: "", body: "" };
+
 const needsPush = computed(() => props.plan.push && !pushed.value);
 const ready = computed(() => !loading.value && !busy.value && base.value && title.value.trim() !== "");
 const baseRef = (name) => props.plan.baseRemote && `${props.plan.baseRemote}/${name}`;
@@ -60,7 +66,10 @@ onMounted(async () => {
     const messages = baseRef(base.value)
       ? await invoke("branch_commit_messages", { path: props.path, base: baseRef(base.value), head: props.plan.branch }).catch(() => [])
       : [];
-    ({ title: title.value, body: body.value } = startingText(messages, template, props.plan.branch));
+    started = startingText(messages, template, props.plan.branch);
+    const kept = draftFor(draftKey);
+    if (kept?.base && branches.value.includes(kept.base)) base.value = kept.base;
+    ({ title: title.value, body: body.value } = kept ?? started);
   } catch (e) {
     error.value = issueError(e).text;
   } finally {
@@ -116,12 +125,23 @@ async function create() {
       body: body.value,
       draft: draft.value,
     });
+    dropDraft(draftKey);
     emit("close", pull);
   } catch (e) {
     error.value = issueError(e).text;
   } finally {
     busy.value = "";
   }
+}
+
+// Canceling keeps what was written for next time; a click outside, easily a slip,
+// doesn't close the dialog then.
+function cancel({ outside = false } = {}) {
+  const typed = !loading.value && (title.value !== started.title || body.value !== started.body);
+  if (outside && typed) return;
+  if (typed) keepDraft(draftKey, { title: title.value, body: body.value, base: base.value });
+  else dropDraft(draftKey);
+  emit("close");
 }
 
 // Enter in the title moves on to the description; Ctrl+Enter (Cmd+Enter on a Mac)
@@ -135,7 +155,7 @@ function onTitleKeydown(event) {
 </script>
 
 <template>
-  <div class="backdrop" @mousedown.self="emit('close')" @keydown.esc="emit('close')">
+  <div class="backdrop" @mousedown.self="cancel({ outside: true })" @keydown.esc="cancel()">
     <div class="dialog" role="dialog" aria-labelledby="new-pull-title">
       <h2 id="new-pull-title">Create Pull Request</h2>
       <p class="dim">On {{ target.owner }}/{{ target.repo }}</p>
@@ -179,7 +199,7 @@ function onTitleKeydown(event) {
           placeholder="Describe the changes (optional)"
           :disabled="!!busy"
           @submit="create"
-          @cancel="emit('close')"
+          @cancel="cancel()"
         />
         <label class="checkbox">
           <input v-model="draft" type="checkbox" :disabled="!!busy" />
@@ -189,7 +209,7 @@ function onTitleKeydown(event) {
       <p v-if="error" class="error">{{ error }}</p>
 
       <div class="buttons">
-        <button type="button" class="secondary-button" :disabled="!!busy" @click="emit('close')">Cancel</button>
+        <button type="button" class="secondary-button" :disabled="!!busy" @click="cancel()">Cancel</button>
         <button type="button" class="primary-button" :disabled="!ready" @click="create">
           {{ busy || (needsPush ? "Push and Create Pull Request" : "Create Pull Request") }}
         </button>

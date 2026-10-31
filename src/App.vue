@@ -107,6 +107,8 @@ const workingFile = ref(null);
 // The commit being written, kept while switching between views. While amending,
 // `saved` holds the draft that was there before, to restore if amending is undone.
 const draft = reactive({ subject: "", body: "", amend: false, saved: null });
+// Other repositories' drafts, kept for when they're open again: path → draft.
+const otherDrafts = new Map();
 
 // Set when the history shows only the commits that changed this file.
 const fileFilter = ref(null);
@@ -1100,7 +1102,9 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       nav.back = [];
       nav.forward = [];
       here = null;
-      Object.assign(draft, { subject: "", body: "", amend: false, saved: null });
+      if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
+      Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
+      otherDrafts.delete(data.path);
       if (overview.value) otherStacks.set(overview.value.path, [undoStack.value, redoStack.value]);
       [undoStack.value, redoStack.value] = otherStacks.get(data.path) ?? [[], []];
       otherStacks.delete(data.path);

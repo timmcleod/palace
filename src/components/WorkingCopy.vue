@@ -309,7 +309,9 @@ async function commit() {
   try {
     const step = props.draft.amend ? { label: "Amend", mode: "soft" } : { label: "Commit", mode: "soft", message };
     await props.undoable(step, () => invoke("commit_changes", { path: props.path, message, amend: props.draft.amend }));
-    Object.assign(props.draft, { subject: "", body: "", amend: false, saved: null });
+    // After amending, whatever was being written before comes back.
+    const before = props.draft.amend ? props.draft.saved : null;
+    Object.assign(props.draft, before ?? { subject: "", body: "" }, { amend: false, saved: null });
     head.value = null;
   } catch (e) {
     commitError.value = String(e);

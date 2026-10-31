@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { issueError } from "../lib/issues.js";
 import { commandKey } from "../lib/platform.js";
+import { draftFor, dropDraft, keepDraft } from "../lib/drafts.js";
 import MarkdownEditor from "./MarkdownEditor.vue";
 
 // The New Issue dialog: a title and a Markdown description. It creates the issue
@@ -14,8 +15,11 @@ const props = defineProps({
 // "close" gives the new issue, or nothing when canceled.
 const emit = defineEmits(["close"]);
 
-const title = ref("");
-const body = ref("");
+// What was written when the dialog was last canceled for this repository.
+const draftKey = `issue:${props.repo.owner}/${props.repo.repo}`.toLowerCase();
+const kept = draftFor(draftKey);
+const title = ref(kept?.title ?? "");
+const body = ref(kept?.body ?? "");
 const busy = ref(false);
 const error = ref("");
 const titleField = ref(null);
@@ -36,12 +40,23 @@ async function create() {
       title: title.value,
       body: body.value,
     });
+    dropDraft(draftKey);
     emit("close", issue);
   } catch (e) {
     error.value = issueError(e).text;
   } finally {
     busy.value = false;
   }
+}
+
+// Canceling keeps what was written for next time; a click outside, easily a slip,
+// doesn't close the dialog then.
+function cancel({ outside = false } = {}) {
+  const typed = title.value.trim() !== "" || body.value.trim() !== "";
+  if (outside && typed) return;
+  if (typed) keepDraft(draftKey, { title: title.value, body: body.value });
+  else dropDraft(draftKey);
+  emit("close");
 }
 
 // Enter in the title moves on to the description; Ctrl+Enter (Cmd+Enter on a Mac)
@@ -55,7 +70,7 @@ function onTitleKeydown(event) {
 </script>
 
 <template>
-  <div class="backdrop" @mousedown.self="emit('close')" @keydown.esc="emit('close')">
+  <div class="backdrop" @mousedown.self="cancel({ outside: true })" @keydown.esc="cancel()">
     <div class="dialog" role="dialog" aria-labelledby="new-issue-title">
       <h2 id="new-issue-title">New Issue</h2>
       <p class="dim">On {{ repo.owner }}/{{ repo.repo }}</p>
@@ -77,12 +92,12 @@ function onTitleKeydown(event) {
         placeholder="Describe the issue"
         :disabled="busy"
         @submit="create"
-        @cancel="emit('close')"
+        @cancel="cancel()"
       />
       <p v-if="error" class="error">{{ error }}</p>
 
       <div class="buttons">
-        <button type="button" class="secondary-button" :disabled="busy" @click="emit('close')">Cancel</button>
+        <button type="button" class="secondary-button" :disabled="busy" @click="cancel()">Cancel</button>
         <button type="button" class="primary-button" :disabled="!ready" @click="create">
           {{ busy ? "Creating…" : "Create Issue" }}
         </button>
