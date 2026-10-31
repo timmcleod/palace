@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.svg" width="96" height="96" alt="">
+  <img src="https://timmcleod.github.io/palace/assets/castle.webp" width="480" height="252" alt="">
 </p>
 
 <h1 align="center">Palace</h1>
