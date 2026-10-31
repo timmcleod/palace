@@ -33,8 +33,23 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
   // Asks first. Most of what's asked about can be undone, except changes to a remote.
   const confirm = (message, title, confirmLabel, danger = true) => askConfirm({ title, message, confirmLabel, danger });
 
-  function checkout(kind, name) {
+  async function checkout(kind, name) {
+    if (!(await leaveDetached())) return "Canceled.";
     return run(["Checking out…", "Checked out", "Checkout failed"], "checkout", { kind, name });
+  }
+
+  // Whether it's fine to move HEAD elsewhere: asks first when it's detached at commits
+  // no branch or tag has, which would be left behind.
+  async function leaveDetached() {
+    if (!overview.value || current()) return true;
+    const count = await invoke("commits_only_at_head", { path: overview.value.path }).catch(() => 0);
+    if (!count) return true;
+    const commits = count === 1 ? "a commit" : `${count} commits`;
+    return confirm(
+      `HEAD is detached at ${commits} that no branch or tag has. Once you check out something else, ${count === 1 ? "it's" : "they're"} hard to find again.\n\nTo keep ${count === 1 ? "it" : "them"}, cancel and create a branch here first.`,
+      "Leave Commits Behind?",
+      "Check Out Anyway",
+    );
   }
 
   async function newBranch(start = null, startLabel = null) {
@@ -50,6 +65,7 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
       confirmLabel: "Create Branch",
     });
     if (!values) return;
+    if (start && values.checkout && !(await leaveDetached())) return;
     const name = values.name.trim();
     if (remote) writeJson(PUBLISH_KEY, values.publish);
     const error = await run(["Creating branch…", "Created branch", "Couldn't create the branch"], "create_branch", {
@@ -160,10 +176,11 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
     if (!error) removeKey(overview.value.path, `branch:${name}`);
   }
 
-  // Deletes a branch whose pull request was merged on GitHub. A squash or rebase
-  // leaves it looking unmerged to git, so it's forced; Undo brings it back.
-  async function deleteMergedBranch(name) {
-    const error = await run(["Deleting branch…", "Deleted branch", "Couldn't delete the branch"], "delete_branch", { name, force: true });
+  // Deletes a branch whose pull request was merged on GitHub, if everything on it was
+  // in the merged `commit`. A squash or rebase leaves it looking unmerged to git, so
+  // it's forced; Undo brings it back.
+  async function deleteMergedBranch(name, commit) {
+    const error = await run(["Deleting branch…", "Deleted branch", "Couldn't delete the branch"], "delete_merged_branch", { name, commit });
     if (!error) removeKey(overview.value.path, `branch:${name}`);
     return error;
   }
@@ -500,6 +517,14 @@ export function useGitActions({ overview, run, compare, pullRequest }) {
         `Abort the ${operation}? The branch goes back to how it was before, and any conflicts you've resolved are thrown away.`,
         `Abort ${operation}`,
         "Abort",
+      );
+      if (!ok) return;
+    }
+    if (action === "skip") {
+      const ok = await confirm(
+        `Skip the commit the ${operation} stopped at? Its changes are left out of the branch, along with any conflicts you've resolved in it.\n\nUntil the ${operation} is finished, aborting it still brings everything back.`,
+        "Skip Commit",
+        "Skip",
       );
       if (!ok) return;
     }

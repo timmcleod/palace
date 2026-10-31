@@ -50,6 +50,7 @@ pub async fn create_tag(path: String, name: String, target: Option<String>, mess
 /// Deletes a tag from this repository only; a pushed copy stays on the remote.
 #[tauri::command]
 pub async fn delete_tag(path: String, name: String) -> Result<String, String> {
+    crate::undo::keep(&path, &format!("refs/tags/{name}"));
     git(&path, &["tag", "--delete", &name], None)?;
     Ok(format!("Deleted the tag {name}."))
 }

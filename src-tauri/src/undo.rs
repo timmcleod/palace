@@ -76,8 +76,37 @@ pub async fn restore_snapshot(path: String, from: Snapshot, to: Snapshot, mode: 
         .map_err(|e| e.to_string())?
 }
 
+/// Where commits and tags something deleted are kept for undoing it: deleting a
+/// branch deletes its reflog too, and dropping a stash its entry in the stash's, so
+/// what only they had is unreachable, and git's routine cleanup may remove it for
+/// good. These refs keep it while Palace runs; the next run lets them go.
+const KEPT: &str = "refs/palace/kept/";
+
+/// Keeps what `name` (a full ref name, or "stash@{n}") points at for undo, before it's
+/// deleted.
+pub(crate) fn keep(path: &str, name: &str) {
+    let Ok(repo) = Repository::discover(path) else { return };
+    let Ok(object) = repo.revparse_single(name) else { return };
+    let id = object.id();
+    let _ = repo.reference(&format!("{KEPT}{id}"), id, true, "Kept by Palace for undo");
+}
+
+/// Removes the refs a previous run kept, once per run for each repository.
+fn release_kept(repo: &Repository) {
+    static RELEASED: std::sync::Mutex<BTreeSet<std::path::PathBuf>> = std::sync::Mutex::new(BTreeSet::new());
+    if !RELEASED.lock().unwrap().insert(repo.path().to_path_buf()) {
+        return;
+    }
+    if let Ok(refs) = repo.references_glob(&format!("{KEPT}*")) {
+        for mut reference in refs.flatten() {
+            let _ = reference.delete();
+        }
+    }
+}
+
 fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
     let mut repo = Repository::discover(path).map_err(message)?;
+    release_kept(&repo);
     let (head_branch, head_id, refs, upstreams) = read_refs(&repo).map_err(message)?;
     let stashes = stash_list(&mut repo).map_err(message)?;
     let files = read_files(&repo, cover)?;
@@ -762,6 +791,26 @@ mod tests {
     }
 
     #[test]
+    fn undoing_a_mixed_reset_brings_back_what_was_staged() {
+        let t = TempRepo::new("undo-reset-staged");
+        let first = t.commit(&[("a.txt", Some("1\n")), ("b.txt", Some("1\n"))], "First");
+        t.commit(&[("a.txt", Some("2\n"))], "Second");
+        // Staged, then edited again: the reset keeps the file but not what was staged.
+        t.write(&[("b.txt", Some("staged\n"))]);
+        git(t.path(), &["add", "b.txt"], None).unwrap();
+        t.write(&[("b.txt", Some("staged\nand more\n"))]);
+        let step = covering(&t, Cover { changed: true, ..Default::default() }, || {
+            run(crate::reset::reset(t.path().into(), first.to_string(), true)).unwrap();
+        });
+        assert_eq!(git(t.path(), &["diff", "--cached", "--name-only"], None).unwrap(), "");
+
+        undo(&t, &step, "mixed").unwrap();
+        assert_eq!(git(t.path(), &["show", ":b.txt"], None).unwrap(), "staged");
+        assert_eq!(read(&t, "b.txt"), "staged\nand more\n");
+        assert_eq!(status(&t), "MM b.txt");
+    }
+
+    #[test]
     fn undoing_a_checkout_switches_back() {
         let t = TempRepo::new("undo-checkout");
         t.commit(&[("a.txt", Some("1\n"))], "First");
@@ -812,6 +861,26 @@ mod tests {
         assert_eq!(undo(&t, &step, "keep").unwrap(), format!("Renamed trunk to {main}. Deleted the tag “trunk”."));
         assert_eq!(t.branch(), main);
         assert!(t.repo.find_reference("refs/tags/trunk").is_err());
+    }
+
+    #[test]
+    fn what_was_deleted_is_kept_for_undo_until_the_next_run() {
+        let t = TempRepo::new("undo-kept");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        git(t.path(), &["switch", "-q", "-c", "gone"], None).unwrap();
+        let only_here = t.commit(&[("b.txt", Some("b\n"))], "Only on gone");
+        git(t.path(), &["switch", "-q", "-"], None).unwrap();
+        let step = around(&t, || {
+            run(crate::branch::delete_branch(t.path().into(), "gone".into(), true)).unwrap();
+        });
+        let kept = format!("{KEPT}{only_here}");
+        assert_eq!(t.repo.refname_to_id(&kept).unwrap(), only_here);
+
+        // Git's cleanup, at its most thorough, still leaves the commit.
+        git(t.path(), &["-c", "gc.reflogExpire=now", "-c", "gc.reflogExpireUnreachable=now", "gc", "-q", "--prune=now"], None).unwrap();
+        undo(&t, &step, "keep").unwrap();
+        assert_eq!(t.repo.refname_to_id("refs/heads/gone").unwrap(), only_here);
+        assert!(!step.0.refs.contains_key(&kept), "snapshots leave them out");
     }
 
     #[test]

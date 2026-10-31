@@ -297,12 +297,14 @@ fn fetch_all(path: &str, running: &Running, report: Report) -> Result<String, St
 fn pull_current(path: &str, options: &PullOptions, running: &Running, report: Report) -> Result<String, String> {
     let plan = pull_plan(path, options)?;
     let args: Vec<&str> = plan.args.iter().map(String::as_str).collect();
+    let stash = crate::stash::newest(path);
     let output = git_with_progress(path, &args, running, report).map_err(|e| crate::branch::stopped_or(path, e))?;
-    Ok(if output.contains("Already up to date") {
+    let done = if output.contains("Already up to date") {
         format!("{} is already up to date.", plan.branch)
     } else {
         format!("Pulled {} into {}.", plan.upstream, plan.branch)
-    })
+    };
+    Ok(crate::stash::unless_left_behind(path, stash, done))
 }
 
 fn push_current(path: &str, force: bool, running: &Running, report: Report) -> Result<String, String> {

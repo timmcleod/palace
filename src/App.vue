@@ -281,7 +281,7 @@ function onPullUpdated(pull) {
 // After a pull request is merged here, the merge is fetched, and the local branch
 // that tracked it is offered for deleting: from wherever it's checked out, by going
 // to the branch it was merged into.
-async function onPullMerged({ number, base, head, headRepo, branchDeleted }) {
+async function onPullMerged({ number, base, head, headRepo, headSha, branchDeleted }) {
   const remotes = overview.value.remotes;
   const headRemote = githubRemoteOf(remotes, headRepo);
   const baseRemote = githubRemoteOf(remotes, issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`);
@@ -292,10 +292,12 @@ async function onPullMerged({ number, base, head, headRepo, branchDeleted }) {
 
   const offers = [];
   // Deleting is forced, since a squash or rebase leaves the branch looking unmerged,
-  // so a branch with commits that were never pushed is kept.
-  const unpushed = local?.ahead > 0;
+  // so a branch with commits that weren't in the pull request is kept.
+  const path = overview.value.path;
+  const unpushed =
+    local && !(await invoke("branch_within", { path, branch: local.name, commit: headSha }).catch(() => false));
   if (local && !unpushed && local.name !== overview.value.head.branch) {
-    offers.push({ label: `Delete “${local.name}”`, run: () => actions.deleteMergedBranch(local.name) });
+    offers.push({ label: `Delete “${local.name}”`, run: () => actions.deleteMergedBranch(local.name, headSha) });
   } else if (local && !unpushed) {
     const into =
       overview.value.branches.find((b) => baseRemote && b.upstream === `${baseRemote.name}/${base}`) ??
@@ -303,7 +305,7 @@ async function onPullMerged({ number, base, head, headRepo, branchDeleted }) {
     if (into) {
       offers.push({
         label: `Switch to “${into.name}” and Delete “${local.name}”`,
-        run: async () => (await actions.checkout("branch", into.name)) || actions.deleteMergedBranch(local.name),
+        run: async () => (await actions.checkout("branch", into.name)) || actions.deleteMergedBranch(local.name, headSha),
       });
     }
   }
@@ -313,7 +315,7 @@ async function onPullMerged({ number, base, head, headRepo, branchDeleted }) {
     state: "done",
     message: [
       branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
-      unpushed && `Your local “${local.name}” has commits that weren't pushed, so it's been kept.`,
+      unpushed && `Your local “${local.name}” has commits that weren't in the pull request, so it's been kept.`,
     ]
       .filter(Boolean)
       .join(" "),
@@ -662,13 +664,26 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
   try {
     await stopBackgroundFetch();
     const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
-    const label = !path && (undoLabel ?? UNDOABLE[command]?.(args));
-    const mode = command === "reset" && args.keepChanges ? "mixed" : "keep";
+    // Continuing or skipping to the end of what stopped makes the whole of it undoable.
+    const resumed =
+      !path && command === "control_operation" && args.action !== "abort" && stopped?.path === overview.value.path ? stopped : null;
+    if (command === "control_operation" && !resumed) stopped = null;
+    const label = !path && (resumed?.step.label ?? undoLabel ?? UNDOABLE[command]?.(args));
+    const mode = resumed?.step.mode ?? (command === "reset" && args.keepChanges ? "mixed" : "keep");
     const undone = undoStack.value.at(-1);
-    op.message = await (label ? undoable({ label, mode, cover: COVER[command]?.(args) }, work) : work());
+    const message = await (label ? undoable({ label, mode, cover: COVER[command]?.(args), resumed }, work) : work());
+    if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
+    // Done, but changes set aside for it conflicted when put back.
+    if (message.startsWith("CONFLICT: ")) {
+      op.state = "conflict";
+      op.title = `${done}, with conflicts`;
+      op.message = message.slice("CONFLICT: ".length);
+      selected.value = "workspace:working-copy";
+      return null;
+    }
+    op.message = message;
     op.state = "done";
     op.title = done;
-    if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
     if (command === "push" || command === "publish_branch") offerPullRequest(op, args.branch ?? overview.value.head.branch);
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") {
@@ -786,6 +801,7 @@ const UNDOABLE = {
   checkout: named("Checkout"),
   create_branch: named("New Branch"),
   delete_branch: named("Delete Branch"),
+  delete_merged_branch: named("Delete Branch"),
   rename_branch: named("Rename Branch"),
   merge: named("Merge"),
   rebase: named("Rebase"),
@@ -805,6 +821,8 @@ const UNDOABLE = {
 const COVER = {
   stash_save: ({ files }) => (files ? { files } : { changed: true }),
   stash_apply: ({ index }) => ({ stash: index }),
+  // Keeping changes unstages them, and what was staged of a file edited since is lost.
+  reset: ({ keepChanges }) => (keepChanges ? { changed: true } : undefined),
 };
 const MAX_UNDO = 50;
 
@@ -815,14 +833,20 @@ const redoStack = ref([]);
 // Other repositories' steps, kept for when they're open again: path → [undo, redo].
 const otherStacks = new Map();
 
+// A step that stopped for conflicts, to undo as a whole once it's continued to the
+// end: { path, step, before }.
+let stopped = null;
+
 /**
  * Runs `work`, and if it changed any branch, tag or stash, or the files `step.cover`
  * names, remembers how to undo it. `step` is { label, mode, cover } and, for a
  * commit, its message. cover is take_snapshot's: { files, changed, stash }.
+ * step.resumed is a stopped step this finishes.
  */
-async function undoable({ cover, ...step }, work) {
+async function undoable({ cover, resumed, ...step }, work) {
   await stopBackgroundFetch();
   const path = overview.value.path;
+  stopped = null;
   let reason = "";
   const snapshot = (cover) =>
     invoke("take_snapshot", { path, cover }).catch((e) => {
@@ -831,7 +855,7 @@ async function undoable({ cover, ...step }, work) {
     });
   // Without a snapshot, it isn't undoable. Changes to files would then be lost for
   // good, though the confirmation said they could be undone, so it asks again.
-  const before = await snapshot(cover ?? null);
+  const before = resumed?.before ?? (await snapshot(cover ?? null));
   if (!before && cover) {
     const ok = await askConfirm({
       title: `${step.label} Without Undo?`,
@@ -841,8 +865,19 @@ async function undoable({ cover, ...step }, work) {
     });
     if (!ok) throw CANCELED;
   }
-  const result = await work();
+  let result;
+  try {
+    result = await work();
+  } catch (e) {
+    if (before && String(e).startsWith("CONFLICT: ")) stopped = { path, step: resumed?.step ?? step, before };
+    throw e;
+  }
   const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
+  // A rebase that stopped again leaves HEAD detached, and is still to be finished.
+  if (resumed && before.head_branch && !after?.head_branch) {
+    stopped = resumed;
+    return result;
+  }
   if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
     undoStack.value = [...undoStack.value.slice(1 - MAX_UNDO), { ...step, before, after }];
     redoStack.value = [];

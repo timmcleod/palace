@@ -36,6 +36,26 @@ pub async fn checkout(path: String, kind: String, name: String) -> Result<String
     }
 }
 
+/// How many commits a detached HEAD has that no branch, tag or remote branch has:
+/// what checking out something else would leave behind.
+#[tauri::command]
+pub async fn commits_only_at_head(path: String) -> Result<usize, String> {
+    let repo = open(&path)?;
+    if !repo.head_detached().unwrap_or(false) {
+        return Ok(0);
+    }
+    let head = repo.head().ok().and_then(|h| h.target()).ok_or("HEAD doesn't point at a commit.")?;
+    let mut walk = repo.revwalk().map_err(|e| e.message().to_string())?;
+    walk.push(head).map_err(|e| e.message().to_string())?;
+    for reference in repo.references().map_err(|e| e.message().to_string())?.flatten() {
+        let kept = reference.is_branch() || reference.is_tag() || reference.is_remote();
+        if let Some(id) = kept.then(|| reference.peel_to_commit().ok()).flatten().map(|c| c.id()) {
+            walk.hide(id).map_err(|e| e.message().to_string())?;
+        }
+    }
+    Ok(walk.count())
+}
+
 /// Checks out a remote branch as a local branch of the same name that tracks it,
 /// reusing the local branch if one already exists.
 fn checkout_remote_branch(path: &str, remote_branch: &str) -> Result<String, String> {
@@ -107,7 +127,38 @@ pub(crate) fn retrack(path: &str, remote: &str, old: &str, new: &str) -> Result<
 /// commits aren't merged anywhere, and that refusal is returned as the error.
 #[tauri::command]
 pub async fn delete_branch(path: String, name: String, force: bool) -> Result<String, String> {
+    crate::undo::keep(&path, &format!("refs/heads/{name}"));
     git(&path, &["branch", if force { "-D" } else { "-d" }, &name], None)?;
+    Ok(format!("Deleted {name}."))
+}
+
+/// Whether everything on local `branch` is in `commit`: its tip is that commit or one
+/// before it. False when `commit` isn't here.
+fn within(repo: &Repository, branch: &str, commit: &str) -> bool {
+    let tip = repo.find_branch(branch, git2::BranchType::Local).ok().and_then(|b| b.get().target());
+    let commit = git2::Oid::from_str(commit).ok().filter(|id| repo.find_commit(*id).is_ok());
+    match (tip, commit) {
+        (Some(tip), Some(commit)) => tip == commit || repo.graph_descendant_of(commit, tip).unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Whether local `branch` has nothing that isn't in `commit`, the head of a pull
+/// request that was merged, so deleting it loses nothing.
+#[tauri::command]
+pub async fn branch_within(path: String, branch: String, commit: String) -> Result<bool, String> {
+    Ok(within(&open(&path)?, &branch, &commit))
+}
+
+/// Deletes a branch whose pull request was merged, as long as everything on it was in
+/// the merged `commit`. Forced, as a squash or rebase leaves it looking unmerged.
+#[tauri::command]
+pub async fn delete_merged_branch(path: String, name: String, commit: String) -> Result<String, String> {
+    if !within(&open(&path)?, &name, &commit) {
+        return Err(format!("{name} has commits that weren't in the pull request, so it's been kept."));
+    }
+    crate::undo::keep(&path, &format!("refs/heads/{name}"));
+    git(&path, &["branch", "-D", &name], None)?;
     Ok(format!("Deleted {name}."))
 }
 
@@ -134,21 +185,24 @@ pub async fn merge(path: String, branch: String, options: Option<MergeOptions>) 
     }
     args.push(&branch);
 
+    let stash = crate::stash::newest(&path);
     let output = git(&path, &args, None).map_err(|e| {
         if options.squash { squash_conflict_or(&path, &branch, e) } else { stopped_or(&path, e) }
     })?;
+    let checked = |done: String| Ok(crate::stash::unless_left_behind(&path, stash.clone(), done));
     if output.contains("Already up to date") {
-        return Ok(format!("Already up to date with {branch}."));
+        return checked(format!("Already up to date with {branch}."));
     }
     if !options.squash {
-        return Ok(if output.contains("Fast-forward") {
+        return checked(if output.contains("Fast-forward") {
             format!("Fast-forwarded to {branch}.")
         } else {
             format!("Merged {branch}.")
         });
     }
-    if !options.commit.unwrap_or(true) {
-        return Ok(format!("Staged the changes from {branch}. Commit them when you're ready."));
+    // Conflicted files can't be committed, so the squash waits for them too.
+    if !options.commit.unwrap_or(true) || crate::stash::newest(&path) != stash {
+        return checked(format!("Staged the changes from {branch}. Commit them when you're ready."));
     }
     // Git has written a message listing the squashed commits; commit with it.
     git(&path, &["commit", "--no-edit"], None)?;
@@ -298,12 +352,15 @@ pub async fn control_operation(path: String, action: String) -> Result<String, S
         _ => return Err(format!("Can't {action} a {operation}.")),
     };
 
+    // A rebase puts back changes it set aside when it ends, either way.
+    let stash = crate::stash::newest(&path);
     git(&path, &args, None).map_err(|e| stopped_or(&path, e))?;
-    Ok(match action.as_str() {
+    let done = match action.as_str() {
         "abort" => format!("Aborted the {operation}."),
-        _ if self::operation(&open(&path)?).is_some() => format!("The {operation} continued and stopped again."),
+        _ if self::operation(&open(&path)?).is_some() => return Ok(format!("The {operation} continued and stopped again.")),
         _ => format!("Finished the {operation}."),
-    })
+    };
+    Ok(crate::stash::unless_left_behind(&path, stash, done))
 }
 
 /// When a merge or rebase stops for conflicts, git exits with an error, but the
@@ -629,5 +686,49 @@ mod tests {
         assert!(refused.contains("would be overwritten"), "{refused}");
         run(merge(t.path().into(), "feature".into(), options(r#"{"autostash":true}"#))).unwrap();
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "one\n2\n3\n4\nfive\n");
+    }
+
+    #[test]
+    fn changes_set_aside_that_conflict_when_put_back_are_not_a_plain_success() {
+        let t = TempRepo::new("merge-autostash-conflict");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        t.commit(&[("a.txt", Some("feature\n"))], "Feature");
+        git(t.path(), &["switch", &main], None).unwrap();
+        t.write(&[("a.txt", Some("mine\n"))]);
+
+        let message = run(merge(t.path().into(), "feature".into(), options(r#"{"autostash":true}"#))).unwrap();
+        assert!(message.starts_with("CONFLICT: Fast-forwarded to feature. Your uncommitted changes conflicted"), "{message}");
+        assert_eq!(git(t.path(), &["stash", "list"], None).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn counting_the_commits_only_a_detached_head_has() {
+        let t = TempRepo::new("detached-commits");
+        let first = t.commit(&[("a.txt", Some("a\n"))], "First");
+        assert_eq!(run(commits_only_at_head(t.path().into())).unwrap(), 0);
+        git(t.path(), &["switch", "-q", "--detach", &first.to_string()], None).unwrap();
+        assert_eq!(run(commits_only_at_head(t.path().into())).unwrap(), 0);
+        t.commit(&[("b.txt", Some("b\n"))], "Second");
+        t.commit(&[("c.txt", Some("c\n"))], "Third");
+        assert_eq!(run(commits_only_at_head(t.path().into())).unwrap(), 2);
+        git(t.path(), &["tag", "kept"], None).unwrap();
+        assert_eq!(run(commits_only_at_head(t.path().into())).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_merged_branch_is_only_deleted_when_the_merge_had_all_of_it() {
+        let (t, _) = feature_ahead("delete-merged");
+        let merged = t.repo.find_branch("feature", git2::BranchType::Local).unwrap().get().target().unwrap().to_string();
+        git(t.path(), &["switch", "-q", "feature"], None).unwrap();
+        t.commit(&[("later.txt", Some("later\n"))], "Made after the merge");
+        git(t.path(), &["switch", "-q", "-"], None).unwrap();
+
+        let kept = run(delete_merged_branch(t.path().into(), "feature".into(), merged.clone())).unwrap_err();
+        assert!(kept.contains("weren't in the pull request"), "{kept}");
+        git(t.path(), &["branch", "-f", "feature", &merged], None).unwrap();
+        run(delete_merged_branch(t.path().into(), "feature".into(), merged)).unwrap();
+        assert!(t.repo.find_branch("feature", git2::BranchType::Local).is_err());
     }
 }

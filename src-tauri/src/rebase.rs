@@ -61,16 +61,9 @@ pub async fn rebase_plan(path: String, from: String) -> Result<RebasePlan, Strin
     }
 
     let base = from.parent_ids().next();
-    let mut walk = repo.revwalk().map_err(message)?;
-    walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE).map_err(message)?;
-    walk.push(head_id).map_err(message)?;
-    if let Some(base) = base {
-        walk.hide(base).map_err(message)?;
-    }
-
     let mut commits = Vec::new();
-    for oid in walk {
-        let commit = repo.find_commit(oid.map_err(message)?).map_err(message)?;
+    for oid in since(&repo, head_id, base)? {
+        let commit = repo.find_commit(oid).map_err(message)?;
         if commit.parent_count() > 1 {
             return Err(format!(
                 "There's a merge commit ({}) in this range. Interactive rebase can only rewrite a straight line of commits; start from a commit after the merge.",
@@ -113,11 +106,32 @@ pub async fn rebase_plan(path: String, from: String) -> Result<RebasePlan, Strin
     })
 }
 
+/// The commits after `base` (all of them when None) up to `head`, oldest first.
+fn since(repo: &Repository, head: Oid, base: Option<Oid>) -> Result<Vec<Oid>, String> {
+    let mut walk = repo.revwalk().map_err(message)?;
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE).map_err(message)?;
+    walk.push(head).map_err(message)?;
+    if let Some(base) = base {
+        walk.hide(base).map_err(message)?;
+    }
+    walk.map(|oid| oid.map_err(message)).collect()
+}
+
 /// Rewrites the current branch from `base` (the plan's base; None for its first
-/// commit) by the given steps, oldest first.
+/// commit) by the given steps, oldest first. The steps must name exactly the commits
+/// the branch has from there, so one made since the plan isn't dropped.
 #[tauri::command]
 pub async fn rebase_interactive(path: String, base: Option<String>, steps: Vec<Step>) -> Result<String, String> {
     let repo = Repository::discover(&path).map_err(message)?;
+    let head = repo.head().ok().filter(|h| h.is_branch()).and_then(|h| h.target()).ok_or("HEAD isn't on a branch anymore.")?;
+    let base_id = base.as_deref().map(Oid::from_str).transpose().map_err(message)?;
+    let mut now: Vec<String> = since(&repo, head, base_id)?.iter().map(Oid::to_string).collect();
+    let mut planned: Vec<String> = steps.iter().map(|s| s.id.clone()).collect();
+    now.sort();
+    planned.sort();
+    if now != planned {
+        return Err("The branch has changed since these commits were listed. Nothing was rewritten; try again.".into());
+    }
     let work = repo.path().join("palace-rebase");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -139,12 +153,14 @@ pub async fn rebase_interactive(path: String, base: Option<String>, steps: Vec<S
     }
 
     let kept = steps.iter().filter(|s| s.action != "drop" && s.action != "fixup").count();
+    let stash = crate::stash::newest(&path);
     git(&path, &args, None).map_err(|e| stopped_or(&path, e))?;
     let _ = std::fs::remove_dir_all(&work);
-    Ok(match kept {
+    let done = match kept {
         1 => "Rewrote the branch; it now has 1 commit from there.".into(),
         n => format!("Rewrote the branch; it now has {n} commits from there."),
-    })
+    };
+    Ok(crate::stash::unless_left_behind(&path, stash, done))
 }
 
 /// Git's to-do list for the steps. A group is a pick and the fixups after it; when
@@ -284,9 +300,20 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_made_since_the_plan_is_never_dropped() {
+        let (t, [a, b, c, d]) = four("rewrite-stale");
+        let steps = vec![step(b, "pick", None), step(d, "pick", None), step(c, "pick", None)];
+        let e = t.commit(&[("e.txt", Some("e\n"))], "E");
+        let refused = run(rebase_interactive(t.path().into(), Some(a.to_string()), steps)).unwrap_err();
+        assert!(refused.starts_with("The branch has changed"), "{refused}");
+        assert_eq!(t.head(), e);
+    }
+
+    #[test]
     fn rewriting_from_the_first_commit() {
-        let (t, [a, b, _, _]) = four("root");
-        run(rebase_interactive(t.path().into(), None, vec![step(a, "pick", Some("Start")), step(b, "fixup", None)])).unwrap();
+        let (t, [a, b, c, d]) = four("root");
+        let steps = vec![step(a, "pick", Some("Start")), step(b, "fixup", None), step(c, "fixup", None), step(d, "fixup", None)];
+        run(rebase_interactive(t.path().into(), None, steps)).unwrap();
         let mut walk = t.repo.revwalk().unwrap();
         walk.push_head().unwrap();
         let all: Vec<_> = walk.map(|id| t.repo.find_commit(id.unwrap()).unwrap().summary().ok().flatten().unwrap().to_string()).collect();

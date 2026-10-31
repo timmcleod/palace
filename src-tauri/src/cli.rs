@@ -10,6 +10,12 @@ use std::sync::Mutex;
 /// Runs git to completion. On failure, returns what git printed so the user can see
 /// why (a failing hook, a missing identity, …).
 pub(crate) fn git(path: &str, args: &[&str], stdin: Option<&str>) -> Result<String, String> {
+    git_input(path, args, stdin.map(str::as_bytes))
+}
+
+/// `git`, with input that needn't be UTF-8, such as a patch of a file in another
+/// encoding.
+pub(crate) fn git_input(path: &str, args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
     let mut child = command(&workdir(path)?, args)
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
@@ -22,7 +28,7 @@ pub(crate) fn git(path: &str, args: &[&str], stdin: Option<&str>) -> Result<Stri
             .stdin
             .take()
             .expect("stdin is piped")
-            .write_all(input.as_bytes())
+            .write_all(input)
             .map_err(|e| format!("Couldn't send input to git: {e}"))?;
     }
 

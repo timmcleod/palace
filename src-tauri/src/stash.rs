@@ -42,6 +42,9 @@ pub async fn stash_save(
 #[tauri::command]
 pub async fn stash_apply(path: String, index: usize, pop: bool) -> Result<String, String> {
     let stash = format!("stash@{{{index}}}");
+    if pop {
+        crate::undo::keep(&path, &stash);
+    }
     git(&path, &["stash", if pop { "pop" } else { "apply" }, &stash], None).map_err(|e| {
         if e.contains("CONFLICT") {
             let kept = if pop { " The stash was kept." } else { "" };
@@ -53,8 +56,28 @@ pub async fn stash_apply(path: String, index: usize, pop: bool) -> Result<String
     Ok(if pop { "Popped the stash.".into() } else { "Applied the stash.".into() })
 }
 
+/// The newest stash, to compare before and after something that sets changes aside
+/// (`--autostash`): git leaves them in the stash list, with conflict markers in the
+/// files, when they don't go back cleanly, yet still reports success.
+pub(crate) fn newest(path: &str) -> Option<String> {
+    git(path, &["rev-parse", "-q", "--verify", "refs/stash"], None).ok()
+}
+
+/// `done`, or when a new stash appeared since `before`, a conflict saying where the
+/// changes went.
+pub(crate) fn unless_left_behind(path: &str, before: Option<String>, done: String) -> String {
+    if newest(path) == before {
+        return done;
+    }
+    format!(
+        "CONFLICT: {done} Your uncommitted changes conflicted when put back, so they're also kept in the stash list. \
+         Resolve the marked files in the working copy, then delete that stash."
+    )
+}
+
 #[tauri::command]
 pub async fn stash_drop(path: String, index: usize) -> Result<String, String> {
+    crate::undo::keep(&path, &format!("stash@{{{index}}}"));
     git(&path, &["stash", "drop", &format!("stash@{{{index}}}")], None)?;
     Ok("Dropped the stash.".into())
 }

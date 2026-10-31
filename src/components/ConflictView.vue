@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { askConfirm } from "../lib/overlays.js";
 
 // A conflicted file with each side of every conflict highlighted, and the ways to
 // resolve it.
@@ -28,6 +29,15 @@ watch(
   { immediate: true },
 );
 
+// Whether a line is one of git's markers: exactly seven of `char`, then the end of the
+// line or, except for =======, a space and a label. A Markdown underline isn't one.
+function isMarker(line, char) {
+  const rest = line.replace(/\r$/, "");
+  if (!rest.startsWith(char.repeat(7))) return false;
+  const after = rest.slice(7);
+  return after === "" || (char !== "=" && after.startsWith(" "));
+}
+
 // Tags each line with the part of a conflict it's in, and numbers each conflict where
 // it starts. Git writes:
 //   <<<<<<< current … ||||||| base (diff3 style only) … ======= … >>>>>>> incoming
@@ -38,17 +48,17 @@ const lines = computed(() => {
   return text.value.split("\n").map((line, i) => {
     let kind = region;
     let block = null;
-    if (line.startsWith("<<<<<<<") && !region) {
+    if (isMarker(line, "<") && !region) {
       kind = "marker";
       region = "current";
       block = blocks++;
-    } else if (line.startsWith("|||||||") && region) {
+    } else if (isMarker(line, "|") && region === "current") {
       kind = "marker";
       region = "base";
-    } else if (line.startsWith("=======") && region) {
+    } else if (isMarker(line, "=") && (region === "current" || region === "base")) {
       kind = "marker";
       region = "incoming";
-    } else if (line.startsWith(">>>>>>>") && region) {
+    } else if (isMarker(line, ">") && region === "incoming") {
       kind = "marker";
       region = null;
     }
@@ -70,6 +80,17 @@ async function resolveBlock(block, side) {
   } finally {
     busy.value = false;
   }
+}
+
+// Taking one side replaces the whole file.
+async function useSide(side) {
+  const ok = await askConfirm({
+    title: side === "current" ? "Use Current" : "Use Incoming",
+    message: `Replace all of “${props.file.path.split("/").at(-1)}” with ${side === "current" ? "HEAD's version" : "the incoming version"}, and mark it as resolved?\n\nThe file as it is now, including any conflicts you've resolved in it, goes to the Trash.`,
+    confirmLabel: "Replace",
+    danger: true,
+  });
+  if (ok) await run("resolve_conflict", { side });
 }
 
 async function run(command, args) {
@@ -94,10 +115,10 @@ async function run(command, args) {
     </p>
 
     <div class="actions">
-      <button class="secondary-button" :disabled="busy" title="Keep HEAD's version of the whole file" @click="run('resolve_conflict', { side: 'current' })">
+      <button class="secondary-button" :disabled="busy" title="Keep HEAD's version of the whole file" @click="useSide('current')">
         Use Current
       </button>
-      <button class="secondary-button" :disabled="busy" title="Keep the whole file as it is in the change being merged, rebased or applied" @click="run('resolve_conflict', { side: 'incoming' })">
+      <button class="secondary-button" :disabled="busy" title="Keep the whole file as it is in the change being merged, rebased or applied" @click="useSide('incoming')">
         Use Incoming
       </button>
       <button class="secondary-button" :disabled="busy" @click="run('open_in_editor')">Open in Editor</button>

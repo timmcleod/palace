@@ -390,12 +390,31 @@ pub async fn github_rename_branch(owner: String, repo: String, branch: String, n
     blocking(move || api::<serde_json::Value>(&token, Method::Post(fields), &path).map(drop).map_err(plain)).await
 }
 
-/// Deletes a branch on GitHub, as after merging its pull request.
+#[derive(Deserialize)]
+struct GitRef {
+    object: GitObject,
+}
+
+#[derive(Deserialize)]
+struct GitObject {
+    sha: String,
+}
+
+/// Deletes a branch on GitHub, as after merging its pull request: only while it's
+/// still at `sha`, the commit that was merged, so nothing pushed since is lost.
 #[tauri::command]
-pub async fn github_delete_branch(owner: String, repo: String, branch: String) -> Result<(), String> {
+pub async fn github_delete_branch(owner: String, repo: String, branch: String, sha: String) -> Result<(), String> {
     let token = token()?;
     let path = format!("/repos/{owner}/{repo}/git/refs/heads/{}", encode_branch(&branch));
-    blocking(move || api(&token, Method::Delete, &path).map_err(plain)).await
+    let one = format!("/repos/{owner}/{repo}/git/ref/heads/{}", encode_branch(&branch));
+    blocking(move || {
+        let now: GitRef = api_get(&token, &one).map_err(plain)?;
+        if now.object.sha != sha {
+            return Err(format!("{branch} has commits pushed since it was merged, so it's been kept on GitHub."));
+        }
+        api(&token, Method::Delete, &path).map_err(plain)
+    })
+    .await
 }
 
 /// The full messages of the commits on `head` that `base` doesn't have, newest first

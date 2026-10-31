@@ -4,7 +4,7 @@
 //! Reading uses git2. Anything that changes the repository runs the git CLI instead,
 //! so hooks, signing and the user's git config apply exactly as they do in a terminal.
 
-use crate::cli::git;
+use crate::cli::{git, git_input};
 use crate::commit::{FileDiff, file_diff_at};
 use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Patch, Repository, StatusOptions, Tree};
 use serde::Serialize;
@@ -107,7 +107,7 @@ pub async fn conflict_file(path: String, file: String) -> Result<String, String>
 /// by staging it as it is in the working copy.
 #[tauri::command]
 pub async fn resolve_conflict(path: String, file: String, side: String) -> Result<(), String> {
-    resolve(&path, &file, &side)
+    resolve(&path, &file, &side, &move_to_trash)
 }
 
 /// Resolves one conflict in a file, the `block`th (from 0), by keeping its "current"
@@ -299,17 +299,17 @@ fn apply_hunk(
         args.push("--reverse");
     }
     args.push("-");
-    git(path, &args, Some(&patch)).map(drop)
+    git_input(path, &args, Some(&patch)).map(drop)
 }
 
 pub(crate) fn discard_lines(path: &str, file: &str, hunk: usize, lines: Option<&[usize]>) -> Result<(), String> {
     let patch = hunk_patch(path, file, None, false, hunk, lines.map(|l| (l, true)))?;
-    git(path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
+    git_input(path, &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).map(drop)
 }
 
 /// A patch holding just one hunk of a file's staged or unstaged diff. With `lines`,
 /// the hunk is narrowed to those of its lines, for a patch applied in reverse when
-/// the flag beside them is set.
+/// the flag beside them is set. It's kept as bytes, as the file may not be UTF-8.
 fn hunk_patch(
     path: &str,
     file: &str,
@@ -317,7 +317,7 @@ fn hunk_patch(
     staged: bool,
     hunk: usize,
     lines: Option<(&[usize], bool)>,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     let repo = Repository::discover(path).map_err(message)?;
     let diff = file_diff(&repo, file, old_path, staged).map_err(message)?;
     let index = delta_index(&diff, file).ok_or("This file no longer has those changes.")?;
@@ -325,29 +325,32 @@ fn hunk_patch(
         .map_err(message)?
         .ok_or("Binary files can't be changed by chunk.")?;
     let text = patch.to_buf().map_err(message)?;
-    let (header, mut hunk) =
-        single_hunk(&String::from_utf8_lossy(&text), hunk).ok_or("That chunk no longer exists.")?;
+    let (mut patch, mut hunk) = single_hunk(&text, hunk).ok_or("That chunk no longer exists.")?;
     if let Some((lines, reverse)) = lines {
         hunk = select_lines(&hunk, lines, reverse).ok_or("Those lines no longer have changes.")?;
     }
-    let mut patch = header + &hunk;
-    if !patch.ends_with('\n') {
-        patch.push('\n');
+    patch.extend(hunk);
+    if !patch.ends_with(b"\n") {
+        patch.push(b'\n');
     }
     Ok(patch)
 }
 
+fn split_lines(text: &[u8]) -> impl Iterator<Item = &[u8]> {
+    text.split_inclusive(|&b| b == b'\n')
+}
+
 /// Splits a patch into its file header and its `hunk`th hunk.
-fn single_hunk(patch: &str, hunk: usize) -> Option<(String, String)> {
-    let mut header = String::new();
-    let mut hunks: Vec<String> = Vec::new();
-    for line in patch.split_inclusive('\n') {
-        if line.starts_with("@@") {
-            hunks.push(String::new());
+fn single_hunk(patch: &[u8], hunk: usize) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut header = Vec::new();
+    let mut hunks: Vec<Vec<u8>> = Vec::new();
+    for line in split_lines(patch) {
+        if line.starts_with(b"@@") {
+            hunks.push(Vec::new());
         }
         match hunks.last_mut() {
-            Some(current) => current.push_str(line),
-            None => header.push_str(line),
+            Some(current) => current.extend_from_slice(line),
+            None => header.extend_from_slice(line),
         }
     }
 
@@ -361,50 +364,55 @@ fn single_hunk(patch: &str, hunk: usize) -> Option<(String, String)> {
 /// isn't there yet and is dropped, while an unchosen removal is still there and stays
 /// as context. Applied in `reverse`, to the new side, it's the other way around.
 /// None when none of the chosen lines is a change.
-fn select_lines(hunk: &str, chosen: &[usize], reverse: bool) -> Option<String> {
-    let mut lines = hunk.split_inclusive('\n');
+fn select_lines(hunk: &[u8], chosen: &[usize], reverse: bool) -> Option<Vec<u8>> {
+    let mut lines = split_lines(hunk);
     let header = lines.next()?;
     // "@@ -12,6 +12,8 @@ function name"
-    let rest = header.strip_prefix("@@ -")?;
-    let (old_start, rest) = rest.split_once(' ')?;
-    let (new_start, section) = rest.strip_prefix('+')?.split_once(" @@")?;
-    let start = |range: &str| range.split(',').next().map(str::to_string);
+    let rest = header.strip_prefix(b"@@ -")?;
+    let space = rest.iter().position(|&b| b == b' ')?;
+    let (old_start, rest) = (&rest[..space], rest[space + 1..].strip_prefix(b"+")?);
+    let end = rest.windows(3).position(|w| w == b" @@")?;
+    let (new_start, section) = (&rest[..end], &rest[end + 3..]);
+    let start = |range: &[u8]| std::str::from_utf8(range).ok()?.split(',').next().map(str::to_string);
     let (old_start, new_start) = (start(old_start)?, start(new_start)?);
 
-    let mut body = String::new();
+    let mut body = Vec::new();
     let (mut old_count, mut new_count, mut changes) = (0, 0, 0);
     // A "\ No newline at end of file" marker belongs to the line before it.
     let mut kept_previous = false;
     for (i, line) in lines.enumerate() {
         let picked = chosen.contains(&i);
-        let kind = match line.chars().next()? {
-            '\\' => {
+        let kind = match line.first()? {
+            b'\\' => {
                 if kept_previous {
-                    body.push_str(line);
+                    body.extend_from_slice(line);
                 }
                 continue;
             }
-            ' ' => Some(' '),
-            c @ ('+' | '-') if picked => {
+            b' ' => Some(b' '),
+            &c @ (b'+' | b'-') if picked => {
                 changes += 1;
                 Some(c)
             }
-            '+' => reverse.then_some(' '),
-            '-' => (!reverse).then_some(' '),
+            b'+' => reverse.then_some(b' '),
+            b'-' => (!reverse).then_some(b' '),
             _ => return None,
         };
         kept_previous = kind.is_some();
         if let Some(kind) = kind {
-            old_count += usize::from(kind != '+');
-            new_count += usize::from(kind != '-');
+            old_count += usize::from(kind != b'+');
+            new_count += usize::from(kind != b'-');
             body.push(kind);
-            body.push_str(&line[1..]);
+            body.extend_from_slice(&line[1..]);
         }
     }
     if changes == 0 {
         return None;
     }
-    Some(format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@{section}{body}"))
+    let mut out = format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@").into_bytes();
+    out.extend_from_slice(section);
+    out.extend(body);
+    Some(out)
 }
 
 fn commit(path: &str, message: &str, amend: bool) -> Result<(), String> {
@@ -454,6 +462,12 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Re
         }
     }
 
+    // A folder here is a submodule or another repository inside this one. Its changes
+    // are its own, and moving it to the Trash would take all of it, history included.
+    if let Some(folder) = targets.iter().find(|t| workdir.join(t).symlink_metadata().is_ok_and(|m| m.is_dir())) {
+        let name = folder.trim_end_matches('/');
+        return Err(format!("{name} is a repository of its own (a submodule), so its changes are inside it. Open it in Palace to discard them there."));
+    }
     for target in &targets {
         let full = workdir.join(target);
         if full.symlink_metadata().is_ok() {
@@ -483,13 +497,19 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Re
     Ok(())
 }
 
-fn resolve(path: &str, file: &str, side: &str) -> Result<(), String> {
+/// Taking a side replaces the whole file, so it goes to `backup` first, along with
+/// any merging done in it by hand.
+fn resolve(path: &str, file: &str, side: &str, backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
     let flag = match side {
         "current" => "--ours",
         "incoming" => "--theirs",
         "resolved" => return stage(path, &[file.to_string()]),
         _ => return Err(format!("Unknown side: {side}")),
     };
+    let full = crate::cli::workdir(path)?.join(file);
+    if full.symlink_metadata().is_ok() {
+        backup(&full)?;
+    }
     match git(path, &["checkout", flag, "--", file], None) {
         Ok(_) => stage(path, &[file.to_string()]),
         // That side deleted the file, so taking it means deleting the file.
@@ -522,8 +542,9 @@ fn take_side(text: &str, block: usize, side: &str) -> Result<String, String> {
     for line in text.split_inclusive('\n') {
         // Only the chosen conflict is changed; everything else is copied as it is.
         let ours = seen == block + 1 && !found;
+        let is = |marker: char| is_marker(line, marker);
         match part {
-            Part::Outside if line.starts_with("<<<<<<<") => {
+            Part::Outside if is('<') => {
                 seen += 1;
                 part = Part::Current;
                 if seen != block + 1 {
@@ -532,20 +553,20 @@ fn take_side(text: &str, block: usize, side: &str) -> Result<String, String> {
             }
             Part::Outside => out.push_str(line),
             _ if !ours => {
-                if line.starts_with(">>>>>>>") {
+                if is('>') && part == Part::Incoming {
                     part = Part::Outside;
-                } else if line.starts_with("|||||||") && part == Part::Current {
+                } else if is('|') && part == Part::Current {
                     part = Part::Base;
-                } else if line.starts_with("=======") && part != Part::Incoming {
+                } else if is('=') && part != Part::Incoming {
                     part = Part::Incoming;
                 }
                 out.push_str(line);
             }
-            Part::Current | Part::Base if line.starts_with("|||||||") => part = Part::Base,
-            Part::Current | Part::Base if line.starts_with("=======") => part = Part::Incoming,
+            Part::Current if is('|') => part = Part::Base,
+            Part::Current | Part::Base if is('=') => part = Part::Incoming,
             Part::Current => current.push_str(line),
             Part::Base => {}
-            Part::Incoming if line.starts_with(">>>>>>>") => {
+            Part::Incoming if is('>') => {
                 part = Part::Outside;
                 found = true;
                 if side != "incoming" {
@@ -560,6 +581,15 @@ fn take_side(text: &str, block: usize, side: &str) -> Result<String, String> {
     }
 
     if found { Ok(out) } else { Err("That conflict isn't in the file anymore. It may have been edited elsewhere.".into()) }
+}
+
+/// Whether `line` is one of git's conflict markers: exactly seven of `marker`, then
+/// the end of the line or, except for =======, a space and a label. A Markdown
+/// underline like ========== isn't one.
+fn is_marker(line: &str, marker: char) -> bool {
+    let line = line.trim_end_matches(['\n', '\r']);
+    let Some(rest) = line.strip_prefix(&marker.to_string().repeat(7)) else { return false };
+    rest.is_empty() || (marker != '=' && rest.starts_with(' '))
 }
 
 fn move_to_trash(file: &Path) -> Result<(), String> {
@@ -772,13 +802,14 @@ mod tests {
 
     #[test]
     fn narrowing_a_hunk_recounts_its_header() {
+        let narrow = |hunk: &str, chosen, reverse| String::from_utf8(select_lines(hunk.as_bytes(), chosen, reverse).unwrap()).unwrap();
         let hunk = "@@ -1,3 +1,3 @@ fn main\n a\n-b\n+B\n+C\n c\n";
-        assert_eq!(select_lines(hunk, &[3], false).unwrap(), "@@ -1,3 +1,4 @@ fn main\n a\n b\n+C\n c\n");
-        assert_eq!(select_lines(hunk, &[1], true).unwrap(), "@@ -1,5 +1,4 @@ fn main\n a\n-b\n B\n C\n c\n");
+        assert_eq!(narrow(hunk, &[3], false), "@@ -1,3 +1,4 @@ fn main\n a\n b\n+C\n c\n");
+        assert_eq!(narrow(hunk, &[1], true), "@@ -1,5 +1,4 @@ fn main\n a\n-b\n B\n C\n c\n");
         // A missing-newline marker goes with the line before it.
         let hunk = "@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+a\n";
-        assert_eq!(select_lines(hunk, &[0], false).unwrap(), "@@ -1,1 +1,0 @@\n-a\n\\ No newline at end of file\n");
-        assert_eq!(select_lines(hunk, &[2], true).unwrap(), "@@ -1,0 +1,1 @@\n+a\n");
+        assert_eq!(narrow(hunk, &[0], false), "@@ -1,1 +1,0 @@\n-a\n\\ No newline at end of file\n");
+        assert_eq!(narrow(hunk, &[2], true), "@@ -1,0 +1,1 @@\n+a\n");
     }
 
     #[test]
@@ -858,6 +889,23 @@ mod tests {
     }
 
     #[test]
+    fn discarding_a_submodule_leaves_it_alone() {
+        let t = TempRepo::new("discard-submodule");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let inner = TempRepo::new("discard-submodule-inner");
+        inner.commit(&[("b.txt", Some("b\n"))], "Inner");
+        git(t.path(), &["-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.path(), "sub"], None).unwrap();
+        git(t.path(), &["commit", "-qm", "Add submodule"], None).unwrap();
+        t.write(&[("sub/b.txt", Some("changed\n"))]);
+
+        let backup = t.dir.join("backup");
+        let refused = discard(t.path(), &["sub".into()], &backup_into(&backup)).unwrap_err();
+        assert!(refused.contains("submodule"), "{refused}");
+        assert_eq!(read(&t, "sub/b.txt").as_deref(), Some("changed\n"));
+        assert!(!backup.exists());
+    }
+
+    #[test]
     fn discarding_a_staged_rename_brings_back_the_old_name() {
         let t = TempRepo::new("discard-rename");
         t.commit(&[("old.txt", Some("content\n"))], "First");
@@ -895,10 +943,30 @@ mod tests {
         t.write(&[("a.txt", Some(&changed))]);
 
         let patch = hunk_patch(t.path(), "a.txt", None, false, 0, None).unwrap();
-        git(t.path(), &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).unwrap();
+        git_input(t.path(), &["apply", "--reverse", "--whitespace=nowarn", "-"], Some(&patch)).unwrap();
 
         let now = read(&t, "a.txt").unwrap();
         assert!(now.contains("line 2\n") && now.contains("line nineteen\n"), "{now}");
+    }
+
+    #[test]
+    fn chunks_of_files_that_arent_utf8_stay_as_they_were() {
+        let t = TempRepo::new("hunk-latin1");
+        // "café" in Latin-1, where é is the single byte E9.
+        let line = |i: usize, word: &[u8]| [format!("line {i} ").as_bytes(), word, b"\n"].concat();
+        let file = |first: &[u8], last: &[u8]| -> Vec<u8> {
+            (1..=20).flat_map(|i| line(i, if i == 1 { first } else if i == 20 { last } else { b"caf\xe9" })).collect()
+        };
+        std::fs::write(t.dir.join("a.txt"), file(b"caf\xe9", b"caf\xe9")).unwrap();
+        git(t.path(), &["add", "a.txt"], None).unwrap();
+        git(t.path(), &["commit", "-qm", "First"], None).unwrap();
+        std::fs::write(t.dir.join("a.txt"), file(b"th\xe9", b"cr\xe8me")).unwrap();
+
+        apply_hunk(t.path(), "a.txt", None, false, 0, None).unwrap();
+        let staged = std::process::Command::new("git").args(["show", ":a.txt"]).current_dir(&t.dir).output().unwrap().stdout;
+        assert_eq!(staged, file(b"th\xe9", b"caf\xe9"));
+        discard_lines(t.path(), "a.txt", 0, None).unwrap();
+        assert_eq!(std::fs::read(t.dir.join("a.txt")).unwrap(), file(b"th\xe9", b"caf\xe9"));
     }
 
     #[test]
@@ -957,13 +1025,29 @@ mod tests {
         assert!(text.contains("<<<<<<<") && text.contains("ours") && text.contains("theirs"), "{text}");
     }
 
+    /// Taking a side backs up the file; the tests let it be replaced.
+    fn keep(_: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
+    #[test]
+    fn taking_a_side_backs_up_the_file_first() {
+        let t = merge_conflict("conflict-backup");
+        t.write(&[("a.txt", Some("merged by hand\n"))]);
+        let backup = t.dir.join("backup");
+        std::fs::create_dir(&backup).unwrap();
+        resolve(t.path(), "a.txt", "current", &backup_into(&backup)).unwrap();
+        assert_eq!(std::fs::read_to_string(backup.join("a.txt")).unwrap(), "merged by hand\n");
+        assert_eq!(read(&t, "a.txt").as_deref(), Some("ours\n"));
+    }
+
     #[test]
     fn resolving_by_taking_a_side() {
         let t = merge_conflict("conflict-resolve");
-        resolve(t.path(), "a.txt", "incoming").unwrap();
+        resolve(t.path(), "a.txt", "incoming", &keep).unwrap();
         assert_eq!(read(&t, "a.txt").as_deref(), Some("theirs\n"));
         // Their side deleted gone.txt, so taking it deletes the file.
-        resolve(t.path(), "gone.txt", "incoming").unwrap();
+        resolve(t.path(), "gone.txt", "incoming", &keep).unwrap();
         assert!(!t.dir.join("gone.txt").exists());
         assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
     }
@@ -972,8 +1056,8 @@ mod tests {
     fn resolving_by_editing_and_marking_resolved() {
         let t = merge_conflict("conflict-mark");
         t.write(&[("a.txt", Some("both\n"))]);
-        resolve(t.path(), "a.txt", "resolved").unwrap();
-        resolve(t.path(), "gone.txt", "current").unwrap();
+        resolve(t.path(), "a.txt", "resolved", &keep).unwrap();
+        resolve(t.path(), "gone.txt", "current", &keep).unwrap();
         assert_eq!(read(&t, "gone.txt").as_deref(), Some("edited\n"));
         assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
     }
@@ -993,6 +1077,11 @@ mod tests {
 
         assert!(take_side(&both, 0, "current").is_err(), "no conflicts are left");
         assert!(take_side(text, 0, "neither").is_err());
+
+        // Markdown underlines and the like inside a conflict are its lines, not markers.
+        let text = "<<<<<<< HEAD\nTitle\n==========\n=======\nHeading\n>>>>>>>>>>\n>>>>>>> theirs\r\nend\n";
+        assert_eq!(take_side(text, 0, "current").unwrap(), "Title\n==========\nend\n");
+        assert_eq!(take_side(text, 0, "incoming").unwrap(), "Heading\n>>>>>>>>>>\nend\n");
     }
 
     #[test]

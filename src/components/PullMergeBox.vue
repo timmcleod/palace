@@ -19,7 +19,7 @@ const props = defineProps({
   url: { type: String, required: true },
   refreshKey: { type: Number, default: 0 },
 });
-// "merged" gives { number, base, head, headRepo, branchDeleted }; "changed" says the pull
+// "merged" gives { number, base, head, headRepo, headSha, branchDeleted }; "changed" says the pull
 // request changed otherwise (a draft made ready).
 const emit = defineEmits(["merged", "changed"]);
 
@@ -165,12 +165,12 @@ async function merge() {
     if (offersDelete.value && deleteBranch.value) {
       busy.value = "Deleting the branch…";
       const [owner, repo] = s.head_repo.split("/");
-      branchDeleted = await invoke("github_delete_branch", { owner, repo, branch: s.head })
+      branchDeleted = await invoke("github_delete_branch", { owner, repo, branch: s.head, sha: s.head_sha })
         .then(() => true)
         .catch(() => false);
     }
     confirming.value = false;
-    emit("merged", { number: props.number, base: s.base, head: s.head, headRepo: s.head_repo, branchDeleted });
+    emit("merged", { number: props.number, base: s.base, head: s.head, headRepo: s.head_repo, headSha: s.head_sha, branchDeleted });
   } catch (e) {
     actionError.value = String(e);
     // The head may have moved, or GitHub changed its mind: show where it stands now.
