@@ -85,7 +85,7 @@ import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
-import { githubAccount } from "./lib/github.js";
+import { githubAccount, githubAccountChecked } from "./lib/github.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -210,6 +210,13 @@ const comparedKeys = computed(() => {
 // another in the menu is remembered for the repository.
 const ISSUE_REPOS_KEY = "palace.issueRepos";
 const issueRemotes = computed(() => githubRemotes(overview.value));
+// Issues and Pull Requests are in the sidebar for repositories on GitHub, unless Palace
+// is signed out of GitHub. Until it knows, they stay, rather than flicker as it starts.
+const showsIssues = computed(() => issueRemotes.value.length > 0 && (!!githubAccount.value || !githubAccountChecked.value));
+// Signing out while looking at them goes back to the history.
+watch(showsIssues, (shown) => {
+  if (!shown && overview.value && (isIssues.value || isPulls.value)) selected.value = headHistoryKey(overview.value);
+});
 // The fork's parent as { owner, repo }; null when it isn't a fork, and undefined until
 // GitHub has said.
 const forkParent = ref(undefined);
@@ -1413,8 +1420,8 @@ function startResize(event, pane, min, max) {
       v-model:selected="selected"
       :overview="overview"
       :compared="comparedKeys"
-      :issues="issueRemotes.length ? { count: openIssues, fresh: freshIssues } : null"
-      :pulls="issueRemotes.length ? { count: openPulls } : null"
+      :issues="showsIssues ? { count: openIssues, fresh: freshIssues } : null"
+      :pulls="showsIssues ? { count: openPulls } : null"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"

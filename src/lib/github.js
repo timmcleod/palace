@@ -4,10 +4,13 @@ import { openForm } from "./overlays.js";
 
 // The GitHub account Palace is signed in with, shared by Settings and the GitHub view.
 export const githubAccount = ref(null);
+// Whether Palace has found out yet if it's signed in, which it does as it starts.
+export const githubAccountChecked = ref(false);
 
 invoke("github_account")
   .then((account) => (githubAccount.value = account))
-  .catch(() => {});
+  .catch(() => {})
+  .finally(() => (githubAccountChecked.value = true));
 
 // A new classic token with the scopes Palace uses: private repositories, workflow
 // files (pushing changes to .github/workflows), organizations, and SSH keys.
