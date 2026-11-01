@@ -611,12 +611,6 @@ function onNavKeydown(event) {
     else undo();
     return;
   }
-  // Ctrl+Shift+O opens the repository's folder.
-  if (commandKey(event) && event.shiftKey && !event.altKey && key === "o" && overview.value && !dialogOpen()) {
-    event.preventDefault();
-    openOutside("open_folder", "Couldn't Open the Folder");
-    return;
-  }
   // Ctrl+F goes to the toolbar search.
   if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && toolbarSearch.value) {
     event.preventDefault();
@@ -1211,7 +1205,7 @@ function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
-    current && { label: `Open in ${fileManager}`, detail: shortcut("Ctrl+Shift+O"), action: () => openOutside("open_folder", "Couldn't Open the Folder") },
+    current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => openOutside("open_terminal", "Couldn't Open a Terminal") },
     current && { separator: true },
     ...recents.value.map((repo) => ({
