@@ -38,6 +38,8 @@ const DAILY = 24 * HOURLY;
 
 let found = null;
 let checking = false;
+// Whether the check running was asked for, so its errors are shown.
+let loud = false;
 // When it last asked, whatever the answer: 0 until the first check after starting.
 let checkedAt = 0;
 
@@ -50,12 +52,15 @@ getVersion()
  * leave the notice as it is while they run, and what was found before if they fail.
  */
 export async function checkForUpdates({ quiet = false } = {}) {
-  if (checking || updates.state === "installing") return;
-  checking = true;
+  if (updates.state === "installing") return;
   if (!quiet) {
+    loud = true;
     updates.state = "checking";
     updates.error = "";
   }
+  // Asked while a background check runs, that check's answer is shown instead.
+  if (checking) return;
+  checking = true;
   try {
     const newest = await check();
     if (updates.state === "installing") return;
@@ -68,7 +73,7 @@ export async function checkForUpdates({ quiet = false } = {}) {
       updates.state = "none";
     }
   } catch (e) {
-    if (!quiet) {
+    if (loud) {
       updates.state = "error";
       updates.error = explain(String(e));
     } else if (updates.state === "checking") {
@@ -76,6 +81,7 @@ export async function checkForUpdates({ quiet = false } = {}) {
     }
   } finally {
     checking = false;
+    loud = false;
     checkedAt = Date.now();
   }
 }
