@@ -226,15 +226,17 @@ function onKey(tab, event) {
     type(tab, "\x1b\r");
     return false;
   }
-  // On Linux, Ctrl+Shift+C copies, leaving Ctrl+C to stop what's running, and Ctrl+V
-  // or Ctrl+Shift+V pastes. Cmd+C and Cmd+V do on a Mac, through the Edit menu.
+  // On Linux, as in its terminals, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, leaving
+  // Ctrl+C to stop what's running and Ctrl+V to programs that use it, such as Vim. In a
+  // Claude tab, Ctrl+V pastes too, or with no text to paste goes to Claude Code, which
+  // then pastes an image. Cmd+C and Cmd+V do on a Mac, through the Edit menu.
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {
       event.preventDefault();
       copySelection(tab);
       return false;
     }
-    if (event.code === "KeyV") {
+    if (event.code === "KeyV" && (event.shiftKey || tab.kind === "claude")) {
       event.preventDefault();
       paste(tab, { orKey: event.shiftKey ? null : "\x16" });
       return false;
