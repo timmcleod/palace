@@ -1103,6 +1103,12 @@ const terminalPanel = ref(null);
 // The Files view's tree, whose Ignored toggle is in the subheader above it.
 const fileTree = ref(null);
 
+// Opens a file in the Files view, to edit it, as from the Working Copy.
+function openInFiles(file) {
+  openFiles[overview.value.path] = file;
+  selected.value = "workspace:files";
+}
+
 // A file deleted in the Files view, or a folder, closes if it's open, once the editor
 // has let it go, and takes its edits not saved with it.
 async function onFileDeleted(file) {
@@ -1659,6 +1665,7 @@ function startResize(event, pane, min, max) {
         :issue-repo="githubAccount ? issueRepo : null"
         @select="workingFile = $event"
         @changed="refresh"
+        @open-file="openInFiles"
       />
       <FileTree
         v-else-if="isFiles"

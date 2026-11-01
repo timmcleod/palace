@@ -21,7 +21,8 @@ const props = defineProps({
   // The GitHub repository ({ owner, repo }) whose issues "#" suggests, or null.
   issueRepo: { type: Object, default: null },
 });
-const emit = defineEmits(["select", "changed"]);
+// "open-file" asks to open a file in the Files view, to edit it.
+const emit = defineEmits(["select", "changed", "open-file"]);
 
 const files = shallowRef(null);
 const error = ref("");
@@ -204,7 +205,17 @@ function onRowMenu(file, event) {
     },
     { label: `Discard ${what}…`, action: () => discard(list), disabled: busy.value, danger: true },
     { separator: true },
-    list.length === 1 && { label: "Open in Editor", action: () => invoke("open_in_editor", { path: props.path, file: file.path }) },
+    list.length === 1 && {
+      label: "Open in Editor",
+      action: () => emit("open-file", file.path),
+      // A deleted file has nothing on disk to open.
+      disabled: file.unstaged === "deleted" || file.staged === "deleted",
+    },
+    list.length === 1 && {
+      label: "Open in Default App",
+      action: () => invoke("open_in_editor", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Open the File", String(e))),
+      disabled: file.unstaged === "deleted" || file.staged === "deleted",
+    },
     list.length === 1 && {
       label: `Show in ${fileManager}`,
       action: () => invoke("show_in_folder", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Show the File", String(e))),
