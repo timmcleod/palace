@@ -219,9 +219,10 @@ export async function paste(tab, { orKey = null } = {}) {
 // program in the terminal.
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
-  // Shift+Enter starts a new line in Claude Code's prompt instead of sending it, as
-  // Option+Enter does: Escape then Return.
-  if (event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+  // In a Claude tab, Shift+Enter starts a new line in Claude Code's prompt instead of
+  // sending it, as Option+Enter does: Escape then Return. Elsewhere it's Enter, as other
+  // programs expect.
+  if (tab.kind === "claude" && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
     event.preventDefault();
     type(tab, "\x1b\r");
     return false;
