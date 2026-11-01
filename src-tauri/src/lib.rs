@@ -109,6 +109,7 @@ pub fn run() {
             terminal::terminal_busy,
             terminal::terminal_close,
             terminal::terminal_close_all,
+            terminal::quit_confirmed,
             cli::install_git_tools,
             tree::tracked_files,
             tree::tree_entries,
@@ -173,8 +174,18 @@ pub fn run() {
             remote::rename_remote,
             remote::remove_remote,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| match event {
+            // Quitting (Cmd+Q, or the last window closing), or closing the window, with
+            // programs running in terminals asks first; see terminal::hold_quit. Not when
+            // Palace quits itself, as to restart into an update, which gives a code.
+            tauri::RunEvent::ExitRequested { code: None, api, .. } if terminal::hold_quit(app) => api.prevent_exit(),
+            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if terminal::hold_quit(app) => {
+                api.prevent_close()
+            }
+            _ => {}
+        });
 }
 
 /// Runs Palace as git's credential helper instead of as the app; see `github`.

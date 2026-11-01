@@ -1089,6 +1089,25 @@ const terminalPanel = ref(null);
 // Terminals a page started before it reloaded have nothing to show them any more.
 invoke("terminal_close_all").catch(() => {});
 
+// Quitting, or closing the window, with programs still running in terminals asks
+// first, naming them (see terminal.rs).
+let askingToQuit = false;
+const unlistenQuit = listen("quit-requested", async ({ payload: ids }) => {
+  if (askingToQuit) return;
+  askingToQuit = true;
+  const { describeTerminals } = await import("./lib/terminals.js");
+  const running = describeTerminals(ids);
+  const names = running.map((t) => `“${t.label}” in ${t.repository}`);
+  const message =
+    names.length === 1
+      ? `${names[0]} is still running. Quitting stops it.`
+      : `${names.length} terminals are still running: ${names.join(", ")}. Quitting stops them.`;
+  const ok = await askConfirm({ title: "Quit Palace?", message, confirmLabel: "Quit", danger: true });
+  askingToQuit = false;
+  if (ok) invoke("quit_confirmed").catch(() => {});
+});
+onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
+
 function toggleTerminal() {
   if (!overview.value) return;
   if (terminalOpen.value) terminalOpen.value = false;

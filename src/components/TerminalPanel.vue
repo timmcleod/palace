@@ -14,6 +14,7 @@ import {
   removeTab,
   setClaudeCommand,
   startTab,
+  tabLabel as label,
   tabsFor,
 } from "../lib/terminals.js";
 
@@ -31,7 +32,6 @@ const group = computed(() => tabsFor(props.path));
 const active = computed(() => group.value.tabs.find((tab) => tab.key === group.value.active) ?? null);
 const body = ref(null);
 
-const label = (tab) => tab.title || (tab.kind === "claude" ? "Claude" : "Terminal");
 
 // The shown tab's terminal is the only one on the page; the others wait, still running.
 async function show() {

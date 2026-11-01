@@ -17,6 +17,18 @@ import { isMac } from "./platform.js";
 export const terminals = reactive({});
 let nextKey = 1;
 
+/** What the tab's called: the title its program gives it, or what it is. */
+export const tabLabel = (tab) => tab.title || (tab.kind === "claude" ? "Claude" : "Terminal");
+
+/** The tabs with these terminal ids, each as { label, repository }. */
+export function describeTerminals(ids) {
+  return Object.entries(terminals).flatMap(([path, group]) =>
+    group.tabs
+      .filter((tab) => ids.includes(tab.id))
+      .map((tab) => ({ label: tabLabel(tab), repository: path.split(/[\\/]/).filter(Boolean).pop() ?? path })),
+  );
+}
+
 export function tabsFor(path) {
   terminals[path] ??= { tabs: [], active: null };
   // Read back, for the reactive version of what was just added.
