@@ -120,6 +120,23 @@ pub async fn read_working_file(path: String, file: String, as_text: Option<bool>
     Ok(WorkingFileContents { kind, text: Some(text), crlf, bom, ..empty })
 }
 
+/// `file` as of the last commit, as text in the form read_working_file gives it ("\n"
+/// line endings, no byte order mark), for marking the lines changed since. None for a
+/// file that's new since, or that isn't text.
+#[tauri::command]
+pub async fn committed_text(path: String, file: String) -> Result<Option<String>, String> {
+    let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
+    let Ok(tree) = repo.head().and_then(|head| head.peel_to_tree()) else { return Ok(None) };
+    let Ok(entry) = tree.get_path(Path::new(&file)) else { return Ok(None) };
+    let Ok(blob) = entry.to_object(&repo).and_then(|object| object.peel_to_blob()) else { return Ok(None) };
+    if blob.is_binary() || blob.size() as u64 > MAX_SHOWN {
+        return Ok(None);
+    }
+    let Ok(text) = std::str::from_utf8(blob.content()) else { return Ok(None) };
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    Ok(Some(text.replace("\r\n", "\n")))
+}
+
 /// Saves `text` as `file`, with the line endings and byte order mark it was read
 /// with, and returns its new version. It refuses if the file changed on disk since
 /// `version` was read, so edits made elsewhere, by an editor or by Claude Code, aren't
@@ -450,6 +467,21 @@ mod tests {
         for bad in ["", "  ", "../outside.txt", ".git/hooks/pre-commit", "/tmp/x"] {
             assert!(create(bad, false).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn reading_the_committed_version() {
+        let t = TempRepo::new("files-committed");
+        let committed = |f: &str| block_on(committed_text(path(&t), f.into())).unwrap();
+        // Before any commit.
+        fs::write(t.dir.join("a.txt"), "new\n").unwrap();
+        assert_eq!(committed("a.txt"), None);
+
+        t.commit(&[("a.txt", Some("one\r\ntwo\r\n")), ("data.bin", Some("\0\x01"))], "Start");
+        fs::write(t.dir.join("a.txt"), "one\nchanged\n").unwrap();
+        assert_eq!(committed("a.txt").as_deref(), Some("one\ntwo\n"));
+        assert_eq!(committed("data.bin"), None);
+        assert_eq!(committed("missing.txt"), None);
     }
 
     #[test]

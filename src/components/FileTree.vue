@@ -10,7 +10,7 @@ const remembered = reactive(new Map());
 import { computed, nextTick, shallowRef, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen } from "lucide-vue-next";
-import { isUnsaved } from "../lib/editing.js";
+import { focusOnOpen, isUnsaved } from "../lib/editing.js";
 import { fileManager } from "../lib/platform.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 
@@ -158,7 +158,10 @@ async function create(dir, folder) {
   const parts = opened ? opened.split("/") : [];
   for (let i = 1; i <= parts.length; i++) view.value.expanded.add(parts.slice(0, i).join("/"));
   await load();
-  if (!folder) emit("select", file);
+  if (!folder) {
+    focusOnOpen();
+    emit("select", file);
+  }
 }
 
 // Renames within the file's folder, or into a new one inside it ("old/notes.md").
@@ -199,6 +202,7 @@ async function duplicate(row) {
   try {
     const copy = await invoke("duplicate_working_file", { path: props.path, file: row.path });
     await load();
+    focusOnOpen();
     emit("select", copy);
   } catch (e) {
     tell("Couldn't Duplicate the File", String(e));

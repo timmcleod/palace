@@ -122,6 +122,7 @@ pub fn run() {
             files::delete_working_file,
             files::rename_working_file,
             files::duplicate_working_file,
+            files::committed_text,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,

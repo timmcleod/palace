@@ -8,6 +8,17 @@ import { invoke } from "@tauri-apps/api/core";
 // The file open in each repository's Files view: path -> file.
 export const openFiles = reactive({});
 
+// Whether the next file opened takes the keys. Asked for by what opens a file to write
+// in, such as New File or the search; opened from the tree, the keys stay in the tree.
+// A request that no file opens for, as when the file was open already, soon lapses.
+let focusAskedAt = 0;
+export const focusOnOpen = () => (focusAskedAt = Date.now());
+export function takeFocusRequest() {
+  const wanted = Date.now() - focusAskedAt < 1000;
+  focusAskedAt = 0;
+  return wanted;
+}
+
 // Images to edit as text instead, such as SVGs, as keys from keyFor.
 export const asText = reactive(new Set());
 

@@ -2,9 +2,9 @@
 import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
-import { asText, buffers, keyFor, markUnsaved } from "../lib/editing.js";
+import { asText, buffers, keyFor, markUnsaved, takeFocusRequest } from "../lib/editing.js";
 import { formatSize } from "../lib/format.js";
-import { shortcut } from "../lib/platform.js";
+import { isMac, shortcut } from "../lib/platform.js";
 import { settings } from "../lib/settings.js";
 import { tell } from "../lib/overlays.js";
 import Spinner from "./Spinner.vue";
@@ -46,6 +46,24 @@ function readFile(path = props.path, file = props.file) {
   return invoke("read_working_file", { path, file, asText: asText.has(key) || buffers.has(key) });
 }
 
+// The status bar: where the cursor is, and how the file is laid out.
+const status = ref(null);
+const layout = ref({ crlf: false, bom: false });
+const language = ref("");
+
+// The file as of the last commit, for the editor to mark the lines changed since.
+// Fetched again on each refresh, as committing changes it.
+async function loadCommitted() {
+  if (!current || !view) return;
+  const key = current.key;
+  const text = await invoke("committed_text", { path: props.path, file: props.file }).catch(() => null);
+  if (current?.key === key && view) cm.setCommittedText(view, text);
+}
+
+function goToLine() {
+  if (view) cm.goToLine(view);
+}
+
 // Text Palace shows, editable or, when too large to edit, read-only.
 const TEXT = ["text", "read_only"];
 const isText = computed(() => TEXT.includes(contents.value?.kind));
@@ -56,6 +74,7 @@ function newState(text, readOnly = false) {
     ...settingsNow(),
     readOnly,
     onSave: () => save(),
+    onCursor: (state) => (status.value = cm.statusOf(state)),
     onChange: (state) => {
       if (!current) return;
       dirty.value = !state.doc.eq(current.saved);
@@ -76,6 +95,7 @@ let loadSeq = 0;
 async function open() {
   leave();
   const seq = ++loadSeq;
+  const focus = takeFocusRequest();
   const { path, file } = props;
   error.value = "";
   changedOnDisk.value = false;
@@ -103,10 +123,16 @@ async function open() {
       state = newState(read.text, read.kind === "read_only");
       current = { key, saved: state.doc, base: { version: read.version, crlf: read.crlf, bom: read.bom } };
     }
-    await showState(state);
+    await showState(state, focus);
     if (seq !== loadSeq) return;
     cm.applySettings(view, settingsNow());
-    cm.loadLanguage(view, file, () => current?.key === key);
+    status.value = cm.statusOf(view.state);
+    layout.value = { crlf: current.base.crlf, bom: current.base.bom };
+    language.value = "";
+    cm.loadLanguage(view, file, () => current?.key === key).then((name) => {
+      if (current?.key === key) language.value = name ?? "Plain Text";
+    });
+    loadCommitted();
   } catch (e) {
     if (seq === loadSeq) {
       contents.value = null;
@@ -117,13 +143,13 @@ async function open() {
   }
 }
 
-async function showState(state) {
+async function showState(state, focus) {
   // The host is shown once the text is ready.
   await Promise.resolve();
   if (!host.value) return;
   if (view) view.setState(state);
   else view = markRaw(cm.createView(host.value, state));
-  view.focus();
+  if (focus) view.focus();
 }
 
 watch(() => [props.path, props.file], open, { immediate: true });
@@ -149,6 +175,7 @@ async function checkDisk() {
 
 function takeFromDisk(read) {
   current.base = { version: read.version, crlf: read.crlf, bom: read.bom };
+  layout.value = { crlf: read.crlf, bom: read.bom };
   cm.replaceText(view, read.text);
   current.saved = view.state.doc;
   dirty.value = false;
@@ -157,7 +184,13 @@ function takeFromDisk(read) {
   buffers.delete(current.key);
 }
 
-watch(() => props.refreshKey, checkDisk);
+watch(
+  () => props.refreshKey,
+  async () => {
+    await checkDisk();
+    loadCommitted();
+  },
+);
 
 // Reload takes the file as it is on disk, dropping the edits here.
 async function reload() {
@@ -237,6 +270,7 @@ function showAs(text) {
   const key = keyFor(props.path, props.file);
   if (text) asText.add(key);
   else asText.delete(key);
+  if (text) focusOnOpen();
   open();
 }
 </script>
@@ -283,6 +317,20 @@ function showAs(text) {
       <button class="secondary-button" @click="openInEditor"><ExternalLink :size="14" /> Open in Your Editor</button>
     </div>
     <div v-show="isText && !error" ref="host" class="editor-host" />
+    <div v-if="isText && !error && status" class="status-bar">
+      <button class="status-item" :title="`Go to Line (${isMac ? '⌃G' : 'Ctrl+G'})`" @click="goToLine">
+        Ln {{ status.line }}, Col {{ status.column }}
+      </button>
+      <span v-if="status.cursors > 1">{{ status.cursors }} cursors</span>
+      <span v-if="status.selected">{{ status.selected.toLocaleString() }} selected</span>
+      <span class="spacer" />
+      <span title="How lines are indented, detected from the file">{{ status.indent }}</span>
+      <span :title="layout.crlf ? 'Lines end with CRLF, as on Windows; saving keeps them that way' : 'Lines end with LF'">
+        {{ layout.crlf ? "CRLF" : "LF" }}
+      </span>
+      <span>{{ layout.bom ? "UTF-8 with BOM" : "UTF-8" }}</span>
+      <span v-if="language">{{ language }}</span>
+    </div>
   </div>
 </template>
 
@@ -362,6 +410,34 @@ function showAs(text) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.status-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 14px;
+  height: 24px;
+  padding: 0 12px 0 6px;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.status-item {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.status-item:hover {
+  background: var(--button-hover);
+  color: var(--text-primary);
 }
 
 .image-view {

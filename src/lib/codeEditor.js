@@ -1,7 +1,9 @@
 import { basicSetup } from "codemirror";
-import { Compartment, EditorState, Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { Compartment, countColumn, EditorState, Prec, RangeSet, StateEffect, StateField, Text } from "@codemirror/state";
+import { Decoration, EditorView, gutter, GutterMarker, keymap, WidgetType } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
+import { gotoLine } from "@codemirror/search";
+import { Chunk } from "@codemirror/merge";
 import { HighlightStyle, indentUnit, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
@@ -43,6 +45,55 @@ const theme = EditorView.theme({
   ".cm-tooltip": { border: "1px solid var(--border)", backgroundColor: "var(--content-bg)", color: "var(--text-primary)" },
   ".cm-tooltip-autocomplete > ul > li[aria-selected]": { color: "#fff", backgroundColor: "var(--accent)" },
   ".cm-panels": { color: "var(--text-primary)", backgroundColor: "var(--sidebar-bg)" },
+  ".cm-changes-gutter": { width: "6px", backgroundColor: "var(--diff-gutter-bg)" },
+  ".cm-changes-gutter .cm-gutterElement": { padding: "0", cursor: "pointer" },
+  ".cm-change-mark": { height: "100%", width: "3px", margin: "0 1px", borderRadius: "1px" },
+  ".cm-change-mark.added": { backgroundColor: "var(--diff-added-text)" },
+  ".cm-change-mark.changed": { backgroundColor: "var(--ref-tag)" },
+  ".cm-change-mark.removed": {
+    width: "0",
+    height: "0",
+    margin: "0",
+    borderTop: "4px solid transparent",
+    borderBottom: "4px solid transparent",
+    borderLeft: "5px solid var(--diff-removed-text)",
+    transform: "translateY(-4px)",
+  },
+  ".cm-change-box": {
+    margin: "2px 0 4px",
+    borderTop: "1px solid var(--border)",
+    borderBottom: "1px solid var(--border)",
+    backgroundColor: "var(--diff-removed-bg)",
+    fontFamily: "system-ui, sans-serif",
+  },
+  ".cm-change-head": {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    color: "var(--text-secondary)",
+    backgroundColor: "var(--diff-hunk-bg)",
+  },
+  ".cm-change-head span": { flex: "1" },
+  ".cm-change-head button": {
+    padding: "1px 9px",
+    border: "1px solid var(--border)",
+    borderRadius: "5px",
+    background: "var(--content-bg)",
+    font: "inherit",
+    color: "var(--text-primary)",
+    cursor: "pointer",
+  },
+  ".cm-change-box pre": {
+    margin: "0",
+    padding: "4px 10px",
+    fontFamily: 'ui-monospace, "SF Mono", Menlo, "Ubuntu Mono", monospace',
+    fontSize: "12px",
+    lineHeight: "18px",
+    whiteSpace: "pre-wrap",
+    color: "var(--text-primary)",
+  },
   ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
   ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--border)" },
   ".cm-panel.cm-search": { padding: "6px 10px", fontSize: "12.5px" },
@@ -115,19 +166,207 @@ function detectIndent(text) {
  * A new editor state for `text` from `file`. `onSave` runs on Cmd+S (Ctrl+S) and
  * `onChange` with each change to the text.
  */
-export function createState(text, file, { tabSize, highlight, wrap, readOnly = false, onSave, onChange }) {
+// --- Lines changed since the last commit --------------------------------------------
+// A bar beside each line added or changed since the last commit, and a mark where
+// lines were removed, kept up to date while typing. Clicking one shows the lines as
+// they were, with Revert to put them back.
+
+const setCommitted = StateEffect.define();
+// The start of the change being shown, or null.
+const showChange = StateEffect.define();
+
+const changes = StateField.define({
+  create: () => ({ committed: null, chunks: [], shown: null }),
+  update(value, tr) {
+    let { committed, chunks, shown } = value;
+    for (const effect of tr.effects) {
+      if (effect.is(setCommitted)) {
+        committed = effect.value == null ? null : Text.of(effect.value.split("\n"));
+        chunks = committed ? Chunk.build(committed, tr.state.doc) : [];
+        shown = null;
+      } else if (effect.is(showChange)) {
+        shown = effect.value;
+      }
+    }
+    if (tr.docChanged && committed) {
+      chunks = Chunk.updateB(chunks, committed, tr.state.doc, tr.changes);
+      if (shown != null) shown = tr.changes.mapPos(shown);
+    }
+    return { committed, chunks, shown };
+  },
+  provide: (field) => EditorView.decorations.from(field, shownChange),
+});
+
+/** The change at `line` (a line's block), if any. */
+function changeAt(chunks, line) {
+  return chunks.find((c) => (c.fromB === c.toB ? c.fromB === line.from : c.fromB <= line.from && line.from < c.toB));
+}
+
+class ChangeMark extends GutterMarker {
+  constructor(kind) {
+    super();
+    this.kind = kind;
+  }
+  eq(other) {
+    return other.kind === this.kind;
+  }
+  toDOM() {
+    const mark = document.createElement("div");
+    mark.className = `cm-change-mark ${this.kind}`;
+    mark.title = {
+      added: "Added since the last commit. Click to see.",
+      changed: "Changed since the last commit. Click to see how it was.",
+      removed: "Lines removed here since the last commit. Click to see them.",
+    }[this.kind];
+    return mark;
+  }
+}
+const MARKS = { added: new ChangeMark("added"), changed: new ChangeMark("changed"), removed: new ChangeMark("removed") };
+
+const changeGutter = gutter({
+  class: "cm-changes-gutter",
+  markers(view) {
+    const { doc } = view.state;
+    const marks = [];
+    for (const chunk of view.state.field(changes).chunks) {
+      if (chunk.fromB === chunk.toB) {
+        marks.push(MARKS.removed.range(doc.lineAt(Math.min(chunk.fromB, doc.length)).from));
+        continue;
+      }
+      const kind = chunk.fromA === chunk.toA ? "added" : "changed";
+      for (let pos = chunk.fromB; pos < chunk.toB && pos <= doc.length; ) {
+        const line = doc.lineAt(pos);
+        marks.push(MARKS[kind].range(line.from));
+        pos = line.to + 1;
+      }
+    }
+    return RangeSet.of(marks, true);
+  },
+  domEventHandlers: {
+    mousedown(view, line) {
+      const { chunks, shown } = view.state.field(changes);
+      const chunk = changeAt(chunks, line);
+      if (!chunk) return false;
+      const open = shown != null && chunk.fromB <= shown && shown <= chunk.endB;
+      view.dispatch({ effects: showChange.of(open ? null : chunk.fromB) });
+      return true;
+    },
+  },
+  initialSpacer: () => MARKS.added,
+});
+
+// The lines as they were at the last commit, below the change (above it, for lines
+// removed), with Revert and Close.
+class ChangeWidget extends WidgetType {
+  constructor(before, chunk) {
+    super();
+    this.before = before;
+    this.chunk = chunk;
+  }
+  eq(other) {
+    return other.before === this.before && other.chunk.fromB === this.chunk.fromB && other.chunk.toB === this.chunk.toB;
+  }
+  toDOM(view) {
+    const box = document.createElement("div");
+    box.className = "cm-change-box";
+    const head = document.createElement("div");
+    head.className = "cm-change-head";
+    const label = document.createElement("span");
+    label.textContent = this.before ? "At the last commit:" : "New since the last commit.";
+    const revert = document.createElement("button");
+    revert.textContent = this.before ? "Revert" : "Remove";
+    revert.title = this.before ? "Put these lines back as they were" : "Remove these new lines";
+    revert.onclick = () => revertChange(view, this.chunk);
+    const close = document.createElement("button");
+    close.textContent = "Close";
+    close.onclick = () => view.dispatch({ effects: showChange.of(null) });
+    head.append(label, revert, close);
+    box.append(head);
+    if (this.before) {
+      const lines = document.createElement("pre");
+      lines.textContent = this.before.replace(/\n$/, "");
+      box.append(lines);
+    }
+    return box;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+function shownChange({ committed, chunks, shown }) {
+  if (shown == null || !committed) return Decoration.none;
+  const chunk = chunks.find((c) => c.fromB <= shown && shown <= c.endB);
+  if (!chunk) return Decoration.none;
+  const before = committed.sliceString(chunk.fromA, Math.min(chunk.toA, committed.length));
+  const widget = Decoration.widget({ widget: new ChangeWidget(before, chunk), block: true, side: chunk.fromB === chunk.toB ? -1 : 1 });
+  return Decoration.set([widget.range(chunk.fromB === chunk.toB ? chunk.fromB : chunk.endB)]);
+}
+
+/** Puts a change's lines back as they were at the last commit. */
+function revertChange(view, chunk) {
+  const { committed } = view.state.field(changes);
+  const { doc } = view.state;
+  // A chunk at the end may run one past it, for the line break the last line lacks.
+  const pastEndA = chunk.toA > committed.length;
+  const pastEndB = chunk.toB > doc.length;
+  let insert = committed.sliceString(chunk.fromA, Math.min(chunk.toA, committed.length));
+  if (pastEndB && !pastEndA && insert.endsWith("\n")) insert = insert.slice(0, -1);
+  if (pastEndA && !pastEndB && chunk.toA > chunk.fromA) insert += "\n";
+  view.dispatch({ changes: { from: chunk.fromB, to: Math.min(chunk.toB, doc.length), insert }, effects: showChange.of(null) });
+  view.focus();
+}
+
+/** Marks the lines that differ from `text`, the file as of the last commit, or none if it's null. */
+export function setCommittedText(view, text) {
+  view.dispatch({ effects: setCommitted.of(text) });
+}
+
+// --- Status -----------------------------------------------------------------------
+
+/** Where the cursor is and how the text is laid out, for the status bar. */
+export function statusOf(state) {
+  const main = state.selection.main;
+  const line = state.doc.lineAt(main.head);
+  const unit = state.facet(indentUnit);
+  return {
+    line: line.number,
+    column: countColumn(line.text.slice(0, main.head - line.from), state.tabSize) + 1,
+    selected: state.selection.ranges.reduce((sum, r) => sum + (r.to - r.from), 0),
+    cursors: state.selection.ranges.length,
+    indent: unit === "\t" ? "Tabs" : `${unit.length} Spaces`,
+  };
+}
+
+/** Asks for a line to go to. */
+export function goToLine(view) {
+  gotoLine(view);
+}
+
+export function createState(text, file, { tabSize, highlight, wrap, readOnly = false, onSave, onChange, onCursor }) {
   return EditorState.create({
     doc: text,
     extensions: [
       basicSetup,
       keymap.of([indentWithTab]),
-      Prec.highest(keymap.of([{ key: "Mod-s", run: () => (onSave(), true), preventDefault: true }])),
+      Prec.highest(
+        keymap.of([
+          { key: "Mod-s", run: () => (onSave(), true), preventDefault: true },
+          // As in most editors; Mod-Alt-g works too.
+          { key: "Ctrl-g", run: gotoLine, preventDefault: true },
+        ]),
+      ),
+      changes,
+      changeGutter,
       theme,
       coloring.of(highlight ? syntaxHighlighting(highlighting) : []),
       tabs.of([EditorState.tabSize.of(tabSize), indentUnit.of(detectIndent(text))]),
       wrapping.of(wrap ? EditorView.lineWrapping : []),
       language.of([]),
-      EditorView.updateListener.of((update) => update.docChanged && onChange(update.state)),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) onChange(update.state);
+        if (update.docChanged || update.selectionSet) onCursor?.(update.state);
+      }),
       // Still selectable, to copy from.
       readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
     ],
@@ -141,13 +380,14 @@ export function createView(parent, state) {
 
 /**
  * Loads the language for `file`, if CodeMirror has one, and colors the editor with it,
- * unless `stillShown` says another file is in the editor by then.
+ * unless `stillShown` says another file is in the editor by then. Returns its name.
  */
 export async function loadLanguage(view, file, stillShown) {
   const description = LanguageDescription.matchFilename(languages, file.split("/").pop());
   if (!description) return;
   const support = await description.load().catch(() => null);
   if (support && stillShown()) view.dispatch({ effects: language.reconfigure(support) });
+  return description.name;
 }
 
 /** Applies Palace's settings for tab width, syntax highlighting and wrapping long lines. */

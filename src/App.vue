@@ -90,7 +90,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount, githubAccountChecked } from "./lib/github.js";
-import { forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
+import { focusOnOpen, forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -1113,6 +1113,7 @@ const fileTree = ref(null);
 
 // Opens a file in the Files view, to edit it, as from the Working Copy.
 function openInFiles(file) {
+  focusOnOpen();
   openFiles[overview.value.path] = file;
   selected.value = "workspace:files";
 }
@@ -1881,7 +1882,7 @@ function startResize(event, pane, min, max) {
           :rev="searchRev"
           :refresh-key="refreshKey"
           :untracked="isFiles"
-          @pick="(file) => (isFiles ? (openFiles[overview.path] = file) : showFileHistory(file))"
+          @pick="(file) => (isFiles ? (focusOnOpen(), (openFiles[overview.path] = file)) : showFileHistory(file))"
           @pick-commit="showFoundCommit"
           @filter-commits="showMatchingCommits"
         />
