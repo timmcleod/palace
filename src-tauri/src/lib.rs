@@ -4,12 +4,14 @@ mod cli;
 mod commit;
 mod compare;
 mod config;
+mod files;
 mod git;
 mod github;
 mod history;
 mod issues;
 mod open;
 mod pulls;
+mod quit;
 mod rebase;
 mod remote;
 mod reset;
@@ -109,8 +111,12 @@ pub fn run() {
             terminal::terminal_busy,
             terminal::terminal_close,
             terminal::terminal_close_all,
-            terminal::quit_confirmed,
+            quit::quit_confirmed,
+            quit::set_unsaved_edits,
             cli::install_git_tools,
+            files::working_entries,
+            files::read_working_file,
+            files::save_working_file,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,
@@ -178,10 +184,11 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| match event {
             // Quitting (Cmd+Q, or the last window closing), or closing the window, with
-            // programs running in terminals asks first; see terminal::hold_quit. Not when
-            // Palace quits itself, as to restart into an update, which gives a code.
-            tauri::RunEvent::ExitRequested { code: None, api, .. } if terminal::hold_quit(app) => api.prevent_exit(),
-            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if terminal::hold_quit(app) => {
+            // programs running in terminals or edits not saved asks first; see quit.rs.
+            // Not when Palace quits itself, as to restart into an update, which gives a
+            // code.
+            tauri::RunEvent::ExitRequested { code: None, api, .. } if quit::hold(app) => api.prevent_exit(),
+            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if quit::hold(app) => {
                 api.prevent_close()
             }
             _ => {}

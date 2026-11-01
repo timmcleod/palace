@@ -5,10 +5,9 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, LazyLock, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{AppHandle, Emitter};
 
 struct Terminal {
     master: Box<dyn MasterPty + Send>,
@@ -163,29 +162,9 @@ fn is_busy(terminal: &Terminal) -> bool {
     }
 }
 
-/// Set once the user has said to quit even though programs are running in terminals.
-static QUIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
-
-/// Whether quitting, or closing the window, should wait: it does while programs are
-/// running in terminals, which quitting would stop, and asks the page to say which
-/// ("quit-requested", with their ids). Quitting goes ahead with `quit_confirmed`.
-pub fn hold_quit(app: &AppHandle) -> bool {
-    if QUIT_CONFIRMED.load(Ordering::Relaxed) {
-        return false;
-    }
-    let busy: Vec<u32> = TERMINALS.lock().unwrap().iter().filter(|(_, t)| is_busy(t)).map(|(id, _)| *id).collect();
-    if busy.is_empty() {
-        return false;
-    }
-    let _ = app.emit("quit-requested", busy);
-    true
-}
-
-/// Quits after all, stopping what's running in the terminals.
-#[tauri::command]
-pub fn quit_confirmed(app: AppHandle) {
-    QUIT_CONFIRMED.store(true, Ordering::Relaxed);
-    app.exit(0);
+/// The terminals with programs running in them, which quitting would stop.
+pub fn busy_terminals() -> Vec<u32> {
+    TERMINALS.lock().unwrap().iter().filter(|(_, t)| is_busy(t)).map(|(id, _)| *id).collect()
 }
 
 /// Hangs up the terminal, which ends its shell and what the shell started.

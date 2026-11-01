@@ -172,7 +172,7 @@ pub(crate) fn file_diff_at(repo: &Repository, diff: &Diff, index: usize, max_lin
     Ok(file_diff)
 }
 
-const IMAGE_TYPES: &[(&str, &str)] = &[
+pub(crate) const IMAGE_TYPES: &[(&str, &str)] = &[
     ("png", "image/png"),
     ("jpg", "image/jpeg"),
     ("jpeg", "image/jpeg"),
@@ -185,7 +185,7 @@ const IMAGE_TYPES: &[(&str, &str)] = &[
 ];
 
 /// Larger images are described but not shown.
-const MAX_IMAGE: usize = 10 * 1024 * 1024;
+pub(crate) const MAX_IMAGE: usize = 10 * 1024 * 1024;
 
 /// One side of a diff as an image, if it's a file with an image's extension.
 fn image(repo: &Repository, file: &DiffFile) -> Option<Image> {

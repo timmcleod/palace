@@ -16,6 +16,7 @@ import {
   CircleAlert,
   CloudDownload,
   ExternalLink,
+  EyeOff,
   FolderGit2,
   GitBranch,
   GitCommitVertical,
@@ -30,6 +31,8 @@ import {
 import CommitDetails from "./components/CommitDetails.vue";
 import CompareBar from "./components/CompareBar.vue";
 import ConflictView from "./components/ConflictView.vue";
+import FileEditor from "./components/FileEditor.vue";
+import FileTree from "./components/FileTree.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import CloneDialog from "./components/CloneDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
@@ -87,6 +90,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount, githubAccountChecked } from "./lib/github.js";
+import { openFiles, unsavedFiles } from "./lib/editing.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -151,6 +155,7 @@ const isFullView = computed(() => isSettings.value || isGitHub.value);
 // The GitHub view opened from the welcome screen, before any repository is open.
 const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
+const isFiles = computed(() => selected.value === "workspace:files");
 const isIssues = computed(() => selected.value === "workspace:issues");
 const isPulls = computed(() => selected.value === "workspace:pulls");
 // Comparing two revisions: the history lists what `head` has that `base` doesn't,
@@ -159,7 +164,7 @@ const isCompare = computed(() => selected.value === "workspace:compare");
 const comparison = ref(null);
 // Views without a history of their own to search or filter.
 const awayFromHistory = () =>
-  isWorkingCopy.value || isFullView.value || isStashes.value || isIssues.value || isPulls.value || isCompare.value;
+  isWorkingCopy.value || isFiles.value || isFullView.value || isStashes.value || isIssues.value || isPulls.value || isCompare.value;
 
 function openComparison({ base, head }) {
   comparison.value = { base, head };
@@ -590,6 +595,7 @@ function describe(place) {
   const [kind, name] = splitKey(place.selected);
   const view = {
     "workspace:working-copy": "Working Copy",
+    "workspace:files": "Files",
     "workspace:stashes": "Stashes",
     "workspace:issues": "Issues",
     "workspace:pulls": "Pull Requests",
@@ -614,7 +620,16 @@ function onNavKeydown(event) {
     else undo();
     return;
   }
-  // Ctrl+F goes to the toolbar search.
+  // Ctrl+P finds a file to open in the Files view.
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "p" && overview.value && !dialogOpen()) {
+    event.preventDefault();
+    selected.value = "workspace:files";
+    nextTick(() => toolbarSearch.value?.focus());
+    return;
+  }
+  // Ctrl+F goes to the toolbar search, except in the Files view's editor, which finds
+  // in the file.
+  if (event.target.closest?.(".cm-editor")) return;
   if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && toolbarSearch.value) {
     event.preventDefault();
     toolbarSearch.value.focus();
@@ -1085,24 +1100,34 @@ const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPa
 const terminalOpen = ref(false);
 const terminalLoaded = ref(false);
 const terminalPanel = ref(null);
+// The Files view's tree, whose Ignored toggle is in the subheader above it.
+const fileTree = ref(null);
 
 // Terminals a page started before it reloaded have nothing to show them any more.
 invoke("terminal_close_all").catch(() => {});
 
-// Quitting, or closing the window, with programs still running in terminals asks
-// first, naming them (see terminal.rs).
+// Quitting, or closing the window, with programs still running in terminals or edits
+// not saved asks first, naming them (see quit.rs).
 let askingToQuit = false;
-const unlistenQuit = listen("quit-requested", async ({ payload: ids }) => {
+const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+const unlistenQuit = listen("quit-requested", async ({ payload }) => {
   if (askingToQuit) return;
   askingToQuit = true;
-  const { describeTerminals } = await import("./lib/terminals.js");
-  const running = describeTerminals(ids);
-  const names = running.map((t) => `“${t.label}” in ${t.repository}`);
-  const message =
-    names.length === 1
-      ? `${names[0]} is still running. Quitting stops it.`
-      : `${names.length} terminals are still running: ${names.join(", ")}. Quitting stops them.`;
-  const ok = await askConfirm({ title: "Quit Palace?", message, confirmLabel: "Quit", danger: true });
+  const lines = [];
+  const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
+  if (edited.length) {
+    lines.push(`Edits to ${edited.join(", ")} aren't saved. Quitting loses them.`);
+  }
+  if (payload.terminals.length) {
+    const { describeTerminals } = await import("./lib/terminals.js");
+    const names = describeTerminals(payload.terminals).map((t) => `“${t.label}” in ${t.repository}`);
+    lines.push(
+      names.length === 1
+        ? `${names[0]} is still running. Quitting stops it.`
+        : `${names.length} terminals are still running: ${names.join(", ")}. Quitting stops them.`,
+    );
+  }
+  const ok = await askConfirm({ title: "Quit Palace?", message: lines.join("\n\n"), confirmLabel: "Quit", danger: true });
   askingToQuit = false;
   if (ok) invoke("quit_confirmed").catch(() => {});
 });
@@ -1516,6 +1541,19 @@ function startResize(event, pane, min, max) {
 
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
+        <template v-else-if="isFiles">
+          <span>Files</span>
+          <button
+            class="mainline-toggle"
+            :class="{ on: fileTree?.showsIgnored() }"
+            :aria-pressed="!!fileTree?.showsIgnored()"
+            title="Show files git ignores, such as dependencies and build output"
+            @click="fileTree?.toggleIgnored()"
+          >
+            <EyeOff :size="14" :stroke-width="1.75" />
+            Ignored
+          </button>
+        </template>
         <span v-else-if="isStashes">Stashes</span>
         <template v-else-if="isIssues || isPulls">
           <span>{{ isPulls ? "Pull Requests" : "Issues" }}</span>
@@ -1600,6 +1638,14 @@ function startResize(event, pane, min, max) {
         @select="workingFile = $event"
         @changed="refresh"
       />
+      <FileTree
+        v-else-if="isFiles"
+        ref="fileTree"
+        :path="overview.path"
+        :selected="openFiles[overview.path] ?? null"
+        :refresh-key="refreshKey"
+        @select="openFiles[overview.path] = $event"
+      />
       <IssueList
         v-else-if="isPulls && issueRepo"
         key="pulls"
@@ -1637,7 +1683,7 @@ function startResize(event, pane, min, max) {
         @menu="(index, event) => openMenu(event, actions.stashMenu(index))"
       />
       <!-- Hidden rather than removed, so the history keeps its scroll position. -->
-      <div v-show="!isWorkingCopy && !isStashes && !isIssues && !isPulls" class="pane-body">
+      <div v-show="!isWorkingCopy && !isFiles && !isStashes && !isIssues && !isPulls" class="pane-body">
         <HistoryList
           :path="overview.path"
           :rev="isCompare ? comparison?.head : historyRev"
@@ -1794,7 +1840,7 @@ function startResize(event, pane, min, max) {
           :path="overview.path"
           :rev="searchRev"
           :refresh-key="refreshKey"
-          @pick="showFileHistory"
+          @pick="(file) => (isFiles ? (openFiles[overview.path] = file) : showFileHistory(file))"
           @pick-commit="showFoundCommit"
           @filter-commits="showMatchingCommits"
         />
@@ -1810,6 +1856,8 @@ function startResize(event, pane, min, max) {
           <p>Select a file to see its changes.</p>
         </div>
       </template>
+
+      <FileEditor v-else-if="isFiles" :path="overview.path" :file="openFiles[overview.path] ?? null" :refresh-key="refreshKey" />
 
       <template v-else-if="isIssues">
         <div class="subheader">

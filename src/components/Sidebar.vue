@@ -10,6 +10,7 @@ import {
   Cloud,
   Folder,
   FolderOpen,
+  FolderTree,
   GitBranch,
   ListFilter,
   Package,
@@ -65,6 +66,7 @@ const isOpen = (key) => query.value !== "" || !collapsedFolders.has(key);
 // Issues and pull requests only for repositories on GitHub.
 const workspaceRows = computed(() =>
   [
+    { key: "workspace:files", label: "Files", icon: FolderTree, depth: 0 },
     {
       key: "workspace:working-copy",
       label: "Working Copy",

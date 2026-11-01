@@ -1,0 +1,317 @@
+//! The working copy's files as they are on disk, for the Files view: its folders, a
+//! file's contents, and saving edits to it. Saving only ever writes inside the working
+//! copy, never into .git, and never over changes made since the file was read.
+
+use crate::commit::{IMAGE_TYPES, MAX_IMAGE};
+use base64::Engine;
+use git2::Repository;
+use serde::Serialize;
+use std::fs;
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+/// Larger files are shown read-only, if at all: an editor over megabytes of text is
+/// slow, and such files are rarely edited by hand.
+const MAX_EDITABLE: u64 = 2 * 1024 * 1024;
+
+/// Starts the refusal to save over a file that changed on disk since it was read, so
+/// the page can offer to reload it instead.
+const CHANGED_ON_DISK: &str = "CHANGED_ON_DISK: ";
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct FileEntry {
+    name: String,
+    path: String,
+    /// "dir", "file", "link" or "submodule".
+    kind: &'static str,
+    /// Whether git ignores it, as it does build output and dependencies.
+    ignored: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct WorkingFileContents {
+    size: u64,
+    /// "text", "image", "binary" (not text, or not UTF-8) or "too_large".
+    kind: &'static str,
+    /// The text, with "\n" for line endings whatever the file uses, and without a
+    /// byte order mark. Saving puts them back.
+    text: Option<String>,
+    crlf: bool,
+    bom: bool,
+    /// The image as a data: URL.
+    image: Option<String>,
+    /// Identifies this version of the file, to tell when it changes on disk.
+    version: String,
+}
+
+/// The folders and files directly inside `dir` of the working copy ("" for the top),
+/// folders first. Ignored ones are left out unless `show_ignored`, and .git always is.
+#[tauri::command]
+pub async fn working_entries(path: String, dir: String, show_ignored: bool) -> Result<Vec<FileEntry>, String> {
+    let (repo, workdir) = open(&path)?;
+    let folder = inside(&workdir, &dir)?;
+    let mut entries = Vec::new();
+    for item in fs::read_dir(&folder).map_err(|e| format!("Couldn't read {}: {e}", shown(&dir)))? {
+        let Ok(item) = item else { continue };
+        let name = item.file_name().to_string_lossy().into_owned();
+        if dir.is_empty() && name == ".git" {
+            continue;
+        }
+        let Ok(kind) = item.file_type() else { continue };
+        let full = item.path();
+        let kind = if kind.is_symlink() {
+            "link"
+        } else if kind.is_dir() {
+            // A repository of its own, such as a submodule.
+            if full.join(".git").exists() { "submodule" } else { "dir" }
+        } else {
+            "file"
+        };
+        let relative = if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") };
+        let ignored = repo.is_path_ignored(Path::new(&relative)).unwrap_or(false);
+        if ignored && !show_ignored {
+            continue;
+        }
+        entries.push(FileEntry { name, path: relative, kind, ignored });
+    }
+    entries.sort_by(|a, b| (a.kind != "dir").cmp(&(b.kind != "dir")).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(entries)
+}
+
+/// A file in the working copy as it is on disk.
+#[tauri::command]
+pub async fn read_working_file(path: String, file: String) -> Result<WorkingFileContents, String> {
+    let (_, workdir) = open(&path)?;
+    let full = inside(&workdir, &file)?;
+    let meta = fs::metadata(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+    let version = version(&meta);
+    let size = meta.len();
+    let empty = WorkingFileContents { size, kind: "binary", text: None, crlf: false, bom: false, image: None, version };
+
+    if let Some(mime) = image_type(&file) {
+        if size as usize <= MAX_IMAGE {
+            let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+            let url = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+            return Ok(WorkingFileContents { kind: "image", image: Some(url), ..empty });
+        }
+    }
+    if size > MAX_EDITABLE {
+        return Ok(WorkingFileContents { kind: "too_large", ..empty });
+    }
+    let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+    // git's own test for binary: a NUL near the start.
+    if bytes[..bytes.len().min(8000)].contains(&0) {
+        return Ok(empty);
+    }
+    let Ok(text) = String::from_utf8(bytes) else { return Ok(empty) };
+    let (text, bom) = match text.strip_prefix('\u{feff}') {
+        Some(rest) => (rest.to_string(), true),
+        None => (text, false),
+    };
+    // The line endings most of its lines use; saving gives every line those.
+    let crlf_count = text.matches("\r\n").count();
+    let crlf = crlf_count > 0 && crlf_count >= text.matches('\n').count() - crlf_count;
+    let text = if crlf { text.replace("\r\n", "\n") } else { text };
+    Ok(WorkingFileContents { kind: "text", text: Some(text), crlf, bom, ..empty })
+}
+
+/// Saves `text` as `file`, with the line endings and byte order mark it was read
+/// with, and returns its new version. It refuses if the file changed on disk since
+/// `version` was read, so edits made elsewhere, by an editor or by Claude Code, aren't
+/// overwritten. Written to a temporary file then moved over the old one, so the file
+/// is never left half-written, and with the old one's permissions.
+#[tauri::command]
+pub async fn save_working_file(path: String, file: String, text: String, crlf: bool, bom: bool, version: String) -> Result<String, String> {
+    let (_, workdir) = open(&path)?;
+    let full = inside(&workdir, &file)?;
+    if file.is_empty() {
+        return Err("Choose a file to save.".into());
+    }
+    let meta = fs::symlink_metadata(&full).map_err(|e| format!("Couldn't save {file}: {e}"))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("{file} is a link. Open it in your editor to change it."));
+    }
+    if !meta.is_file() {
+        return Err(format!("{file} isn't a file."));
+    }
+    // Through a linked folder, the file could be outside the working copy.
+    let parent = full.parent().ok_or_else(|| format!("Couldn't save {file}."))?;
+    let real_parent = parent.canonicalize().map_err(|e| format!("Couldn't save {file}: {e}"))?;
+    let real_workdir = workdir.canonicalize().map_err(|e| format!("Couldn't save {file}: {e}"))?;
+    if !real_parent.starts_with(&real_workdir) {
+        return Err(format!("{file} is outside the repository's folder."));
+    }
+    if self::version(&meta) != version {
+        return Err(format!("{CHANGED_ON_DISK}{file} has changed on disk since you opened it."));
+    }
+
+    let mut bytes = Vec::with_capacity(text.len() + 3);
+    if bom {
+        bytes.extend_from_slice("\u{feff}".as_bytes());
+    }
+    bytes.extend_from_slice(if crlf { text.replace('\n', "\r\n") } else { text }.as_bytes());
+
+    let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let temp = parent.join(format!(".{name}.palace-{}-{nanos}.tmp", std::process::id()));
+    let written = (|| {
+        let mut out = fs::File::create(&temp)?;
+        out.write_all(&bytes)?;
+        out.set_permissions(meta.permissions())?;
+        out.sync_all()?;
+        fs::rename(&temp, &full)
+    })();
+    if let Err(e) = written {
+        let _ = fs::remove_file(&temp);
+        return Err(format!("Couldn't save {file}: {e}"));
+    }
+    let meta = fs::metadata(&full).map_err(|e| format!("Couldn't save {file}: {e}"))?;
+    Ok(self::version(&meta))
+}
+
+fn open(path: &str) -> Result<(Repository, PathBuf), String> {
+    let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
+    let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
+    Ok((repo, workdir))
+}
+
+/// `relative` within the working copy, refusing a path that would lead out of it or
+/// into .git.
+fn inside(workdir: &Path, relative: &str) -> Result<PathBuf, String> {
+    let mut full = workdir.to_path_buf();
+    for (i, part) in Path::new(relative).components().enumerate() {
+        match part {
+            Component::Normal(name) if i == 0 && name == ".git" => return Err(format!("{relative} is inside .git.")),
+            Component::Normal(name) => full.push(name),
+            _ => return Err(format!("{relative} isn't a path inside the repository.")),
+        }
+    }
+    Ok(full)
+}
+
+/// Identifies a version of a file by when it was last changed and how big it is.
+fn version(meta: &fs::Metadata) -> String {
+    let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("{modified}:{}", meta.len())
+}
+
+fn image_type(file: &str) -> Option<&'static str> {
+    let extension = Path::new(file).extension()?.to_str()?.to_ascii_lowercase();
+    IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension).map(|(_, mime)| *mime)
+}
+
+fn shown(dir: &str) -> &str {
+    if dir.is_empty() { "the repository's folder" } else { dir }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TempRepo;
+    use tauri::async_runtime::block_on;
+
+    fn path(t: &TempRepo) -> String {
+        t.dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn listing_a_folder() {
+        let t = TempRepo::new("files-list");
+        fs::write(t.dir.join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(t.dir.join("src/lib")).unwrap();
+        fs::create_dir_all(t.dir.join("build")).unwrap();
+        fs::write(t.dir.join("src/main.rs"), "").unwrap();
+        fs::write(t.dir.join("README.md"), "").unwrap();
+        fs::write(t.dir.join("build/out.js"), "").unwrap();
+
+        let names = |show: bool| {
+            block_on(working_entries(path(&t), "".into(), show)).unwrap().into_iter().map(|e| (e.name, e.kind, e.ignored)).collect::<Vec<_>>()
+        };
+        // Folders first, then files; never .git; ignored folders only when asked for.
+        assert_eq!(names(false), [("src".into(), "dir", false), (".gitignore".into(), "file", false), ("README.md".into(), "file", false)]);
+        assert!(names(true).contains(&("build".into(), "dir", true)));
+        let inner = block_on(working_entries(path(&t), "src".into(), false)).unwrap();
+        assert_eq!(inner[1].path, "src/main.rs");
+    }
+
+    #[test]
+    fn paths_stay_inside_the_working_copy() {
+        let t = TempRepo::new("files-inside");
+        for bad in ["../outside", "/etc/passwd", ".git/config", "src/../../x"] {
+            assert!(block_on(read_working_file(path(&t), bad.into())).is_err(), "{bad}");
+            assert!(block_on(working_entries(path(&t), bad.into(), false)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn reading_text_binary_and_line_endings() {
+        let t = TempRepo::new("files-read");
+        fs::write(t.dir.join("unix.txt"), "a\nb\n").unwrap();
+        fs::write(t.dir.join("windows.txt"), "\u{feff}a\r\nb\r\n").unwrap();
+        fs::write(t.dir.join("data.bin"), [0u8, 1, 2]).unwrap();
+        fs::write(t.dir.join("latin1.txt"), [b'c', b'a', b'f', 0xe9]).unwrap();
+
+        let read = |f: &str| block_on(read_working_file(path(&t), f.into())).unwrap();
+        let unix = read("unix.txt");
+        assert_eq!((unix.kind, unix.text.as_deref(), unix.crlf, unix.bom), ("text", Some("a\nb\n"), false, false));
+        let windows = read("windows.txt");
+        assert_eq!((windows.text.as_deref(), windows.crlf, windows.bom), (Some("a\nb\n"), true, true));
+        assert_eq!(read("data.bin").kind, "binary");
+        assert_eq!(read("latin1.txt").kind, "binary");
+    }
+
+    #[test]
+    fn saving_keeps_line_endings_and_permissions() {
+        let t = TempRepo::new("files-save");
+        fs::write(t.dir.join("windows.txt"), "\u{feff}a\r\nb\r\n").unwrap();
+        fs::write(t.dir.join("run.sh"), "echo hi\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(t.dir.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let read = block_on(read_working_file(path(&t), "windows.txt".into())).unwrap();
+        block_on(save_working_file(path(&t), "windows.txt".into(), "a\nchanged\n".into(), read.crlf, read.bom, read.version)).unwrap();
+        assert_eq!(fs::read_to_string(t.dir.join("windows.txt")).unwrap(), "\u{feff}a\r\nchanged\r\n");
+
+        let read = block_on(read_working_file(path(&t), "run.sh".into())).unwrap();
+        block_on(save_working_file(path(&t), "run.sh".into(), "echo bye\n".into(), false, false, read.version)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(t.dir.join("run.sh")).unwrap().permissions().mode() & 0o777, 0o755);
+        }
+        // Nothing left behind.
+        let leftovers: Vec<_> = fs::read_dir(&t.dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn saving_refuses_to_overwrite_changes_made_elsewhere() {
+        let t = TempRepo::new("files-stale");
+        fs::write(t.dir.join("notes.txt"), "mine\n").unwrap();
+        let read = block_on(read_working_file(path(&t), "notes.txt".into())).unwrap();
+        // Changed by something else meanwhile, such as Claude Code.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(t.dir.join("notes.txt"), "theirs, and longer\n").unwrap();
+
+        let refused = block_on(save_working_file(path(&t), "notes.txt".into(), "edited\n".into(), false, false, read.version)).unwrap_err();
+        assert!(refused.starts_with(CHANGED_ON_DISK), "{refused}");
+        assert_eq!(fs::read_to_string(t.dir.join("notes.txt")).unwrap(), "theirs, and longer\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_refuses_links() {
+        let t = TempRepo::new("files-link");
+        let outside = std::env::temp_dir().join(format!("palace-test-outside-{}", std::process::id()));
+        fs::write(&outside, "secret\n").unwrap();
+        std::os::unix::fs::symlink(&outside, t.dir.join("link.txt")).unwrap();
+        let read = block_on(read_working_file(path(&t), "link.txt".into())).unwrap();
+        assert!(block_on(save_working_file(path(&t), "link.txt".into(), "changed\n".into(), false, false, read.version)).is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "secret\n");
+        fs::remove_file(&outside).unwrap();
+    }
+}
