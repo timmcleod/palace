@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/readme/palace-dark.webp">
-    <img src=".github/readme/palace-light.webp" width="560" height="360" alt="Palace">
+    <img src=".github/readme/palace-light.webp" width="560" alt="Palace">
   </picture>
 </p>
 
