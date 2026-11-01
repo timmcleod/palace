@@ -111,6 +111,7 @@ pub fn run() {
             terminal::terminal_busy,
             terminal::terminal_close,
             terminal::terminal_close_all,
+            terminal::program_available,
             quit::quit_confirmed,
             quit::set_unsaved_edits,
             cli::install_git_tools,

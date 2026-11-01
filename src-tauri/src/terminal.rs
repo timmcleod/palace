@@ -4,7 +4,10 @@
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, LazyLock, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -162,6 +165,50 @@ fn is_busy(terminal: &Terminal) -> bool {
     }
 }
 
+/// Whether `program` can be run in a terminal: found on Palace's PATH, where installers
+/// usually put it, or on the PATH the user's shell sets up, which an app started from
+/// the desktop may not have. When it can't tell, it says yes, leaving the terminal to
+/// say otherwise.
+#[tauri::command]
+pub async fn program_available(program: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || available(&program)).await.unwrap_or(true)
+}
+
+fn available(program: &str) -> bool {
+    let program = program.trim();
+    if program.is_empty() {
+        return false;
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    // A path rather than a name; a relative one depends on where it's run.
+    if program.contains('/') {
+        let full = match (program.strip_prefix("~/"), &home) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => PathBuf::from(program),
+        };
+        return !full.is_absolute() || full.is_file();
+    }
+    let on = |path: &OsStr| std::env::split_paths(path).any(|dir| dir.join(program).is_file());
+    if std::env::var_os("PATH").is_some_and(|path| on(&path)) {
+        return true;
+    }
+    // Where installers put programs: Claude Code's native installer and npm's, Homebrew.
+    let usual = [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", ".volta/bin"];
+    if let Some(home) = &home {
+        if usual.iter().any(|dir| home.join(dir).join(program).is_file()) {
+            return true;
+        }
+    }
+    if ["/opt/homebrew/bin", "/usr/local/bin"].iter().any(|dir| Path::new(dir).join(program).is_file()) {
+        return true;
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    match crate::shell_path::login_path(&shell, Duration::from_secs(5)) {
+        Some(path) => on(OsStr::new(&path)),
+        None => true,
+    }
+}
+
 /// The terminals with programs running in them, which quitting would stop.
 pub fn busy_terminals() -> Vec<u32> {
     TERMINALS.lock().unwrap().iter().filter(|(_, t)| is_busy(t)).map(|(id, _)| *id).collect()
@@ -262,6 +309,17 @@ mod tests {
         assert_eq!(exit.recv_timeout(Duration::from_secs(10)).unwrap(), "3");
         assert!(tauri::async_runtime::block_on(terminal_write(id, "more\n".into())).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finding_programs() {
+        assert!(available("sh"));
+        assert!(available("/bin/sh"));
+        assert!(!available("palace-no-such-program"));
+        assert!(!available("/no/such/program"));
+        assert!(!available("  "));
+        // Relative to wherever it's run, so not something to check here.
+        assert!(available("./bin/claude"));
     }
 
     /// A terminal whose output is collected, and its id.

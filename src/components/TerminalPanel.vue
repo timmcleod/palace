@@ -1,9 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-vue-next";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 import { isMac } from "../lib/platform.js";
 import {
+  CLAUDE_INSTALL,
+  CLAUDE_SETUP_URL,
   claudeCommand,
   copySelection,
   DEFAULT_CLAUDE_COMMAND,
@@ -11,6 +14,7 @@ import {
   isBusy,
   openTerminal,
   paste,
+  programOf,
   removeTab,
   setClaudeCommand,
   startTab,
@@ -69,8 +73,31 @@ function newTerminal() {
   openTerminal(props.path);
 }
 
-function newClaude() {
-  openTerminal(props.path, { command: claudeCommand(props.path), kind: "claude" });
+// A Claude tab checks its program is there first: without Claude Code, the tab would
+// open to "command not found". Instead it says how to install it, and can type the
+// command into a new terminal to run.
+async function newClaude() {
+  const command = claudeCommand(props.path);
+  const program = programOf(command);
+  if (!(await invoke("program_available", { program }).catch(() => true))) {
+    if (program === DEFAULT_CLAUDE_COMMAND) {
+      const install = await askConfirm({
+        title: "Claude Code Isn't Installed",
+        message: `Claude tabs run Claude Code, which isn't installed here yet. Anthropic's installer, for macOS and Linux, is:\n\n${CLAUDE_INSTALL}\n\nPalace can type it into a terminal for you to run. Other ways to install it are at ${CLAUDE_SETUP_URL}. Once it's installed, open a Claude tab again.`,
+        confirmLabel: "Install in Terminal",
+      });
+      if (install) openTerminal(props.path, { input: CLAUDE_INSTALL });
+    } else {
+      const change = await askConfirm({
+        title: "Command Not Found",
+        message: `Claude tabs in “${props.name}” run “${command}”, but “${program}” wasn't found. Install it, or change the command.`,
+        confirmLabel: "Change Command…",
+      });
+      if (change) editClaudeCommand();
+    }
+    return;
+  }
+  openTerminal(props.path, { command, kind: "claude" });
 }
 
 async function editClaudeCommand() {

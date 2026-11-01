@@ -43,6 +43,16 @@ export const DEFAULT_CLAUDE_COMMAND = "claude";
 
 export const claudeCommand = (path) => readJson(CLAUDE_COMMANDS_KEY, {})[path] || DEFAULT_CLAUDE_COMMAND;
 
+// How Anthropic says to install Claude Code, on a Mac and on Linux, and where to read
+// about other ways (https://code.claude.com/docs/en/setup).
+export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
+export const CLAUDE_SETUP_URL = "https://code.claude.com/docs/en/setup";
+
+/** The program a command runs: its first word, after any VAR=value settings. */
+export function programOf(command) {
+  return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
+}
+
 export function setClaudeCommand(path, command) {
   const commands = readJson(CLAUDE_COMMANDS_KEY, {});
   if (command.trim() && command.trim() !== DEFAULT_CLAUDE_COMMAND) commands[path] = command.trim();
@@ -120,8 +130,9 @@ new MutationObserver(() => {
 /**
  * Adds a tab to the repository's terminals and shows it. Its shell starts once the
  * panel has shown it (see startTab), and then runs `command`, if any, as if typed.
+ * `input` is typed too, but left for the user to run.
  */
-export function openTerminal(path, { command = null, kind = "shell" } = {}) {
+export function openTerminal(path, { command = null, input = null, kind = "shell" } = {}) {
   const group = tabsFor(path);
   const term = new Terminal({
     fontFamily: 'ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace',
@@ -142,7 +153,7 @@ export function openTerminal(path, { command = null, kind = "shell" } = {}) {
   el.className = "terminal-host";
 
   const tab = reactive({ key: nextKey++, kind, title: "", id: null });
-  tab.session = markRaw({ term, fit, el, command, started: false, typed: [] });
+  tab.session = markRaw({ term, fit, el, command, input, started: false, typed: [] });
   term.onTitleChange((title) => (tab.title = title));
   term.onData((data) => type(tab, data));
   term.onResize(({ cols, rows }) => tab.id && invoke("terminal_resize", { id: tab.id, cols, rows }).catch(() => {}));
@@ -172,6 +183,8 @@ export async function startTab(path, tab) {
     return;
   }
   if (session.command) type(tab, `${session.command}\r`);
+  // Typed but left for the user to run, as an install command is.
+  if (session.input) type(tab, session.input);
   for (const data of session.typed.splice(0)) type(tab, data);
 }
 
