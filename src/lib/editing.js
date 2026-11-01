@@ -8,6 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 // The file open in each repository's Files view: path -> file.
 export const openFiles = reactive({});
 
+// Images to edit as text instead, such as SVGs, as keys from keyFor.
+export const asText = reactive(new Set());
+
 // Files with edits that aren't saved, as keys from keyFor.
 export const unsaved = reactive(new Set());
 

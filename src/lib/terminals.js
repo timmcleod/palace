@@ -130,9 +130,10 @@ new MutationObserver(() => {
 /**
  * Adds a tab to the repository's terminals and shows it. Its shell starts once the
  * panel has shown it (see startTab), and then runs `command`, if any, as if typed.
- * `input` is typed too, but left for the user to run.
+ * `input` is typed too, but left for the user to run. The shell starts in `folder`
+ * inside the repository, or at its top.
  */
-export function openTerminal(path, { command = null, input = null, kind = "shell" } = {}) {
+export function openTerminal(path, { command = null, input = null, kind = "shell", folder = "" } = {}) {
   const group = tabsFor(path);
   const term = new Terminal({
     fontFamily: 'ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace',
@@ -153,7 +154,7 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
   el.className = "terminal-host";
 
   const tab = reactive({ key: nextKey++, kind, title: "", id: null });
-  tab.session = markRaw({ term, fit, el, command, input, started: false, typed: [] });
+  tab.session = markRaw({ term, fit, el, command, input, folder, started: false, typed: [] });
   term.onTitleChange((title) => (tab.title = title));
   term.onData((data) => type(tab, data));
   term.onResize(({ cols, rows }) => tab.id && invoke("terminal_resize", { id: tab.id, cols, rows }).catch(() => {}));
@@ -177,7 +178,8 @@ export async function startTab(path, tab) {
   const exited = new Channel();
   exited.onmessage = () => removeTab(path, tab);
   try {
-    tab.id = await invoke("terminal_open", { path, cols: session.term.cols, rows: session.term.rows, output, exited });
+    const cwd = session.folder ? `${path}/${session.folder}` : path;
+    tab.id = await invoke("terminal_open", { path: cwd, cols: session.term.cols, rows: session.term.rows, output, exited });
   } catch (e) {
     session.term.write(`\r\n${e}\r\n`);
     return;

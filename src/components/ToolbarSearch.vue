@@ -12,6 +12,9 @@ const props = defineProps({
   // The history to search for commits; HEAD when null.
   rev: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
+  // Whether to find new files git doesn't track yet too, as in the Files view, where
+  // they can be opened.
+  untracked: { type: Boolean, default: false },
 });
 const emit = defineEmits(["pick", "pick-commit", "filter-commits"]);
 
@@ -27,11 +30,12 @@ const list = ref(null);
 // lined up under the field.
 const position = ref({});
 
-// Tracked files, loaded when the search is first used and after anything changes.
+// Tracked files, and untracked ones if asked for, loaded when the search is first used
+// and after anything changes.
 let files = null;
 const loaded = ref(0);
 watch(
-  () => [props.path, props.refreshKey],
+  () => [props.path, props.refreshKey, props.untracked],
   () => {
     files = null;
     loaded.value++;
@@ -45,7 +49,7 @@ watch(
 async function ensureFiles() {
   if (files) return;
   try {
-    files = await invoke("tracked_files", { path: props.path });
+    files = await invoke("tracked_files", { path: props.path, untracked: props.untracked });
   } catch {
     files = [];
   }

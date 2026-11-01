@@ -86,6 +86,7 @@ const highlighting = HighlightStyle.define([
 const language = new Compartment();
 const coloring = new Compartment();
 const tabs = new Compartment();
+const wrapping = new Compartment();
 
 /** How the text indents: tabs, or the smallest run of spaces most lines start with. */
 function detectIndent(text) {
@@ -114,7 +115,7 @@ function detectIndent(text) {
  * A new editor state for `text` from `file`. `onSave` runs on Cmd+S (Ctrl+S) and
  * `onChange` with each change to the text.
  */
-export function createState(text, file, { tabSize, highlight, onSave, onChange }) {
+export function createState(text, file, { tabSize, highlight, wrap, readOnly = false, onSave, onChange }) {
   return EditorState.create({
     doc: text,
     extensions: [
@@ -124,8 +125,11 @@ export function createState(text, file, { tabSize, highlight, onSave, onChange }
       theme,
       coloring.of(highlight ? syntaxHighlighting(highlighting) : []),
       tabs.of([EditorState.tabSize.of(tabSize), indentUnit.of(detectIndent(text))]),
+      wrapping.of(wrap ? EditorView.lineWrapping : []),
       language.of([]),
       EditorView.updateListener.of((update) => update.docChanged && onChange(update.state)),
+      // Still selectable, to copy from.
+      readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
     ],
   });
 }
@@ -146,11 +150,12 @@ export async function loadLanguage(view, file, stillShown) {
   if (support && stillShown()) view.dispatch({ effects: language.reconfigure(support) });
 }
 
-/** Applies Palace's settings for tab width and syntax highlighting. */
-export function applySettings(view, { tabSize, highlight }) {
+/** Applies Palace's settings for tab width, syntax highlighting and wrapping long lines. */
+export function applySettings(view, { tabSize, highlight, wrap }) {
   view.dispatch({
     effects: [
       coloring.reconfigure(highlight ? syntaxHighlighting(highlighting) : []),
+      wrapping.reconfigure(wrap ? EditorView.lineWrapping : []),
       tabs.reconfigure([EditorState.tabSize.of(tabSize), indentUnit.of(view.state.facet(indentUnit))]),
     ],
   });

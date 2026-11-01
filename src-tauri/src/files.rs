@@ -11,9 +11,10 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// Larger files are shown read-only, if at all: an editor over megabytes of text is
-/// slow, and such files are rarely edited by hand.
+/// Larger files are shown read-only, up to MAX_SHOWN, and beyond that not at all: an
+/// editor over megabytes of text is slow, and such files are rarely edited by hand.
 const MAX_EDITABLE: u64 = 2 * 1024 * 1024;
+const MAX_SHOWN: u64 = 10 * 1024 * 1024;
 
 /// Starts the refusal to save over a file that changed on disk since it was read, so
 /// the page can offer to reload it instead.
@@ -32,7 +33,8 @@ pub struct FileEntry {
 #[derive(Serialize, Debug)]
 pub struct WorkingFileContents {
     size: u64,
-    /// "text", "image", "binary" (not text, or not UTF-8) or "too_large".
+    /// "text", "read_only" (text too large to edit), "image", "binary" (not text, or
+    /// not UTF-8) or "too_large".
     kind: &'static str,
     /// The text, with "\n" for line endings whatever the file uses, and without a
     /// byte order mark. Saving puts them back.
@@ -79,9 +81,10 @@ pub async fn working_entries(path: String, dir: String, show_ignored: bool) -> R
     Ok(entries)
 }
 
-/// A file in the working copy as it is on disk.
+/// A file in the working copy as it is on disk. An image comes as one, unless `as_text`,
+/// as for editing an SVG.
 #[tauri::command]
-pub async fn read_working_file(path: String, file: String) -> Result<WorkingFileContents, String> {
+pub async fn read_working_file(path: String, file: String, as_text: Option<bool>) -> Result<WorkingFileContents, String> {
     let (_, workdir) = open(&path)?;
     let full = inside(&workdir, &file)?;
     let meta = fs::metadata(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
@@ -89,14 +92,14 @@ pub async fn read_working_file(path: String, file: String) -> Result<WorkingFile
     let size = meta.len();
     let empty = WorkingFileContents { size, kind: "binary", text: None, crlf: false, bom: false, image: None, version };
 
-    if let Some(mime) = image_type(&file) {
+    if let Some(mime) = image_type(&file).filter(|_| !as_text.unwrap_or(false)) {
         if size as usize <= MAX_IMAGE {
             let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
             let url = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
             return Ok(WorkingFileContents { kind: "image", image: Some(url), ..empty });
         }
     }
-    if size > MAX_EDITABLE {
+    if size > MAX_SHOWN {
         return Ok(WorkingFileContents { kind: "too_large", ..empty });
     }
     let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
@@ -113,7 +116,8 @@ pub async fn read_working_file(path: String, file: String) -> Result<WorkingFile
     let crlf_count = text.matches("\r\n").count();
     let crlf = crlf_count > 0 && crlf_count >= text.matches('\n').count() - crlf_count;
     let text = if crlf { text.replace("\r\n", "\n") } else { text };
-    Ok(WorkingFileContents { kind: "text", text: Some(text), crlf, bom, ..empty })
+    let kind = if size > MAX_EDITABLE { "read_only" } else { "text" };
+    Ok(WorkingFileContents { kind, text: Some(text), crlf, bom, ..empty })
 }
 
 /// Saves `text` as `file`, with the line endings and byte order mark it was read
@@ -199,6 +203,44 @@ pub async fn create_working_file(path: String, file: String, folder: bool) -> Re
         fs::OpenOptions::new().write(true).create_new(true).open(&full).map(drop)
     };
     created.map_err(|e| format!("Couldn't create {file}: {e}"))
+}
+
+/// Copies `file` beside itself as "name copy.ext" (or "name copy 2.ext", and so on, if
+/// that's taken), and returns the copy's path.
+#[tauri::command]
+pub async fn duplicate_working_file(path: String, file: String) -> Result<String, String> {
+    let (_, workdir) = open(&path)?;
+    let full = inside(&workdir, &file)?;
+    let meta = fs::symlink_metadata(&full).map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{file} isn't a file Palace can duplicate."));
+    }
+    let parent = full.parent().ok_or_else(|| format!("Couldn't duplicate {file}."))?;
+    let real_parent = parent.canonicalize().map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    let real_workdir = workdir.canonicalize().map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    if !real_parent.starts_with(&real_workdir) {
+        return Err(format!("{file} is outside the repository's folder."));
+    }
+    let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // "notes.md" -> ("notes", ".md"); ".env" and "Makefile" have no extension.
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name.as_str(), ""),
+    };
+    let copy = (1..1000)
+        .map(|n| if n == 1 { format!("{stem} copy{extension}") } else { format!("{stem} copy {n}{extension}") })
+        .find(|candidate| fs::symlink_metadata(parent.join(candidate)).is_err())
+        .ok_or_else(|| format!("Couldn't find a name for a copy of {file}."))?;
+    // Not over anything that appeared meanwhile.
+    let mut from = fs::File::open(&full).map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    let mut to = fs::OpenOptions::new().write(true).create_new(true).open(parent.join(&copy)).map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    std::io::copy(&mut from, &mut to).map_err(|e| format!("Couldn't duplicate {file}: {e}"))?;
+    let _ = to.set_permissions(meta.permissions());
+    let folder = file.rsplit_once('/').map(|(dir, _)| dir);
+    Ok(match folder {
+        Some(dir) => format!("{dir}/{copy}"),
+        None => copy,
+    })
 }
 
 /// Renames `from` to `to`, a file or a folder, making any new folders on the way to
@@ -327,7 +369,7 @@ mod tests {
     fn paths_stay_inside_the_working_copy() {
         let t = TempRepo::new("files-inside");
         for bad in ["../outside", "/etc/passwd", ".git/config", "src/../../x"] {
-            assert!(block_on(read_working_file(path(&t), bad.into())).is_err(), "{bad}");
+            assert!(block_on(read_working_file(path(&t), bad.into(), None)).is_err(), "{bad}");
             assert!(block_on(working_entries(path(&t), bad.into(), false)).is_err(), "{bad}");
         }
     }
@@ -340,7 +382,7 @@ mod tests {
         fs::write(t.dir.join("data.bin"), [0u8, 1, 2]).unwrap();
         fs::write(t.dir.join("latin1.txt"), [b'c', b'a', b'f', 0xe9]).unwrap();
 
-        let read = |f: &str| block_on(read_working_file(path(&t), f.into())).unwrap();
+        let read = |f: &str| block_on(read_working_file(path(&t), f.into(), None)).unwrap();
         let unix = read("unix.txt");
         assert_eq!((unix.kind, unix.text.as_deref(), unix.crlf, unix.bom), ("text", Some("a\nb\n"), false, false));
         let windows = read("windows.txt");
@@ -360,11 +402,11 @@ mod tests {
             fs::set_permissions(t.dir.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let read = block_on(read_working_file(path(&t), "windows.txt".into())).unwrap();
+        let read = block_on(read_working_file(path(&t), "windows.txt".into(), None)).unwrap();
         block_on(save_working_file(path(&t), "windows.txt".into(), "a\nchanged\n".into(), read.crlf, read.bom, read.version)).unwrap();
         assert_eq!(fs::read_to_string(t.dir.join("windows.txt")).unwrap(), "\u{feff}a\r\nchanged\r\n");
 
-        let read = block_on(read_working_file(path(&t), "run.sh".into())).unwrap();
+        let read = block_on(read_working_file(path(&t), "run.sh".into(), None)).unwrap();
         block_on(save_working_file(path(&t), "run.sh".into(), "echo bye\n".into(), false, false, read.version)).unwrap();
         #[cfg(unix)]
         {
@@ -380,7 +422,7 @@ mod tests {
     fn saving_refuses_to_overwrite_changes_made_elsewhere() {
         let t = TempRepo::new("files-stale");
         fs::write(t.dir.join("notes.txt"), "mine\n").unwrap();
-        let read = block_on(read_working_file(path(&t), "notes.txt".into())).unwrap();
+        let read = block_on(read_working_file(path(&t), "notes.txt".into(), None)).unwrap();
         // Changed by something else meanwhile, such as Claude Code.
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(t.dir.join("notes.txt"), "theirs, and longer\n").unwrap();
@@ -408,6 +450,33 @@ mod tests {
         for bad in ["", "  ", "../outside.txt", ".git/hooks/pre-commit", "/tmp/x"] {
             assert!(create(bad, false).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn svgs_large_files_and_duplicates() {
+        let t = TempRepo::new("files-more");
+        fs::write(t.dir.join("logo.svg"), "<svg/>\n").unwrap();
+        let read = |f: &str, as_text| block_on(read_working_file(path(&t), f.into(), as_text)).unwrap();
+        assert_eq!(read("logo.svg", None).kind, "image");
+        let svg = read("logo.svg", Some(true));
+        assert_eq!((svg.kind, svg.text.as_deref()), ("text", Some("<svg/>\n")));
+
+        // Too large to edit, but not to read.
+        fs::write(t.dir.join("big.log"), "x\n".repeat(1_500_000)).unwrap();
+        assert_eq!(read("big.log", None).kind, "read_only");
+        fs::write(t.dir.join("huge.log"), "x\n".repeat(6_000_000)).unwrap();
+        assert_eq!(read("huge.log", None).kind, "too_large");
+
+        fs::create_dir_all(t.dir.join("docs")).unwrap();
+        fs::write(t.dir.join("docs/notes.md"), "n\n").unwrap();
+        fs::write(t.dir.join(".env"), "A=1\n").unwrap();
+        let duplicate = |f: &str| block_on(duplicate_working_file(path(&t), f.into()));
+        assert_eq!(duplicate("docs/notes.md").unwrap(), "docs/notes copy.md");
+        assert_eq!(duplicate("docs/notes.md").unwrap(), "docs/notes copy 2.md");
+        assert_eq!(duplicate(".env").unwrap(), ".env copy");
+        assert_eq!(fs::read_to_string(t.dir.join("docs/notes copy 2.md")).unwrap(), "n\n");
+        assert!(duplicate("docs").is_err());
+        assert!(duplicate("../x").is_err());
     }
 
     #[test]
@@ -482,7 +551,7 @@ mod tests {
         let outside = std::env::temp_dir().join(format!("palace-test-outside-{}", std::process::id()));
         fs::write(&outside, "secret\n").unwrap();
         std::os::unix::fs::symlink(&outside, t.dir.join("link.txt")).unwrap();
-        let read = block_on(read_working_file(path(&t), "link.txt".into())).unwrap();
+        let read = block_on(read_working_file(path(&t), "link.txt".into(), None)).unwrap();
         assert!(block_on(save_working_file(path(&t), "link.txt".into(), "changed\n".into(), false, false, read.version)).is_err());
         assert_eq!(fs::read_to_string(&outside).unwrap(), "secret\n");
         fs::remove_file(&outside).unwrap();

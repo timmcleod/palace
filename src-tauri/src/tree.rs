@@ -2,7 +2,7 @@
 //! folders and file contents for the Tree view.
 
 use crate::cli;
-use git2::{ObjectType, Oid, Repository};
+use git2::{ObjectType, Oid, Repository, StatusOptions};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -26,12 +26,20 @@ pub struct FileContents {
     text: Option<String>,
 }
 
-/// Every file git tracks in the working copy, for file search.
+/// Every file git tracks in the working copy, for file search, and with `untracked`,
+/// the new files it doesn't track yet, except those it ignores.
 #[tauri::command]
-pub async fn tracked_files(path: String) -> Result<Vec<String>, String> {
+pub async fn tracked_files(path: String, untracked: Option<bool>) -> Result<Vec<String>, String> {
     let repo = Repository::discover(&path).map_err(message)?;
     let index = repo.index().map_err(message)?;
-    Ok(index.iter().map(|entry| String::from_utf8_lossy(&entry.path).into_owned()).collect())
+    let mut files: Vec<String> = index.iter().map(|entry| String::from_utf8_lossy(&entry.path).into_owned()).collect();
+    if untracked.unwrap_or(false) {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+        let statuses = repo.statuses(Some(&mut opts)).map_err(message)?;
+        files.extend(statuses.iter().filter(|s| s.status().is_wt_new()).map(|s| String::from_utf8_lossy(s.path_bytes()).into_owned()));
+    }
+    Ok(files)
 }
 
 /// The folders and files directly inside `dir` ("" for the top) at commit `id`,
@@ -199,6 +207,21 @@ mod tests {
     use crate::test_support::TempRepo;
 
     #[test]
+    fn listing_files_for_search() {
+        let t = TempRepo::new("tree-search");
+        t.commit(&[(".gitignore", Some("build/\n")), ("tracked.txt", Some(""))], "Start");
+        t.write(&[("src/new.rs", Some("")), ("build/out.js", Some(""))]);
+
+        let sorted = |untracked| {
+            let mut files = tauri::async_runtime::block_on(tracked_files(t.path().into(), untracked)).unwrap();
+            files.sort();
+            files
+        };
+        assert_eq!(sorted(None), [".gitignore", "tracked.txt"]);
+        assert_eq!(sorted(Some(true)), [".gitignore", "src/new.rs", "tracked.txt"]);
+    }
+
+    #[test]
     fn browsing_a_commit() {
         let t = TempRepo::new("tree");
         let id = t.commit(
@@ -224,7 +247,7 @@ mod tests {
     fn listing_tracked_files() {
         let t = TempRepo::new("tracked");
         t.commit(&[("a.txt", Some("a")), ("dir/b.txt", Some("b"))], "First");
-        let mut files = run(tracked_files(t.path().into()));
+        let mut files = run(tracked_files(t.path().into(), None));
         files.sort();
         assert_eq!(files, ["a.txt", "dir/b.txt"]);
     }

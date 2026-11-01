@@ -1,8 +1,8 @@
 <script setup>
-import { markRaw, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleAlert, ExternalLink, Save } from "lucide-vue-next";
-import { buffers, keyFor, markUnsaved } from "../lib/editing.js";
+import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
+import { asText, buffers, keyFor, markUnsaved } from "../lib/editing.js";
 import { formatSize } from "../lib/format.js";
 import { shortcut } from "../lib/platform.js";
 import { settings } from "../lib/settings.js";
@@ -37,11 +37,24 @@ const saving = ref(false);
 // read with ({ version, crlf, bom }).
 let current = null;
 
-const settingsNow = () => ({ tabSize: settings.tabSize, highlight: settings.syntaxHighlighting });
+const settingsNow = () => ({ tabSize: settings.tabSize, highlight: settings.syntaxHighlighting, wrap: settings.wrapLines });
 
-function newState(text) {
+// An image to edit as text, such as an SVG, comes as text; one with edits not saved
+// stays text.
+function readFile(path = props.path, file = props.file) {
+  const key = keyFor(path, file);
+  return invoke("read_working_file", { path, file, asText: asText.has(key) || buffers.has(key) });
+}
+
+// Text Palace shows, editable or, when too large to edit, read-only.
+const TEXT = ["text", "read_only"];
+const isText = computed(() => TEXT.includes(contents.value?.kind));
+const isSvg = computed(() => /\.svg$/i.test(props.file ?? ""));
+
+function newState(text, readOnly = false) {
   return cm.createState(text, props.file, {
     ...settingsNow(),
+    readOnly,
     onSave: () => save(),
     onChange: (state) => {
       if (!current) return;
@@ -73,10 +86,10 @@ async function open() {
   }
   loading.value = true;
   try {
-    const [read] = await Promise.all([invoke("read_working_file", { path, file }), cm ?? import("../lib/codeEditor.js").then((m) => (cm = m))]);
+    const [read] = await Promise.all([readFile(path, file), cm ?? import("../lib/codeEditor.js").then((m) => (cm = m))]);
     if (seq !== loadSeq) return;
     contents.value = read;
-    if (read.kind !== "text") return;
+    if (!TEXT.includes(read.kind)) return;
 
     const key = keyFor(path, file);
     const kept = buffers.get(key);
@@ -87,7 +100,7 @@ async function open() {
       dirty.value = true;
       changedOnDisk.value = read.version !== kept.base.version;
     } else {
-      state = newState(read.text);
+      state = newState(read.text, read.kind === "read_only");
       current = { key, saved: state.doc, base: { version: read.version, crlf: read.crlf, bom: read.bom } };
     }
     await showState(state);
@@ -121,12 +134,12 @@ async function checkDisk() {
   const key = current.key;
   let read;
   try {
-    read = await invoke("read_working_file", { path: props.path, file: props.file });
+    read = await readFile();
   } catch {
     return;
   }
   if (!current || current.key !== key || read.version === current.base.version) return;
-  if (read.kind !== "text") return;
+  if (!TEXT.includes(read.kind)) return;
   if (dirty.value) {
     changedOnDisk.value = true;
     return;
@@ -149,7 +162,7 @@ watch(() => props.refreshKey, checkDisk);
 // Reload takes the file as it is on disk, dropping the edits here.
 async function reload() {
   try {
-    takeFromDisk(await invoke("read_working_file", { path: props.path, file: props.file }));
+    takeFromDisk(await readFile());
   } catch (e) {
     tell("Couldn't Reload the File", String(e));
   }
@@ -158,7 +171,7 @@ async function reload() {
 // Keep Mine saves over the version on disk.
 async function keepMine() {
   try {
-    const read = await invoke("read_working_file", { path: props.path, file: props.file });
+    const read = await readFile();
     current.base = { ...current.base, version: read.version };
     changedOnDisk.value = false;
   } catch (e) {
@@ -169,7 +182,7 @@ async function keepMine() {
 const CHANGED_ON_DISK = "CHANGED_ON_DISK: ";
 
 async function save() {
-  if (!current || !view || saving.value) return;
+  if (!current || !view || saving.value || contents.value?.kind !== "text") return;
   if (!dirty.value && !changedOnDisk.value) return;
   saving.value = true;
   const target = current;
@@ -200,7 +213,7 @@ async function save() {
 }
 
 watch(
-  () => [settings.tabSize, settings.syntaxHighlighting],
+  () => [settings.tabSize, settings.syntaxHighlighting, settings.wrapLines],
   () => view && cm.applySettings(view, settingsNow()),
 );
 
@@ -216,8 +229,16 @@ function openInEditor() {
 
 const NOT_EDITABLE = {
   binary: "This file isn't text Palace can edit.",
-  too_large: "This file is too large to edit here.",
+  too_large: "This file is too large to show here.",
 };
+
+// An SVG shows as an image, or as its text to edit.
+function showAs(text) {
+  const key = keyFor(props.path, props.file);
+  if (text) asText.add(key);
+  else asText.delete(key);
+  open();
+}
 </script>
 
 <template>
@@ -225,9 +246,13 @@ const NOT_EDITABLE = {
     <div class="editor-header">
       <span class="file-title" :title="file">{{ file }}</span>
       <span v-if="dirty" class="unsaved-note">Edited</span>
+      <span v-if="contents?.kind === 'read_only'" class="unsaved-note" title="Files this large open read-only">Read Only</span>
       <span class="spacer" />
       <Spinner v-if="loading || saving" :size="13" class="dim" />
       <span v-else-if="contents" class="dim size">{{ formatSize(contents.size) }}</span>
+      <button v-if="isSvg && isText && !dirty" class="secondary-button save" title="Show the image" @click="showAs(false)">
+        <Image :size="13" /> Image
+      </button>
       <button v-if="file" class="icon-button small" title="Open in Your Editor" @click="openInEditor"><ExternalLink :size="14" /></button>
       <button
         v-if="contents?.kind === 'text'"
@@ -251,12 +276,13 @@ const NOT_EDITABLE = {
     <div v-else-if="!file" class="empty-state"><p>Select a file to see and edit it.</p></div>
     <div v-else-if="contents?.kind === 'image'" class="image-view">
       <img :src="contents.image" alt="" />
+      <button v-if="isSvg" class="secondary-button edit-text" @click="showAs(true)">Edit as Text</button>
     </div>
     <div v-else-if="contents && NOT_EDITABLE[contents.kind]" class="empty-state">
       <p>{{ NOT_EDITABLE[contents.kind] }}</p>
       <button class="secondary-button" @click="openInEditor"><ExternalLink :size="14" /> Open in Your Editor</button>
     </div>
-    <div v-show="contents?.kind === 'text' && !error" ref="host" class="editor-host" />
+    <div v-show="isText && !error" ref="host" class="editor-host" />
   </div>
 </template>
 
@@ -339,6 +365,7 @@ const NOT_EDITABLE = {
 }
 
 .image-view {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
@@ -347,6 +374,14 @@ const NOT_EDITABLE = {
   padding: 20px;
   overflow: auto;
   background: repeating-conic-gradient(var(--row-hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+}
+
+.edit-text {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  padding: 4px 12px;
+  background: var(--content-bg);
 }
 
 .image-view img {

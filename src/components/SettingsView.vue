@@ -452,7 +452,7 @@ const SAMPLE = {
             <div class="item">
               <div class="text">
                 <div class="title">Wrap long lines</div>
-                <div class="desc">Instead of scrolling sideways. Side by side always wraps.</div>
+                <div class="desc">In unified diffs and the Files view's editor, instead of scrolling sideways. Side by side always wraps.</div>
               </div>
               <label class="switch"><input v-model="settings.wrapLines" type="checkbox" /><span /></label>
             </div>

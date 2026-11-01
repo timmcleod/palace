@@ -542,6 +542,8 @@ const placeHere = () => ({
   detailMode: detailMode.value,
   treeFile: treeFile.value,
   comparison: comparison.value,
+  // The file open in the Files view.
+  file: isFiles.value ? (openFiles[overview.value.path] ?? null) : null,
 });
 
 const samePlace = (a, b) =>
@@ -551,9 +553,11 @@ const samePlace = (a, b) =>
   a.fileFilter === b.fileFilter &&
   a.detailMode === b.detailMode &&
   a.treeFile === b.treeFile &&
-  a.comparison === b.comparison;
+  a.comparison === b.comparison &&
+  a.file === b.file;
 
-watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile, comparison], () => {
+const openFile = () => (isFiles.value && overview.value ? openFiles[overview.value.path] : null);
+watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile, comparison, openFile], () => {
   if (restoring || !overview.value) return;
   const place = placeHere();
   if (here && samePlace(here, place)) return;
@@ -583,6 +587,7 @@ async function go(direction) {
   treeFile.value = place.treeFile;
   treeReveal.value = place.treeFile;
   comparison.value = place.comparison;
+  if (place.file) openFiles[overview.value.path] = place.file;
   // Let the views settle (opening a stash's view picks one, say) before recording again.
   await nextTick();
   await nextTick();
@@ -604,7 +609,10 @@ function describe(place) {
     "workspace:history": "History",
     "workspace:compare": place.comparison && `${place.comparison.head} with ${place.comparison.base}`,
   }[place.selected] ?? name ?? kind;
-  const detail = place.commit?.short_id ?? (place.selected === "workspace:stashes" && place.stash != null ? `stash@{${place.stash}}` : "");
+  const detail =
+    place.commit?.short_id ??
+    place.file?.split("/").pop() ??
+    (place.selected === "workspace:stashes" && place.stash != null ? `stash@{${place.stash}}` : "");
   return [view, detail].filter(Boolean).join(" › ");
 }
 
@@ -1168,13 +1176,13 @@ function toggleTerminal() {
 }
 
 // Shows the panel, starting a terminal if the repository has none, or with `newTab`,
-// whatever it has.
-async function showTerminal({ newTab = false } = {}) {
+// whatever it has, in `folder` inside the repository if given.
+async function showTerminal({ newTab = false, folder = "" } = {}) {
   if (!overview.value) return;
   terminalOpen.value = true;
   terminalLoaded.value = true;
   const { openTerminal, tabsFor } = await import("./lib/terminals.js");
-  if (newTab || !tabsFor(overview.value.path).tabs.length) openTerminal(overview.value.path);
+  if (newTab || !tabsFor(overview.value.path).tabs.length) openTerminal(overview.value.path, { folder });
   else terminalPanel.value?.focus();
 }
 
@@ -1676,6 +1684,7 @@ function startResize(event, pane, min, max) {
         @select="openFiles[overview.path] = $event"
         @deleted="onFileDeleted"
         @renamed="onFileRenamed"
+        @open-terminal="(folder) => showTerminal({ newTab: true, folder })"
       />
       <IssueList
         v-else-if="isPulls && issueRepo"
@@ -1871,6 +1880,7 @@ function startResize(event, pane, min, max) {
           :path="overview.path"
           :rev="searchRev"
           :refresh-key="refreshKey"
+          :untracked="isFiles"
           @pick="(file) => (isFiles ? (openFiles[overview.path] = file) : showFileHistory(file))"
           @pick-commit="showFoundCommit"
           @filter-commits="showMatchingCommits"

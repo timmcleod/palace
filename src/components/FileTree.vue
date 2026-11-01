@@ -7,10 +7,11 @@ const remembered = reactive(new Map());
 </script>
 
 <script setup>
-import { computed, shallowRef, ref, watch } from "vue";
+import { computed, nextTick, shallowRef, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen } from "lucide-vue-next";
 import { isUnsaved } from "../lib/editing.js";
+import { fileManager } from "../lib/platform.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 
 // The working copy's folders and files as they are on disk, with git's view of each:
@@ -20,9 +21,10 @@ const props = defineProps({
   selected: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
 });
-// "deleted" says what was deleted, so the editor can let it go, and "renamed" what
-// was renamed ({ from, to }), so it can follow.
-const emit = defineEmits(["select", "deleted", "renamed"]);
+// "deleted" says what was deleted, so the editor can let it go, "renamed" what was
+// renamed ({ from, to }), so it can follow, and "open-terminal" a folder to start a
+// terminal in.
+const emit = defineEmits(["select", "deleted", "renamed", "open-terminal"]);
 
 watch(
   () => props.path,
@@ -192,6 +194,17 @@ async function rename(row) {
   await load();
 }
 
+// A copy beside the file ("notes copy.md"), opened to change.
+async function duplicate(row) {
+  try {
+    const copy = await invoke("duplicate_working_file", { path: props.path, file: row.path });
+    await load();
+    emit("select", copy);
+  } catch (e) {
+    tell("Couldn't Duplicate the File", String(e));
+  }
+}
+
 // Deleting moves to the Trash, where it can be got back from, as discarding does.
 async function remove(row) {
   const folder = row.kind === "dir";
@@ -215,40 +228,99 @@ async function remove(row) {
   await load();
 }
 
+const outside = (command, failed, file) => invoke(command, { path: props.path, file }).catch((e) => tell(failed, String(e)));
+
 function rowMenu(event, row) {
   const dir = row.kind === "dir" ? row.path : folderOf(row.path);
+  const isFile = row.kind === "file" || row.kind === "link";
   openMenu(event, [
     { label: "New File…", action: () => create(dir, false) },
     { label: "New Folder…", action: () => create(dir, true) },
     { separator: true },
+    isFile && { label: "Open in Default App", action: () => outside("open_in_editor", "Couldn't Open the File", row.path) },
+    { label: `Reveal in ${fileManager}`, action: () => outside("show_in_folder", "Couldn't Show It", row.path) },
+    { label: "Open Terminal Here", action: () => emit("open-terminal", dir) },
+    { label: "Copy Path", action: () => navigator.clipboard.writeText(row.path) },
+    { separator: true },
     { label: "Rename…", action: () => rename(row) },
+    row.kind === "file" && { label: "Duplicate", action: () => duplicate(row) },
     { label: "Delete…", danger: true, action: () => remove(row) },
   ]);
 }
 
-// Right-clicking empty space makes them at the top.
+// Right-clicking empty space acts on the top of the repository.
 function listMenu(event) {
   if (event.target.closest(".tree-row")) return;
   openMenu(event, [
     { label: "New File…", action: () => create("", false) },
     { label: "New Folder…", action: () => create("", true) },
+    { separator: true },
+    { label: "Open Terminal Here", action: () => emit("open-terminal", "") },
   ]);
 }
 
 function activate(row) {
+  cursor.value = row.path;
   if (row.kind === "dir") toggle(row.path);
   else if (row.kind === "file" || row.kind === "link") emit("select", row.path);
+}
+
+// --- Keys -------------------------------------------------------------------------
+// The arrows move through the tree, as in a file manager: Up and Down from row to row,
+// Right opens a folder or steps into it, Left closes it or steps out to its folder.
+// Enter or Space opens a file.
+
+// The row the keys act on: the open file's, until they move.
+const cursor = ref(null);
+watch(() => props.selected, (file) => (cursor.value = file), { immediate: true });
+
+function moveTo(row) {
+  if (!row) return;
+  cursor.value = row.path;
+  nextTick(() => list.value?.querySelector(`[data-path="${CSS.escape(row.path)}"]`)?.scrollIntoView({ block: "nearest" }));
+}
+
+const list = ref(null);
+
+function onKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const all = rows.value;
+  if (!all.length) return;
+  const at = all.findIndex((r) => r.path === cursor.value);
+  const row = all[at];
+  const keys = {
+    ArrowDown: () => moveTo(all[at < 0 ? 0 : Math.min(at + 1, all.length - 1)]),
+    ArrowUp: () => moveTo(all[at < 0 ? 0 : Math.max(at - 1, 0)]),
+    Home: () => moveTo(all[0]),
+    End: () => moveTo(all.at(-1)),
+    ArrowRight: () => {
+      if (row?.kind !== "dir") return;
+      if (!view.value.expanded.has(row.path)) toggle(row.path);
+      else if (all[at + 1]?.depth > row.depth) moveTo(all[at + 1]);
+    },
+    ArrowLeft: () => {
+      if (!row) return;
+      if (row.kind === "dir" && view.value.expanded.has(row.path)) toggle(row.path);
+      else moveTo(all.find((r) => r.path === folderOf(row.path)));
+    },
+    Enter: () => row && activate(row),
+    " ": () => row && activate(row),
+  };
+  if (!keys[event.key]) return;
+  event.preventDefault();
+  keys[event.key]();
 }
 </script>
 
 <template>
-  <div class="file-tree" @contextmenu="listMenu">
+  <div ref="list" class="file-tree" tabindex="0" @contextmenu="listMenu" @keydown="onKeydown">
     <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
     <div
       v-for="row in rows"
       :key="row.path"
       class="tree-row"
-      :class="{ selected: row.path === selected, muted: row.ignored || row.kind === 'submodule' }"
+      :data-path="row.path"
+      :class="{ selected: row.path === selected, cursor: row.path === cursor, muted: row.ignored || row.kind === 'submodule' }"
       :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
       :title="row.kind === 'submodule' ? 'A separate repository' : row.path"
       @click="activate(row)"
@@ -297,6 +369,15 @@ function activate(row) {
 
 .tree-row.selected {
   background: var(--row-selected);
+}
+
+.file-tree:focus {
+  outline: none;
+}
+
+/* Where the keys are, while the tree has them. */
+.file-tree:focus .tree-row.cursor {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .tree-row.muted {
