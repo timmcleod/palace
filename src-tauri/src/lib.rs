@@ -15,7 +15,6 @@ mod quit;
 mod rebase;
 mod remote;
 mod reset;
-#[cfg(any(target_os = "macos", test))]
 mod shell_path;
 mod stash;
 mod store;
