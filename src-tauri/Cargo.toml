@@ -1,6 +1,6 @@
 [package]
 name = "palace"
-version = "0.12.1"
+version = "0.12.2"
 description = "A Git client for Linux"
 authors = ["Tim McLeod"]
 license = "MIT"
