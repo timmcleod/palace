@@ -6,12 +6,14 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{mpsc, LazyLock, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 struct Terminal {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// What's typed, for the terminal's own thread to write: a program that isn't
+    /// reading holds up only that thread, not every terminal.
+    input: mpsc::Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     shell: Option<u32>,
 }
@@ -91,10 +93,20 @@ pub async fn terminal_open(
     let mut child = pair.slave.spawn_command(command).map_err(|e| format!("Couldn't start the shell: {e}"))?;
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let mut killer = child.clone_killer();
-    let terminal = Terminal { master: pair.master, writer, killer: child.clone_killer(), shell: child.process_id() };
+    let (input, typed) = mpsc::channel::<Vec<u8>>();
+    // Ends once the terminal's closed and nothing more can be typed, or the shell has
+    // gone and can't take it.
+    std::thread::spawn(move || {
+        for data in typed {
+            if writer.write_all(&data).and_then(|_| writer.flush()).is_err() {
+                break;
+            }
+        }
+    });
+    let terminal = Terminal { master: pair.master, input, killer: child.clone_killer(), shell: child.process_id() };
     TERMINALS.lock().unwrap().insert(id, terminal);
 
     std::thread::spawn(move || {
@@ -120,12 +132,13 @@ pub async fn terminal_open(
     Ok(id)
 }
 
-/// Types `data` into the terminal: keys pressed, or text pasted.
+/// Types `data` into the terminal: keys pressed, or text pasted. It's queued, so a
+/// program that isn't reading doesn't hold up Palace.
 #[tauri::command]
 pub async fn terminal_write(id: u32, data: String) -> Result<(), String> {
-    let mut terminals = TERMINALS.lock().unwrap();
-    let terminal = terminals.get_mut(&id).ok_or("The terminal has closed.")?;
-    terminal.writer.write_all(data.as_bytes()).and_then(|_| terminal.writer.flush()).map_err(|e| e.to_string())
+    let terminals = TERMINALS.lock().unwrap();
+    let terminal = terminals.get(&id).ok_or("The terminal has closed.")?;
+    terminal.input.send(data.into_bytes()).map_err(|_| "The terminal has closed.".to_string())
 }
 
 #[tauri::command]
@@ -241,6 +254,48 @@ mod tests {
         assert!(seen.contains(&format!("in:{} from::", folder.display())), "{seen}");
         assert_eq!(exit.recv_timeout(Duration::from_secs(10)).unwrap(), "3");
         assert!(tauri::async_runtime::block_on(terminal_write(id, "more\n".into())).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A terminal whose output is collected, and its id.
+    fn open_collecting(path: &str) -> (u32, mpsc::Receiver<Vec<u8>>) {
+        let (send, printed) = mpsc::channel();
+        let output = Channel::new(move |body| {
+            if let InvokeResponseBody::Raw(bytes) = body {
+                let _ = send.send(bytes);
+            }
+            Ok(())
+        });
+        let exited = Channel::new(|_| Ok(()));
+        let id = tauri::async_runtime::block_on(terminal_open(path.into(), 80, 24, output, exited)).unwrap();
+        (id, printed)
+    }
+
+    #[test]
+    fn pasting_into_a_program_that_isnt_reading_holds_up_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("palace-test-terminal-paste-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().into_owned();
+
+        let (busy, _) = open_collecting(&path);
+        tauri::async_runtime::block_on(terminal_write(busy, "sleep 30\n".into())).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        // Far more than a terminal's input buffer holds.
+        let started = std::time::Instant::now();
+        tauri::async_runtime::block_on(terminal_write(busy, "x".repeat(1 << 20))).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1), "the paste waited {:?}", started.elapsed());
+
+        let (other, printed) = open_collecting(&path);
+        tauri::async_runtime::block_on(terminal_write(other, "echo still-typing\n".into())).unwrap();
+        let mut seen = String::new();
+        while !seen.contains("still-typing\r\n") {
+            let bytes = printed.recv_timeout(Duration::from_secs(10)).expect("the other terminal stalled");
+            seen.push_str(&String::from_utf8_lossy(&bytes));
+        }
+
+        tauri::async_runtime::block_on(terminal_close(busy));
+        tauri::async_runtime::block_on(terminal_close(other));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
