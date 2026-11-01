@@ -18,6 +18,7 @@ mod shell_path;
 mod stash;
 mod store;
 mod tag;
+mod terminal;
 mod tree;
 mod undo;
 mod updates;
@@ -36,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(history::HistoryState::default())
         .manage(cli::Running::default())
         .manage(store::Store::default())
@@ -101,7 +103,12 @@ pub fn run() {
             undo::restore_snapshot,
             open::open_folder,
             open::show_in_folder,
-            open::open_terminal,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_busy,
+            terminal::terminal_close,
+            terminal::terminal_close_all,
             cli::install_git_tools,
             tree::tracked_files,
             tree::tree_entries,

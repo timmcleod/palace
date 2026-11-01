@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
@@ -23,6 +23,7 @@ import {
   Redo2,
   RefreshCw,
   Search,
+  SquareTerminal,
   Undo2,
   X,
 } from "lucide-vue-next";
@@ -602,6 +603,8 @@ function describe(place) {
 }
 
 function onNavKeydown(event) {
+  // Whatever's typed in a terminal is the terminal's.
+  if (event.target.closest?.(".terminal-panel")) return;
   // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
   // dialogs, which keep their own. On a Mac, these and the shortcuts below use Cmd.
   const key = event.key.toLowerCase();
@@ -1073,7 +1076,35 @@ const unlistenProgress = listen("remote-progress", (event) => {
 onBeforeUnmount(() => unlistenProgress.then((unlisten) => unlisten()));
 
 const PANES_KEY = "palace.paneWidths";
-const panes = reactive({ sidebar: 300, history: 580, ...readJson(PANES_KEY, {}) });
+const panes = reactive({ sidebar: 300, history: 580, terminal: 300, ...readJson(PANES_KEY, {}) });
+const savePanes = () => writeJson(PANES_KEY, { sidebar: panes.sidebar, history: panes.history, terminal: panes.terminal });
+
+// The terminal panel below the history and details, loaded the first time it's opened.
+// Opening it for a repository with no terminals starts one.
+const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
+const terminalOpen = ref(false);
+const terminalLoaded = ref(false);
+const terminalPanel = ref(null);
+
+// Terminals a page started before it reloaded have nothing to show them any more.
+invoke("terminal_close_all").catch(() => {});
+
+function toggleTerminal() {
+  if (!overview.value) return;
+  if (terminalOpen.value) terminalOpen.value = false;
+  else showTerminal();
+}
+
+// Shows the panel, starting a terminal if the repository has none, or with `newTab`,
+// whatever it has.
+async function showTerminal({ newTab = false } = {}) {
+  if (!overview.value) return;
+  terminalOpen.value = true;
+  terminalLoaded.value = true;
+  const { openTerminal, tabsFor } = await import("./lib/terminals.js");
+  if (newTab || !tabsFor(overview.value.path).tabs.length) openTerminal(overview.value.path);
+  else terminalPanel.value?.focus();
+}
 
 // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
 let loadSeq = 0;
@@ -1196,7 +1227,7 @@ homeDir()
   .then((dir) => (home.value = dir))
   .catch(() => {});
 
-// Opens the repository in the file manager or a terminal, saying why if it can't.
+// Opens the repository in the file manager, saying why if it can't.
 function openOutside(command, failed) {
   invoke(command, { path: overview.value.path }).catch((e) => tell(failed, String(e)));
 }
@@ -1206,7 +1237,7 @@ function recentMenu(anchor) {
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
     current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
-    current && { label: "Open in Terminal", action: () => openOutside("open_terminal", "Couldn't Open a Terminal") },
+    current && { label: "Open in Terminal", action: () => showTerminal({ newTab: true }) },
     current && { separator: true },
     ...recents.value.map((repo) => ({
       label: repo.name,
@@ -1394,7 +1425,7 @@ function startResize(event, pane, min, max) {
   const stop = () => {
     target.removeEventListener("pointermove", move);
     target.removeEventListener("pointerup", stop);
-    writeJson(PANES_KEY, { sidebar: panes.sidebar, history: panes.history });
+    savePanes();
   };
   target.addEventListener("pointermove", move);
   target.addEventListener("pointerup", stop);
@@ -1699,6 +1730,14 @@ function startResize(event, pane, min, max) {
             <Redo2 :size="18" :stroke-width="1.5" />
           </button>
         </div>
+        <button
+          class="icon-button terminal-toggle"
+          :class="{ active: terminalOpen }"
+          :title="terminalOpen ? 'Hide Terminal' : 'Terminal'"
+          @click="toggleTerminal"
+        >
+          <SquareTerminal :size="18" :stroke-width="1.5" />
+        </button>
         <button class="icon-button" title="Refresh, and fetch from all remotes" @click="refreshAndFetch">
           <RefreshCw
             :size="17"
@@ -1837,6 +1876,16 @@ function startResize(event, pane, min, max) {
       </template>
     </section>
 
+    <TerminalPanel
+      v-if="terminalLoaded"
+      v-show="terminalOpen"
+      ref="terminalPanel"
+      v-model:height="panes.terminal"
+      :path="overview.path"
+      :name="overview.name"
+      @resized="savePanes"
+      @hide="terminalOpen = false"
+    />
   </div>
 
   <main v-else-if="browsingGitHub" class="github-page">
@@ -1909,8 +1958,22 @@ function startResize(event, pane, min, max) {
 <style scoped>
 .window {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
+}
+
+/* The sidebar stays full height; the terminal panel is below the other panes. */
+.window > .sidebar {
+  grid-row: 1 / -1;
+}
+
+.window > .pane {
+  grid-row: 1;
+}
+
+.window > .terminal-panel {
+  grid-row: 2;
+  grid-column: 2 / -1;
 }
 
 .pane {

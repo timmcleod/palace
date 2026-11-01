@@ -33,6 +33,8 @@ ureq = { version = "3", features = ["json"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 base64 = "0.23"
+portable-pty = "0.9.0"
+tauri-plugin-clipboard-manager = "2"
 
 # Signed-in GitHub tokens are kept in the desktop's keyring: the Secret Service on
 # Linux, the Keychain on macOS.
