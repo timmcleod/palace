@@ -27,12 +27,12 @@
       <stop offset="0.45" stop-color="#62b0f8"/>
       <stop offset="1" stop-color="#56a3f2"/>
     </linearGradient>
-    <linearGradient id="towerL" x1="0" y1="340" x2="0" y2="631" gradientUnits="userSpaceOnUse">
+    <linearGradient id="turretL" x1="0" y1="340" x2="0" y2="631" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ecf2fa"/>
       <stop offset="0.35" stop-color="#e2ecf8"/>
       <stop offset="1" stop-color="#8bbdf7"/>
     </linearGradient>
-    <linearGradient id="towerR" x1="0" y1="340" x2="0" y2="631" gradientUnits="userSpaceOnUse">
+    <linearGradient id="turretR" x1="0" y1="340" x2="0" y2="631" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#f0f6fd"/>
       <stop offset="0.35" stop-color="#e8f2fc"/>
       <stop offset="1" stop-color="#98c6f9"/>
@@ -66,13 +66,13 @@
       <rect x="134" y="631" width="806" height="210" fill="url(#ground)"/>
       <rect x="134" y="35" width="806" height="806" fill="url(#vignette)"/>
 
-      <!-- Left tower and wall -->
-      <path d="M222 360 L301 339 L300 606 L184 631 Z" fill="url(#towerL)"/>
+      <!-- Left turret and wall -->
+      <path d="M222 360 L301 339 L300 606 L184 631 Z" fill="url(#turretL)"/>
       <path d="M301 399 L392 377 L385 588 L300 606 Z" fill="url(#wallL)"/>
       <path d="M301 339 L309 345 L309 397 L301 399 Z" fill="#3f5a87"/>
 
-      <!-- Right tower and wall -->
-      <path d="M849 360 L770 339 L771 606 L887 631 Z" fill="url(#towerR)"/>
+      <!-- Right turret and wall -->
+      <path d="M849 360 L770 339 L771 606 L887 631 Z" fill="url(#turretR)"/>
       <path d="M770 399 L679 377 L686 588 L771 606 Z" fill="url(#wallR)"/>
       <path d="M770 339 L762 345 L762 397 L770 399 Z" fill="#5f7dab"/>
 
