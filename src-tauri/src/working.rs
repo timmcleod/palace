@@ -592,7 +592,7 @@ fn is_marker(line: &str, marker: char) -> bool {
     rest.is_empty() || (marker != '=' && rest.starts_with(' '))
 }
 
-fn move_to_trash(file: &Path) -> Result<(), String> {
+pub(crate) fn move_to_trash(file: &Path) -> Result<(), String> {
     trash::delete(file).map_err(|e| format!("Couldn't move {} to the Trash: {e}", file.display()))
 }
 

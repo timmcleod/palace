@@ -90,7 +90,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount, githubAccountChecked } from "./lib/github.js";
-import { openFiles, unsavedFiles } from "./lib/editing.js";
+import { forgetEdits, openFiles, unsavedFiles } from "./lib/editing.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -1103,6 +1103,16 @@ const terminalPanel = ref(null);
 // The Files view's tree, whose Ignored toggle is in the subheader above it.
 const fileTree = ref(null);
 
+// A file deleted in the Files view, or a folder, closes if it's open, once the editor
+// has let it go, and takes its edits not saved with it.
+async function onFileDeleted(file) {
+  const path = overview.value.path;
+  const open = openFiles[path];
+  if (open === file || open?.startsWith(`${file}/`)) openFiles[path] = null;
+  await nextTick();
+  forgetEdits(path, file);
+}
+
 // Terminals a page started before it reloaded have nothing to show them any more.
 invoke("terminal_close_all").catch(() => {});
 
@@ -1645,6 +1655,7 @@ function startResize(event, pane, min, max) {
         :selected="openFiles[overview.path] ?? null"
         :refresh-key="refreshKey"
         @select="openFiles[overview.path] = $event"
+        @deleted="onFileDeleted"
       />
       <IssueList
         v-else-if="isPulls && issueRepo"

@@ -117,6 +117,8 @@ pub fn run() {
             files::working_entries,
             files::read_working_file,
             files::save_working_file,
+            files::create_working_file,
+            files::delete_working_file,
             tree::tracked_files,
             tree::tree_entries,
             tree::file_contents,

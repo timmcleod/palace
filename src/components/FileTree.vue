@@ -11,6 +11,7 @@ import { computed, shallowRef, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen } from "lucide-vue-next";
 import { isUnsaved } from "../lib/editing.js";
+import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 
 // The working copy's folders and files as they are on disk, with git's view of each:
 // changed, new, conflicted. Folders with changes inside them show a dot.
@@ -19,7 +20,8 @@ const props = defineProps({
   selected: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
 });
-const emit = defineEmits(["select"]);
+// "deleted" says what was deleted, so the editor can let it go.
+const emit = defineEmits(["select", "deleted"]);
 
 watch(
   () => props.path,
@@ -27,7 +29,10 @@ watch(
   { immediate: true },
 );
 const view = computed(() => remembered.get(props.path));
-defineExpose({ toggleIgnored: () => (view.value.showIgnored = !view.value.showIgnored), showsIgnored: () => view.value.showIgnored });
+defineExpose({
+  toggleIgnored: () => (view.value.showIgnored = !view.value.showIgnored),
+  showsIgnored: () => view.value.showIgnored,
+});
 
 // Loaded folder listings by folder path ("" is the top).
 const listings = shallowRef(new Map());
@@ -123,6 +128,78 @@ const BADGES = {
 
 const ICONS = { file: File, link: FileSymlink, submodule: FolderGit2 };
 
+// --- New files and folders ---------------------------------------------------------
+
+const folderOf = (file) => (file?.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
+
+// Asks for a name, in `dir` ("" for the top), then makes it. A name can go into new
+// folders ("docs/guide.md"). A new file opens, ready to write.
+async function create(dir, folder) {
+  const values = await openForm({
+    title: folder ? "New Folder" : "New File",
+    message: dir ? `In ${dir}/` : "At the top of the repository.",
+    fields: [{ key: "name", label: "Name", type: "text", placeholder: folder ? "assets" : "notes.md" }],
+    confirmLabel: "Create",
+  });
+  const name = values?.name?.trim().replace(/^\/+|\/+$/g, "");
+  if (!name) return;
+  const file = dir ? `${dir}/${name}` : name;
+  try {
+    await invoke("create_working_file", { path: props.path, file, folder });
+  } catch (e) {
+    tell(folder ? "Couldn't Create the Folder" : "Couldn't Create the File", String(e));
+    return;
+  }
+  // Opens the folders down to it, and shows it.
+  const opened = folder ? file : folderOf(file);
+  const parts = opened ? opened.split("/") : [];
+  for (let i = 1; i <= parts.length; i++) view.value.expanded.add(parts.slice(0, i).join("/"));
+  await load();
+  if (!folder) emit("select", file);
+}
+
+// Deleting moves to the Trash, where it can be got back from, as discarding does.
+async function remove(row) {
+  const folder = row.kind === "dir";
+  const ok = await askConfirm({
+    title: folder ? "Delete Folder?" : "Delete File?",
+    message: folder
+      ? `“${row.path}” and everything in it will be moved to the Trash.`
+      : `“${row.path}” will be moved to the Trash.${isUnsaved(props.path, row.path) ? " Your edits to it that aren't saved will be lost." : ""}`,
+    confirmLabel: "Move to Trash",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await invoke("delete_working_file", { path: props.path, file: row.path });
+  } catch (e) {
+    tell(folder ? "Couldn't Delete the Folder" : "Couldn't Delete the File", String(e));
+    return;
+  }
+  view.value.expanded.delete(row.path);
+  emit("deleted", row.path);
+  await load();
+}
+
+function rowMenu(event, row) {
+  const dir = row.kind === "dir" ? row.path : folderOf(row.path);
+  openMenu(event, [
+    { label: "New File…", action: () => create(dir, false) },
+    { label: "New Folder…", action: () => create(dir, true) },
+    { separator: true },
+    { label: "Delete…", danger: true, action: () => remove(row) },
+  ]);
+}
+
+// Right-clicking empty space makes them at the top.
+function listMenu(event) {
+  if (event.target.closest(".tree-row")) return;
+  openMenu(event, [
+    { label: "New File…", action: () => create("", false) },
+    { label: "New Folder…", action: () => create("", true) },
+  ]);
+}
+
 function activate(row) {
   if (row.kind === "dir") toggle(row.path);
   else if (row.kind === "file" || row.kind === "link") emit("select", row.path);
@@ -130,7 +207,7 @@ function activate(row) {
 </script>
 
 <template>
-  <div class="file-tree">
+  <div class="file-tree" @contextmenu="listMenu">
     <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
     <div
       v-for="row in rows"
@@ -140,6 +217,7 @@ function activate(row) {
       :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
       :title="row.kind === 'submodule' ? 'A separate repository' : row.path"
       @click="activate(row)"
+      @contextmenu.prevent="rowMenu($event, row)"
     >
       <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: view.expanded.has(row.path) }" />
       <span v-else class="chevron" />

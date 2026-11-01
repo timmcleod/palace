@@ -170,6 +170,61 @@ pub async fn save_working_file(path: String, file: String, text: String, crlf: b
     Ok(self::version(&meta))
 }
 
+/// Creates an empty file at `file` in the working copy, or with `folder`, a folder,
+/// along with any folders on the way to it. Refuses if something's already there.
+#[tauri::command]
+pub async fn create_working_file(path: String, file: String, folder: bool) -> Result<(), String> {
+    let (_, workdir) = open(&path)?;
+    let file = file.trim().trim_end_matches('/').to_string();
+    if file.is_empty() {
+        return Err("Enter a name.".into());
+    }
+    let full = inside(&workdir, &file)?;
+    if fs::symlink_metadata(&full).is_ok() {
+        return Err(format!("{file} already exists."));
+    }
+    // The folders on the way could lead out of the working copy through a link.
+    let real_workdir = workdir.canonicalize().map_err(|e| format!("Couldn't create {file}: {e}"))?;
+    let existing = full.ancestors().skip(1).find(|dir| dir.exists()).unwrap_or(&workdir);
+    let real_existing = existing.canonicalize().map_err(|e| format!("Couldn't create {file}: {e}"))?;
+    if !real_existing.starts_with(&real_workdir) {
+        return Err(format!("{file} would be outside the repository's folder."));
+    }
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Couldn't create {file}: {e}"))?;
+    }
+    let created = if folder {
+        fs::create_dir(&full)
+    } else {
+        fs::OpenOptions::new().write(true).create_new(true).open(&full).map(drop)
+    };
+    created.map_err(|e| format!("Couldn't create {file}: {e}"))
+}
+
+/// Moves `file`, or a folder and everything in it, to the Trash, where it can be got
+/// back from.
+#[tauri::command]
+pub async fn delete_working_file(path: String, file: String) -> Result<(), String> {
+    delete(&path, &file, &crate::working::move_to_trash)
+}
+
+fn delete(path: &str, file: &str, trash: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+    let (_, workdir) = open(path)?;
+    if file.trim().is_empty() {
+        return Err("Choose a file to delete.".into());
+    }
+    let full = inside(&workdir, file)?;
+    fs::symlink_metadata(&full).map_err(|e| format!("Couldn't delete {file}: {e}"))?;
+    // Through a linked folder, it could be outside the working copy.
+    let parent = full.parent().ok_or_else(|| format!("Couldn't delete {file}."))?;
+    let real_parent = parent.canonicalize().map_err(|e| format!("Couldn't delete {file}: {e}"))?;
+    let real_workdir = workdir.canonicalize().map_err(|e| format!("Couldn't delete {file}: {e}"))?;
+    if !real_parent.starts_with(&real_workdir) {
+        return Err(format!("{file} is outside the repository's folder."));
+    }
+    trash(&full)
+}
+
 fn open(path: &str) -> Result<(Repository, PathBuf), String> {
     let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
@@ -300,6 +355,65 @@ mod tests {
         let refused = block_on(save_working_file(path(&t), "notes.txt".into(), "edited\n".into(), false, false, read.version)).unwrap_err();
         assert!(refused.starts_with(CHANGED_ON_DISK), "{refused}");
         assert_eq!(fs::read_to_string(t.dir.join("notes.txt")).unwrap(), "theirs, and longer\n");
+    }
+
+    #[test]
+    fn creating_files_and_folders() {
+        let t = TempRepo::new("files-create");
+        let create = |f: &str, folder: bool| block_on(create_working_file(path(&t), f.into(), folder));
+
+        create("docs/guide/intro.md", false).unwrap();
+        assert_eq!(fs::read_to_string(t.dir.join("docs/guide/intro.md")).unwrap(), "");
+        create("assets/", true).unwrap();
+        assert!(t.dir.join("assets").is_dir());
+
+        // Never over something that's there, nor outside the working copy or into .git.
+        fs::write(t.dir.join("docs/guide/intro.md"), "kept\n").unwrap();
+        assert!(create("docs/guide/intro.md", false).is_err());
+        assert_eq!(fs::read_to_string(t.dir.join("docs/guide/intro.md")).unwrap(), "kept\n");
+        assert!(create("assets", true).is_err());
+        for bad in ["", "  ", "../outside.txt", ".git/hooks/pre-commit", "/tmp/x"] {
+            assert!(create(bad, false).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn deleting_moves_to_the_trash() {
+        let t = TempRepo::new("files-delete");
+        fs::create_dir_all(t.dir.join("docs/old")).unwrap();
+        fs::write(t.dir.join("docs/old/a.md"), "").unwrap();
+        fs::write(t.dir.join("notes.txt"), "").unwrap();
+        // The Trash, for the test: what's moved there, and gone from the folder.
+        let trashed = std::cell::RefCell::new(Vec::new());
+        let real_dir = t.dir.canonicalize().unwrap();
+        let trash = |full: &Path| {
+            let relative = full.strip_prefix(&real_dir).or_else(|_| full.strip_prefix(&t.dir)).unwrap();
+            trashed.borrow_mut().push(relative.to_path_buf());
+            if full.is_dir() { fs::remove_dir_all(full) } else { fs::remove_file(full) }.map_err(|e| e.to_string())
+        };
+
+        delete(&path(&t), "notes.txt", &trash).unwrap();
+        delete(&path(&t), "docs/old", &trash).unwrap();
+        assert_eq!(*trashed.borrow(), [PathBuf::from("notes.txt"), PathBuf::from("docs/old")]);
+        assert!(!t.dir.join("docs/old").exists() && t.dir.join("docs").exists());
+
+        // Nothing that isn't there, nor the repository itself, outside it or .git.
+        for bad in ["notes.txt", "", "..", "../x", ".git", ".git/config"] {
+            assert!(delete(&path(&t), bad, &trash).is_err(), "{bad}");
+        }
+        assert_eq!(trashed.borrow().len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creating_refuses_to_go_through_links_outside() {
+        let t = TempRepo::new("files-create-link");
+        let outside = std::env::temp_dir().join(format!("palace-test-outside-dir-{}", std::process::id()));
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, t.dir.join("elsewhere")).unwrap();
+        assert!(block_on(create_working_file(path(&t), "elsewhere/new.txt".into(), false)).is_err());
+        assert!(!outside.join("new.txt").exists());
+        fs::remove_dir_all(&outside).unwrap();
     }
 
     #[cfg(unix)]

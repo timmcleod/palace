@@ -29,6 +29,16 @@ export function markUnsaved(path, file, dirty) {
   if (before !== unsaved.size > 0) invoke("set_unsaved_edits", { unsaved: unsaved.size > 0 }).catch(() => {});
 }
 
+/** Drops the edits not saved to `file`, or to anything in it if it's a folder, as when it's deleted. */
+export function forgetEdits(path, file) {
+  for (const key of [...unsaved, ...buffers.keys()]) {
+    const [repo, edited] = key.split("\n");
+    if (repo !== path || (edited !== file && !edited.startsWith(`${file}/`))) continue;
+    buffers.delete(key);
+    markUnsaved(repo, edited, false);
+  }
+}
+
 /** The files with edits that aren't saved, as { path, file }. */
 export const unsavedFiles = () =>
   [...unsaved].map((key) => {
