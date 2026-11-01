@@ -379,9 +379,14 @@ function onKeydown(event) {
   outline: none;
 }
 
-/* Where the keys are, while the tree has them. */
+/* Where the keys are, while the tree has them: a bar down the row's edge, and a tint
+   when it isn't on the open file. */
 .file-tree:focus .tree-row.cursor {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.file-tree:focus .tree-row.cursor:not(.selected) {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
 .tree-row.muted {
