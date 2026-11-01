@@ -76,7 +76,11 @@ const split = computed(() => settings.diffLayout === "split");
 
 // Wrapping, the line number columns are as wide as the longest number needs.
 const numberWidth = computed(() => {
-  const last = Math.max(0, ...(props.diff.hunks ?? []).flatMap((h) => h.lines.map((l) => Math.max(l.old ?? 0, l.new ?? 0))));
+  // A loop, not Math.max(...lines): a long diff has more lines than a call takes arguments.
+  let last = 0;
+  for (const hunk of props.diff.hunks ?? []) {
+    for (const line of hunk.lines) last = Math.max(last, line.old ?? 0, line.new ?? 0);
+  }
   return `${Math.max(3, String(last).length)}ch`;
 });
 const splitHunks = computed(() => (split.value ? props.diff.hunks?.map((hunk) => splitRows(hunk.lines)) : null) ?? []);
