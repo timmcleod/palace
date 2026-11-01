@@ -1,6 +1,9 @@
 //! Restarting into an update once it's installed.
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+// For app.env(), on Linux only.
+#[cfg(target_os = "linux")]
+use tauri::Manager;
 
 /// Restarts Palace after an update. On Linux the new copy waits until this one, and
 /// its web view's helper processes, have exited: until then the web view holds on to
