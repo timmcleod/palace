@@ -2,7 +2,7 @@
 import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
-import { asText, buffers, keyFor, markUnsaved, takeFocusRequest } from "../lib/editing.js";
+import { asText, buffers, focusOnOpen, keyFor, markUnsaved, takeFocusRequest } from "../lib/editing.js";
 import { formatSize } from "../lib/format.js";
 import { isMac, shortcut } from "../lib/platform.js";
 import { settings } from "../lib/settings.js";
