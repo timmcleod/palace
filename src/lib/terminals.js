@@ -128,6 +128,9 @@ export function openTerminal(path, { command = null, kind = "shell" } = {}) {
     fontSize: isMac ? 12 : 14,
     cursorBlink: true,
     scrollback: 10000,
+    // Trackpads on a Mac scroll the terminal slowly at xterm's usual speed, next to the
+    // rest of the system. Option scrolls faster still, as everywhere.
+    scrollSensitivity: isMac ? 3 : 1,
     allowProposedApi: true,
     macOptionIsMeta: true,
     theme: theme(),
