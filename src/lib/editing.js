@@ -39,6 +39,24 @@ export function forgetEdits(path, file) {
   }
 }
 
+/** Moves the edits not saved to `from`, or to anything in it if it's a folder, as when it's renamed to `to`. */
+export function renameEdits(path, from, to) {
+  const moved = (file) => (file === from ? to : file.startsWith(`${from}/`) ? to + file.slice(from.length) : null);
+  for (const key of [...new Set([...unsaved, ...buffers.keys()])]) {
+    const [repo, edited] = key.split("\n");
+    const renamed = repo === path && moved(edited);
+    if (!renamed) continue;
+    if (buffers.has(key)) {
+      buffers.set(keyFor(repo, renamed), buffers.get(key));
+      buffers.delete(key);
+    }
+    if (unsaved.has(key)) {
+      markUnsaved(repo, edited, false);
+      markUnsaved(repo, renamed, true);
+    }
+  }
+}
+
 /** The files with edits that aren't saved, as { path, file }. */
 export const unsavedFiles = () =>
   [...unsaved].map((key) => {

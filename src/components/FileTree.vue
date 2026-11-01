@@ -20,8 +20,9 @@ const props = defineProps({
   selected: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
 });
-// "deleted" says what was deleted, so the editor can let it go.
-const emit = defineEmits(["select", "deleted"]);
+// "deleted" says what was deleted, so the editor can let it go, and "renamed" what
+// was renamed ({ from, to }), so it can follow.
+const emit = defineEmits(["select", "deleted", "renamed"]);
 
 watch(
   () => props.path,
@@ -158,6 +159,39 @@ async function create(dir, folder) {
   if (!folder) emit("select", file);
 }
 
+// Renames within the file's folder, or into a new one inside it ("old/notes.md").
+async function rename(row) {
+  const folder = row.kind === "dir";
+  const dir = folderOf(row.path);
+  const values = await openForm({
+    title: folder ? "Rename Folder" : "Rename File",
+    message: dir ? `In ${dir}/` : "At the top of the repository.",
+    fields: [{ key: "name", label: "Name", type: "text", value: row.name }],
+    confirmLabel: "Rename",
+  });
+  const name = values?.name?.trim().replace(/^\/+|\/+$/g, "");
+  if (!name || name === row.name) return;
+  const to = dir ? `${dir}/${name}` : name;
+  try {
+    await invoke("rename_working_file", { path: props.path, from: row.path, to });
+  } catch (e) {
+    tell(folder ? "Couldn't Rename the Folder" : "Couldn't Rename the File", String(e));
+    return;
+  }
+  // Open folders keep open under their new names, and the way to it opens.
+  const { expanded } = view.value;
+  for (const open of [...expanded]) {
+    if (open === row.path || open.startsWith(`${row.path}/`)) {
+      expanded.delete(open);
+      expanded.add(to + open.slice(row.path.length));
+    }
+  }
+  const parts = folderOf(to) ? folderOf(to).split("/") : [];
+  for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
+  emit("renamed", { from: row.path, to });
+  await load();
+}
+
 // Deleting moves to the Trash, where it can be got back from, as discarding does.
 async function remove(row) {
   const folder = row.kind === "dir";
@@ -187,6 +221,7 @@ function rowMenu(event, row) {
     { label: "New File…", action: () => create(dir, false) },
     { label: "New Folder…", action: () => create(dir, true) },
     { separator: true },
+    { label: "Rename…", action: () => rename(row) },
     { label: "Delete…", danger: true, action: () => remove(row) },
   ]);
 }

@@ -90,7 +90,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount, githubAccountChecked } from "./lib/github.js";
-import { forgetEdits, openFiles, unsavedFiles } from "./lib/editing.js";
+import { forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -1113,6 +1113,18 @@ async function onFileDeleted(file) {
   forgetEdits(path, file);
 }
 
+// A file renamed in the Files view, or the folder it's in, stays open under its new
+// name, its edits not saved with it. They move once the editor has let go of the old
+// name, and before it opens the new one.
+async function onFileRenamed({ from, to }) {
+  const path = overview.value.path;
+  const open = openFiles[path];
+  if (open === from) openFiles[path] = to;
+  else if (open?.startsWith(`${from}/`)) openFiles[path] = to + open.slice(from.length);
+  await nextTick();
+  renameEdits(path, from, to);
+}
+
 // Terminals a page started before it reloaded have nothing to show them any more.
 invoke("terminal_close_all").catch(() => {});
 
@@ -1656,6 +1668,7 @@ function startResize(event, pane, min, max) {
         :refresh-key="refreshKey"
         @select="openFiles[overview.path] = $event"
         @deleted="onFileDeleted"
+        @renamed="onFileRenamed"
       />
       <IssueList
         v-else-if="isPulls && issueRepo"

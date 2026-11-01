@@ -201,6 +201,39 @@ pub async fn create_working_file(path: String, file: String, folder: bool) -> Re
     created.map_err(|e| format!("Couldn't create {file}: {e}"))
 }
 
+/// Renames `from` to `to`, a file or a folder, making any new folders on the way to
+/// it. Refuses if something's already called `to`.
+#[tauri::command]
+pub async fn rename_working_file(path: String, from: String, to: String) -> Result<(), String> {
+    let (_, workdir) = open(&path)?;
+    let to = to.trim().trim_end_matches('/').to_string();
+    if from.trim().is_empty() || to.is_empty() {
+        return Err("Enter a name.".into());
+    }
+    let old = inside(&workdir, &from)?;
+    let new = inside(&workdir, &to)?;
+    fs::symlink_metadata(&old).map_err(|e| format!("Couldn't rename {from}: {e}"))?;
+    if fs::symlink_metadata(&new).is_ok() {
+        return Err(format!("{to} already exists."));
+    }
+    // Neither end may be outside the working copy through a linked folder.
+    let real_workdir = workdir.canonicalize().map_err(|e| format!("Couldn't rename {from}: {e}"))?;
+    for end in [&old, &new] {
+        let existing = end.ancestors().skip(1).find(|dir| dir.exists()).unwrap_or(&workdir);
+        let real = existing.canonicalize().map_err(|e| format!("Couldn't rename {from}: {e}"))?;
+        if !real.starts_with(&real_workdir) {
+            return Err(format!("{} is outside the repository's folder.", if end == &old { &from } else { &to }));
+        }
+    }
+    if new.starts_with(&old) {
+        return Err(format!("{from} can't go inside itself."));
+    }
+    if let Some(parent) = new.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Couldn't rename {from}: {e}"))?;
+    }
+    fs::rename(&old, &new).map_err(|e| format!("Couldn't rename {from}: {e}"))
+}
+
 /// Moves `file`, or a folder and everything in it, to the Trash, where it can be got
 /// back from.
 #[tauri::command]
@@ -375,6 +408,32 @@ mod tests {
         for bad in ["", "  ", "../outside.txt", ".git/hooks/pre-commit", "/tmp/x"] {
             assert!(create(bad, false).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn renaming_files_and_folders() {
+        let t = TempRepo::new("files-rename");
+        fs::create_dir_all(t.dir.join("docs")).unwrap();
+        fs::write(t.dir.join("docs/a.md"), "a\n").unwrap();
+        fs::write(t.dir.join("b.md"), "b\n").unwrap();
+        let rename = |from: &str, to: &str| block_on(rename_working_file(path(&t), from.into(), to.into()));
+
+        rename("docs/a.md", "docs/intro.md").unwrap();
+        assert_eq!(fs::read_to_string(t.dir.join("docs/intro.md")).unwrap(), "a\n");
+        // Into a new folder, and a whole folder at once.
+        rename("docs/intro.md", "docs/guide/intro.md").unwrap();
+        rename("docs", "manual").unwrap();
+        assert_eq!(fs::read_to_string(t.dir.join("manual/guide/intro.md")).unwrap(), "a\n");
+
+        // Never over something that's there, into itself, outside the working copy or into .git.
+        assert!(rename("b.md", "manual").is_err());
+        assert!(rename("manual", "manual/inner").is_err());
+        for bad in ["../b.md", ".git/b.md", "", "/tmp/b.md"] {
+            assert!(rename("b.md", bad).is_err(), "{bad}");
+        }
+        assert!(rename(".git", "git").is_err());
+        assert!(rename("missing.md", "found.md").is_err());
+        assert_eq!(fs::read_to_string(t.dir.join("b.md")).unwrap(), "b\n");
     }
 
     #[test]
