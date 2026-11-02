@@ -97,7 +97,7 @@ export function writeJson(key, value) {
 }
 
 const RECENTS_KEY = "palace.recentRepositories";
-const MAX_RECENTS = 15;
+const MAX_RECENTS = 30;
 
 export function recentRepositories() {
   const recents = readJson(RECENTS_KEY, []);

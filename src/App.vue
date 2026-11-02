@@ -1399,10 +1399,12 @@ function recentMenu(anchor) {
     current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => showTerminal({ newTab: true }) },
     current && { separator: true },
+    recents.value.length > FILTER_RECENTS && { filter: "Find a repository", empty: "No matching repositories", rows: FILTER_RECENTS },
     ...recents.value.map((repo) => ({
       label: repo.name,
       detail: tidy(repo.path),
       checked: repo.path === current,
+      filterable: true,
       action: () => repo.path !== current && loadRepository(repo.path, { keepOnError: true }),
     })),
     recents.value.length && { separator: true },
@@ -1418,6 +1420,34 @@ function refresh() {
   if (!overview.value || loading.value) return;
   loadRepository(overview.value.path, { quiet: true });
   refreshKey.value++;
+}
+
+// A list of more recent repositories than this has a field to find one in, and
+// shows this many, scrolling to the rest.
+const FILTER_RECENTS = 5;
+const recentList = ref(null);
+const recentListHeight = ref("none");
+watch(
+  [recentList, () => recents.value.length],
+  () => {
+    const row = recentList.value?.querySelector(".recent");
+    recentListHeight.value = recents.value.length > FILTER_RECENTS && row ? `${FILTER_RECENTS * row.offsetHeight}px` : "none";
+  },
+  { flush: "post" },
+);
+const recentQuery = ref("");
+const shownRecents = computed(() => {
+  const words = recentQuery.value.toLowerCase().split(/\s+/).filter(Boolean);
+  return recents.value.filter((repo) => {
+    const text = `${repo.name} ${repo.path}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+});
+
+// Enter in the welcome screen's field opens the first match.
+function openFirstRecent() {
+  const repo = shownRecents.value[0];
+  if (repo) loadRepository(repo.path);
 }
 
 function removeRecent(path) {
@@ -2079,8 +2109,19 @@ function startResize(event, pane, min, max) {
 
       <div v-if="recents.length" class="recents">
         <div class="recents-title">Recent</div>
-        <div class="recent-list">
-          <div v-for="repo in recents" :key="repo.path" class="recent" @click="loadRepository(repo.path)">
+        <input
+          v-if="recents.length > FILTER_RECENTS"
+          v-model="recentQuery"
+          class="recent-filter"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="Find a repository"
+          @keydown.enter="openFirstRecent"
+        />
+        <div ref="recentList" class="recent-list" :style="{ maxHeight: recentListHeight }">
+          <div v-if="!shownRecents.length" class="recent-none">No matching repositories</div>
+          <div v-for="repo in shownRecents" :key="repo.path" class="recent" @click="loadRepository(repo.path)">
             <FolderGit2 :size="17" :stroke-width="1.5" class="row-icon" />
             <div class="recent-text">
               <div>{{ repo.name }}</div>
@@ -2532,6 +2573,29 @@ function startResize(event, pane, min, max) {
   min-height: 0;
   margin-top: 24px;
   text-align: left;
+}
+
+.recent-filter {
+  flex-shrink: 0;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--input-bg);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.recent-filter:focus {
+  border-color: var(--accent);
+}
+
+.recent-none {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
 
 .recent-list {

@@ -26,8 +26,10 @@ export const contextMenu = shallowRef(null);
 
 /**
  * Shows a menu at the pointer. items: [{ label, action, disabled, danger, detail,
- * checked }] or { separator: true }. `detail` is a second, smaller line; `checked`
- * puts a tick beside the item.
+ * checked, filterable }] or { separator: true }. `detail` is a second, smaller line;
+ * `checked` puts a tick beside the item. A { filter: placeholder, empty } item is a
+ * field, focused as the menu opens, that narrows the `filterable` items to those
+ * matching what's typed; `empty` is shown when none do.
  */
 export function openMenu(event, items) {
   event.preventDefault();
