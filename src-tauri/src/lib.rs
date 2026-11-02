@@ -216,7 +216,6 @@ pub fn run() {
         });
 }
 
-
 /// Runs Palace as git's credential helper instead of as the app; see `github`.
 pub fn git_credential(action: Option<&str>) -> i32 {
     github::credential_helper(action)
