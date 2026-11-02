@@ -21,7 +21,6 @@ import {
   GitBranch,
   GitCommitVertical,
   GitMerge,
-  RefreshCw,
   Search,
   SquareTerminal,
   X,
@@ -626,6 +625,13 @@ function onNavKeydown(event) {
     else undo();
     return;
   }
+  // Ctrl+R reloads the repository and fetches, as the Fetch button does, rather than
+  // reloading the window.
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "r" && overview.value && !dialogOpen()) {
+    event.preventDefault();
+    refreshAndFetch();
+    return;
+  }
   // Ctrl+P finds a file to open in the Files view.
   if (commandKey(event) && !event.shiftKey && !event.altKey && key === "p" && overview.value && !dialogOpen()) {
     event.preventDefault();
@@ -776,8 +782,9 @@ const REMOTE_TITLES = {
 
 const runRemote = (kind) => runGit(REMOTE_TITLES[kind], kind);
 
-// The Refresh button reloads the repository at once, then fetches from its remotes,
-// which reloads it again with what came in.
+// Fetch, and Cmd+R (Ctrl+R), reload the repository at once, then fetch from its
+// remotes, which reloads it again with what came in. Otherwise Palace keeps itself
+// current: the file watcher, coming back to the window and background fetches.
 function refreshAndFetch() {
   refresh();
   if (overview.value?.remotes.length && !remoteBusy.value) runRemote("fetch");
@@ -831,10 +838,10 @@ watch(
 
 const fetchTitle = computed(() => {
   const at = overview.value && fetchedAt[overview.value.path];
-  if (!at) return "Fetch from all remotes";
+  if (!at) return `Fetch from all remotes (${shortcut("Ctrl+R")})`;
   const minutes = Math.floor((now.value - at) / 60_000);
   const ago = minutes < 1 ? "just now" : minutes === 1 ? "a minute ago" : `${minutes} minutes ago`;
-  return `Fetch from all remotes (last fetched ${ago})`;
+  return `Fetch from all remotes (${shortcut("Ctrl+R")}), last fetched ${ago}`;
 });
 
 // --- Undo and redo -----------------------------------------------------------------
@@ -1781,7 +1788,7 @@ function startResize(event, pane, min, max) {
             :class="{ active: remoteOp?.command === 'fetch' && remoteBusy }"
             :title="fetchTitle"
             :disabled="remoteBusy"
-            @click="runRemote('fetch')"
+            @click="refreshAndFetch"
           >
             <CloudDownload :size="18" :stroke-width="1.5" />
           </button>
@@ -1852,13 +1859,6 @@ function startResize(event, pane, min, max) {
           @click="toggleTerminal"
         >
           <SquareTerminal :size="18" :stroke-width="1.5" />
-        </button>
-        <button class="icon-button" title="Refresh, and fetch from all remotes" @click="refreshAndFetch">
-          <RefreshCw
-            :size="17"
-            :stroke-width="1.5"
-            :class="{ spinning: loading || (remoteOp?.command === 'fetch' && remoteBusy) }"
-          />
         </button>
         <label v-if="isStashes" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
