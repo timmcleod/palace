@@ -262,7 +262,19 @@ fn commit_diff<'r>(repo: &'r Repository, commit: &Commit) -> Result<Diff<'r>, gi
         0 => None,
         _ => Some(commit.parent(0)?.tree()?),
     };
-    tree_diff(repo, parent_tree.as_ref(), &commit.tree()?)
+    let mut diff = tree_diff(repo, parent_tree.as_ref(), &commit.tree()?)?;
+    // A stash saved with its untracked files keeps them in a third parent of their own,
+    // a commit with no parents: they're shown as added, with the rest of the stash.
+    if let Some(untracked) = stashed_untracked(commit) {
+        diff.merge(&tree_diff(repo, None, &untracked.tree()?)?)?;
+    }
+    Ok(diff)
+}
+
+fn stashed_untracked<'r>(commit: &Commit<'r>) -> Option<Commit<'r>> {
+    let third = (commit.parent_count() == 3).then(|| commit.parent(2).ok()).flatten()?;
+    let message = String::from_utf8_lossy(third.message_bytes());
+    (third.parent_count() == 0 && message.starts_with("untracked files on ")).then_some(third)
 }
 
 /// The changes from one tree to another, with renames found.
@@ -288,6 +300,21 @@ fn path_string(path: Option<&std::path::Path>) -> String {
 mod tests {
     use super::*;
     use crate::test_support::TempRepo;
+
+    #[test]
+    fn a_stash_shows_its_untracked_files() {
+        let t = TempRepo::new("stash-untracked");
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        t.write(&[("a.txt", Some("2\n")), ("new.txt", Some("new\n"))]);
+        crate::cli::git(t.path(), &["stash", "push", "--include-untracked"], None).unwrap();
+        let stash = t.repo.revparse_single("stash@{0}").unwrap().id().to_string();
+
+        let details = read_details(t.path(), &stash).unwrap();
+        let files: Vec<_> = details.files.iter().map(|f| (f.path.as_str(), f.status)).collect();
+        assert_eq!(files, [("a.txt", "modified"), ("new.txt", "added")]);
+        let diff = read_file_diff(t.path(), &stash, 1, None).unwrap();
+        assert_eq!(diff.hunks[0].lines[0].text.trim_end(), "new");
+    }
 
     #[test]
     fn root_commit_shows_every_file_as_added() {
