@@ -2079,15 +2079,17 @@ function startResize(event, pane, min, max) {
 
       <div v-if="recents.length" class="recents">
         <div class="recents-title">Recent</div>
-        <div v-for="repo in recents" :key="repo.path" class="recent" @click="loadRepository(repo.path)">
-          <FolderGit2 :size="17" :stroke-width="1.5" class="row-icon" />
-          <div class="recent-text">
-            <div>{{ repo.name }}</div>
-            <div class="recent-path">{{ repo.path }}</div>
+        <div class="recent-list">
+          <div v-for="repo in recents" :key="repo.path" class="recent" @click="loadRepository(repo.path)">
+            <FolderGit2 :size="17" :stroke-width="1.5" class="row-icon" />
+            <div class="recent-text">
+              <div>{{ repo.name }}</div>
+              <div class="recent-path">{{ repo.path }}</div>
+            </div>
+            <button class="icon-button small" title="Remove from list" @click.stop="removeRecent(repo.path)">
+              <X :size="14" />
+            </button>
           </div>
-          <button class="icon-button small" title="Remove from list" @click.stop="removeRecent(repo.path)">
-            <X :size="14" />
-          </button>
         </div>
       </div>
     </div>
@@ -2459,6 +2461,9 @@ function startResize(event, pane, min, max) {
   flex-direction: column;
   align-items: center;
   width: min(460px, calc(100vw - 32px));
+  /* No taller than the window: a long list of recent repositories scrolls instead. */
+  box-sizing: border-box;
+  max-height: calc(100vh - 56px);
   padding: 36px 28px 24px;
   border-radius: 14px;
   background: var(--content-bg);
@@ -2521,9 +2526,17 @@ function startResize(event, pane, min, max) {
 }
 
 .recents {
+  display: flex;
+  flex-direction: column;
   align-self: stretch;
+  min-height: 0;
   margin-top: 24px;
   text-align: left;
+}
+
+.recent-list {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .recents-title {
