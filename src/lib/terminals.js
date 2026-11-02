@@ -145,6 +145,10 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
     scrollSensitivity: isMac ? 3 : 1,
     allowProposedApi: true,
     macOptionIsMeta: true,
+    // Where a program takes the mouse, as Claude Code does, dragging goes to it rather
+    // than selecting. Shift+drag selects anyway on Linux, as xterm always has, and
+    // Option+drag on a Mac, as in Terminal and iTerm2.
+    macOptionClickForcesSelection: true,
     theme: theme(),
   });
   const fit = new FitAddon();
