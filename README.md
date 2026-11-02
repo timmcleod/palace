@@ -15,8 +15,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://timmcleod.github.io/palace/assets/hero-dark.webp">
-    <img src="https://timmcleod.github.io/palace/assets/hero-light.webp" width="900" alt="Palace showing a repository's Working Copy and the diff of a changed file, with Claude Code running in a Claude tab below">
+    <source media="(prefers-color-scheme: dark)" srcset="https://timmcleod.github.io/palace/assets/hero-dark.webp?v=2">
+    <img src="https://timmcleod.github.io/palace/assets/hero-light.webp?v=2" width="900" alt="Palace showing a repository's Working Copy and the diff of a changed file, with Claude Code running in a Claude tab below">
   </picture>
 </p>
 
