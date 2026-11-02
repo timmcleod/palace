@@ -152,7 +152,7 @@ function terminalMenu(event) {
   const term = tab.session.term;
   openMenu(event, [
     { label: "Copy", detail: isMac ? "⌘C" : "Ctrl+Shift+C", disabled: !term.hasSelection(), action: () => copySelection(tab) },
-    { label: "Paste", detail: isMac ? "⌘V" : tab.kind === "claude" ? "Ctrl+V" : "Ctrl+Shift+V", action: () => paste(tab) },
+    { label: "Paste", detail: isMac ? "⌘V" : "Ctrl+Shift+V", action: () => paste(tab) },
     { label: "Select All", action: () => term.selectAll() },
     { separator: true },
     { label: "Clear", action: () => term.clear() },

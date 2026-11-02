@@ -253,14 +253,10 @@ export function copySelection(tab) {
   if (text) writeText(text).catch(() => {});
 }
 
-/**
- * Pastes the clipboard's text. With `orKey`, a clipboard without any, such as one
- * holding an image, passes the key on instead (Ctrl+V), for Claude Code to paste it.
- */
-export async function paste(tab, { orKey = null } = {}) {
+/** Pastes the clipboard's text. */
+export async function paste(tab) {
   const text = await readText().catch(() => "");
   if (text) tab.session.term.paste(text);
-  else if (orKey) type(tab, orKey);
 }
 
 // Keys the terminal handles as terminals on the desktop do. False keeps the key from the
@@ -275,19 +271,19 @@ function onKey(tab, event) {
     type(tab, "\x1b\r");
     return false;
   }
-  // On Linux, as in its terminals, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, leaving
-  // Ctrl+C to stop what's running and Ctrl+V to programs that use it, such as Vim. In a
-  // Claude tab, Ctrl+V pastes too, or with no text to paste goes to Claude Code, which
-  // then pastes an image. Cmd+C and Cmd+V do on a Mac, through the Edit menu.
+  // On Linux, as in its terminals, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, in every
+  // tab, leaving Ctrl+C to stop what's running and Ctrl+V to programs that use it: Vim,
+  // and Claude Code, which pastes an image with it. Cmd+C and Cmd+V do on a Mac, through
+  // the Edit menu.
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {
       event.preventDefault();
       copySelection(tab);
       return false;
     }
-    if (event.code === "KeyV" && (event.shiftKey || tab.kind === "claude")) {
+    if (event.shiftKey && event.code === "KeyV") {
       event.preventDefault();
-      paste(tab, { orKey: event.shiftKey ? null : "\x16" });
+      paste(tab);
       return false;
     }
   }
