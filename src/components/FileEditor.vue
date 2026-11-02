@@ -219,11 +219,12 @@ async function save() {
   if (!dirty.value && !changedOnDisk.value) return;
   saving.value = true;
   const target = current;
+  const { path, file } = props;
   const doc = view.state.doc;
   try {
     const version = await invoke("save_working_file", {
-      path: props.path,
-      file: props.file,
+      path,
+      file,
       text: doc.toString(),
       crlf: target.base.crlf,
       bom: target.base.bom,
@@ -234,12 +235,25 @@ async function save() {
     if (current === target) {
       dirty.value = !view.state.doc.eq(doc);
       changedOnDisk.value = false;
-      markUnsaved(props.path, props.file, dirty.value);
+      markUnsaved(path, file, dirty.value);
+    } else {
+      // Another file was opened while this one saved: what was kept of this one, if
+      // anything, is brought up to date, and dropped if nothing's left to save.
+      const kept = buffers.get(target.key);
+      if (kept) {
+        kept.saved = doc;
+        kept.base = target.base;
+        if (kept.state.doc.eq(doc)) {
+          buffers.delete(target.key);
+          markUnsaved(path, file, false);
+        }
+      }
     }
   } catch (e) {
     const message = String(e);
-    if (message.startsWith(CHANGED_ON_DISK)) changedOnDisk.value = true;
-    else tell("Couldn't Save the File", message);
+    if (!message.startsWith(CHANGED_ON_DISK)) tell("Couldn't Save the File", message);
+    // Noted only on the file still open; coming back to another, it's checked again.
+    else if (current === target) changedOnDisk.value = true;
   } finally {
     saving.value = false;
   }
