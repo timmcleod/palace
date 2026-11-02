@@ -20,8 +20,9 @@ const props = defineProps({
   refreshKey: { type: Number, default: 0 },
 });
 // "merged" gives { number, base, head, headRepo, headSha, branchDeleted }; "changed" says the pull
-// request changed otherwise (a draft made ready).
-const emit = defineEmits(["merged", "changed"]);
+// request changed otherwise (a draft made ready); "checkout" asks to check it out, with
+// { number, head, headRepo }.
+const emit = defineEmits(["merged", "changed", "checkout"]);
 
 const METHODS = {
   merge: { label: "Create a Merge Commit", button: "Merge Pull Request", detail: "All the commits are added to the base branch with a merge commit." },
@@ -235,6 +236,13 @@ async function markReady() {
         <IssueError v-if="actionError" :error="actionError" />
         <div class="buttons">
           <Spinner v-if="busy" :size="14" class="dim" />
+          <button
+            class="secondary-button"
+            title="Check out its branch here, to run it or review it in your own tools"
+            @click="emit('checkout', { number, head: state.head, headRepo: state.head_repo })"
+          >
+            Check Out
+          </button>
           <button v-if="verdict.draft" class="secondary-button" :disabled="!!busy" @click="markReady">
             {{ busy || "Ready for Review" }}
           </button>

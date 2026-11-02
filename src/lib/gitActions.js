@@ -40,6 +40,13 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     return run(["Checking out…", "Checked out", "Checkout failed"], "checkout", { kind, name });
   }
 
+  // A pull request, from `remote`: its head branch there if it has one, or else
+  // GitHub's copy of it (see checkout_pull).
+  async function checkoutPull(remote, number, branch) {
+    if (!(await leaveDetached())) return "Canceled.";
+    return run(["Checking out…", `Checked out #${number}`, "Checkout failed"], "checkout_pull", { remote, number, branch });
+  }
+
   // Whether it's fine to move HEAD elsewhere: asks first when it's detached at commits
   // no branch or tag has, which would be left behind.
   async function leaveDetached() {
@@ -787,6 +794,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
 
   return {
     checkout,
+    checkoutPull,
     deleteMergedBranch,
     merge,
     commitsMenu,

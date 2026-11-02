@@ -58,7 +58,7 @@ pub async fn commits_only_at_head(path: String) -> Result<usize, String> {
 
 /// Checks out a remote branch as a local branch of the same name that tracks it,
 /// reusing the local branch if one already exists.
-fn checkout_remote_branch(path: &str, remote_branch: &str) -> Result<String, String> {
+pub(crate) fn checkout_remote_branch(path: &str, remote_branch: &str) -> Result<String, String> {
     let repo = open(path)?;
     let local = remote_branch.split_once('/').map(|(_, b)| b).unwrap_or(remote_branch);
     if repo.find_branch(local, git2::BranchType::Local).is_ok() {

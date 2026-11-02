@@ -187,6 +187,7 @@ pub fn run() {
             remote::fetch,
             remote::fetch_in_background,
             remote::pull,
+            remote::checkout_pull,
             remote::push,
             remote::publish_branch,
             remote::cancel_remote,

@@ -47,8 +47,8 @@ const props = defineProps({
 });
 // "updated" is the issue after a change, for the list and the open count;
 // "show-commit" asks to show a commit that mentions it; "merged" is a pull request
-// merged here, with PullMergeBox's details.
-const emit = defineEmits(["updated", "show-commit", "merged"]);
+// merged here, with PullMergeBox's details, and "checkout" one to check out.
+const emit = defineEmits(["updated", "show-commit", "merged", "checkout"]);
 
 const thread = shallowRef(null);
 // The full issue once it's loaded, and the list's until then.
@@ -471,6 +471,7 @@ function onClick(event) {
         :url="shown.html_url"
         :refresh-key="refreshKey"
         @merged="onMerged"
+        @checkout="emit('checkout', $event)"
         @changed="reload"
       />
 

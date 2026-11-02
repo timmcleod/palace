@@ -339,6 +339,18 @@ async function onPullMerged({ number, base, head, headRepo, headSha, branchDelet
   dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 15_000);
 }
 
+// Checks out a pull request: from the remote its branch is on, or, from a fork no
+// remote points at, GitHub's copy of it in this repository.
+function checkoutPull({ number, head, headRepo }) {
+  const remotes = overview.value.remotes;
+  const headRemote = githubRemoteOf(remotes, headRepo);
+  if (headRemote) return actions.checkoutPull(headRemote.name, number, head);
+  const full = issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`;
+  const baseRemote = githubRemoteOf(remotes, full);
+  if (baseRemote) return actions.checkoutPull(baseRemote.name, number, null);
+  tell("Couldn't Check Out the Pull Request", `None of this repository's remotes is ${full ?? "on GitHub"}.`);
+}
+
 function onIssueCreated(issue) {
   if (openIssues.value != null) openIssues.value++;
   selectedIssue.value = issue;
@@ -693,6 +705,7 @@ let dismissTimer;
 const NETWORK = new Set([
   "fetch",
   "pull",
+  "checkout_pull",
   "push",
   "publish_branch",
   "clone_repo",
@@ -861,6 +874,7 @@ const fetchTitle = computed(() => {
 const named = (label) => () => label;
 const UNDOABLE = {
   checkout: named("Checkout"),
+  checkout_pull: named("Checkout"),
   create_branch: named("New Branch"),
   delete_branch: named("Delete Branch"),
   delete_merged_branch: named("Delete Branch"),
@@ -2004,6 +2018,7 @@ function startResize(event, pane, min, max) {
           @updated="onIssueUpdated"
           @show-commit="showFoundCommit"
           @merged="onPullMerged"
+          @checkout="checkoutPull"
         />
         <div v-else class="empty-state">
           <p>Select an issue to read it.</p>
@@ -2026,6 +2041,7 @@ function startResize(event, pane, min, max) {
           @updated="onPullUpdated"
           @show-commit="showFoundCommit"
           @merged="onPullMerged"
+          @checkout="checkoutPull"
         />
         <div v-else class="empty-state">
           <p>Select a pull request to read it.</p>

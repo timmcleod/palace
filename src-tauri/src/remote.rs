@@ -81,6 +81,50 @@ fn fetch_one(path: &str, remote: &str, running: &Running, report: Report) -> Res
     Ok(format!("Fetched from {remote}."))
 }
 
+/// Checks out pull request `number` from `remote`. With `branch`, its head branch is a
+/// branch of that remote, checked out as any remote branch is: a local branch of the
+/// same name that tracks it. Without, it's from a fork, and GitHub's own copy of it,
+/// pull/N/head, becomes a local branch pr-N, brought up to date when checked out again.
+#[tauri::command]
+pub async fn checkout_pull(
+    window: WebviewWindow,
+    path: String,
+    remote: String,
+    number: u64,
+    branch: Option<String>,
+) -> Result<String, String> {
+    in_background(window, move |running, report| checkout_pull_from(&path, &remote, number, branch.as_deref(), running, report))
+        .await
+}
+
+fn checkout_pull_from(
+    path: &str,
+    remote: &str,
+    number: u64,
+    branch: Option<&str>,
+    running: &Running,
+    report: Report,
+) -> Result<String, String> {
+    if let Some(branch) = branch {
+        git_with_progress(path, &["fetch", "--progress", remote, branch], running, report)?;
+        return crate::branch::checkout_remote_branch(path, &format!("{remote}/{branch}"));
+    }
+    let local = format!("pr-{number}");
+    let pull = format!("pull/{number}/head");
+    let repo = Repository::open(path).map_err(|e| e.message().to_string())?;
+    let current = repo.head().ok().and_then(|h| h.shorthand().ok().map(str::to_string));
+    if current.as_deref() == Some(local.as_str()) {
+        // A branch that's checked out can't be fetched into, so it's merged instead.
+        git_with_progress(path, &["fetch", "--progress", remote, &pull], running, report)?;
+        crate::cli::git(path, &["merge", "--ff-only", "FETCH_HEAD"], None)?;
+        return Ok(format!("Brought {local} up to date with pull request #{number}."));
+    }
+    // Not forced, so commits of your own on pr-N are never thrown away.
+    git_with_progress(path, &["fetch", "--progress", remote, &format!("{pull}:{local}")], running, report)?;
+    crate::cli::git(path, &["switch", &local], None)?;
+    Ok(format!("Checked out pull request #{number} as {local}."))
+}
+
 #[tauri::command]
 pub async fn pull(window: WebviewWindow, path: String, options: Option<PullOptions>) -> Result<String, String> {
     let options = options.unwrap_or_default();
@@ -490,6 +534,37 @@ mod tests {
     use super::*;
     use crate::test_support::TempRepo;
     use git2::Oid;
+
+    #[test]
+    fn checking_out_a_pull_request() {
+        let server = TempRepo::bare("checkout-pull-server");
+        let t = TempRepo::clone_of("checkout-pull", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        crate::cli::git(t.path(), &["push", "-q", "origin", &main], None).unwrap();
+        crate::cli::git(t.path(), &["switch", "-qc", "feature"], None).unwrap();
+        let feature = t.commit(&[("b.txt", Some("1\n"))], "Feature");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "feature"], None).unwrap();
+        // From a fork, GitHub keeps the pull request's commits under refs/pull.
+        let fork = t.commit(&[("c.txt", Some("1\n"))], "From a fork");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/pull/7/head"], None).unwrap();
+        crate::cli::git(t.path(), &["switch", "-q", &main], None).unwrap();
+        crate::cli::git(t.path(), &["branch", "-qD", "feature"], None).unwrap();
+        let run = |branch| checkout_pull_from(t.path(), "origin", 7, branch, &Running::default(), &mut |_| {});
+
+        assert_eq!(run(Some("feature")).unwrap(), "Created feature, tracking origin/feature, and switched to it.");
+        assert_eq!(t.head(), feature);
+
+        assert_eq!(run(None).unwrap(), "Checked out pull request #7 as pr-7.");
+        assert_eq!((t.branch(), t.head()), ("pr-7".to_string(), fork));
+
+        // Pushed to again, it's brought up to date, checked out or not.
+        let later = t.commit(&[("d.txt", Some("1\n"))], "Later");
+        crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/pull/7/head"], None).unwrap();
+        crate::cli::git(t.path(), &["reset", "-q", "--hard", "HEAD~"], None).unwrap();
+        assert_eq!(run(None).unwrap(), "Brought pr-7 up to date with pull request #7.");
+        assert_eq!(t.head(), later);
+    }
 
     #[test]
     fn renaming_a_branch_on_its_remote() {
