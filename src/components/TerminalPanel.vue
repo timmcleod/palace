@@ -73,28 +73,20 @@ function newTerminal() {
   openTerminal(props.path);
 }
 
-// A Claude tab checks its program is there first: without Claude Code, the tab would
-// open to "command not found". Instead it says how to install it, and can type the
-// command into a new terminal to run.
+// A Claude tab running Claude Code checks it's installed first: without it, the tab
+// would open to "command not found". Instead it says how to install it, and can type
+// the installer into a new terminal to run. A command that starts with something else,
+// such as "cd api && claude" or an alias, is the shell's to run, so it isn't checked.
 async function newClaude() {
   const command = claudeCommand(props.path);
-  const program = programOf(command);
-  if (!(await invoke("program_available", { program }).catch(() => true))) {
-    if (program === DEFAULT_CLAUDE_COMMAND) {
-      const install = await askConfirm({
-        title: "Claude Code Isn't Installed",
-        message: `Claude tabs run Claude Code, which isn't installed here yet. Anthropic's installer, for macOS and Linux, is:\n\n${CLAUDE_INSTALL}\n\nPalace can type it into a terminal for you to run. Other ways to install it are at ${CLAUDE_SETUP_URL}. Once it's installed, open a Claude tab again.`,
-        confirmLabel: "Install in Terminal",
-      });
-      if (install) openTerminal(props.path, { input: CLAUDE_INSTALL });
-    } else {
-      const change = await askConfirm({
-        title: "Command Not Found",
-        message: `Claude tabs in “${props.name}” run “${command}”, but “${program}” wasn't found. Install it, or change the command.`,
-        confirmLabel: "Change Command…",
-      });
-      if (change) editClaudeCommand();
-    }
+  const checked = programOf(command) === DEFAULT_CLAUDE_COMMAND;
+  if (checked && !(await invoke("program_available", { program: DEFAULT_CLAUDE_COMMAND }).catch(() => true))) {
+    const install = await askConfirm({
+      title: "Claude Code Isn't Installed",
+      message: `Claude tabs run Claude Code, which isn't installed here yet. Anthropic's installer, for macOS and Linux, is:\n\n${CLAUDE_INSTALL}\n\nPalace can type it into a terminal for you to run. Other ways to install it are at ${CLAUDE_SETUP_URL}. Once it's installed, open a Claude tab again.`,
+      confirmLabel: "Install in Terminal",
+    });
+    if (install) openTerminal(props.path, { input: CLAUDE_INSTALL });
     return;
   }
   openTerminal(props.path, { command, kind: "claude" });
