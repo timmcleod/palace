@@ -16,7 +16,9 @@ pub fn restart_after_update(app: AppHandle) {
     if let Ok(binary) = tauri::process::current_binary(&app.env()) {
         use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
-        const WAIT_THEN_START: &str = r#"pids="$1 $(pgrep -P "$1")"; shift
+        // This script is one of the copy's helpers too, but outlives it: it's left out,
+        // or it would wait on itself, the full minute, every time.
+        const WAIT_THEN_START: &str = r#"pids="$1 $(pgrep -P "$1" | grep -vx "$$")"; shift
 for _ in $(seq 300); do
   alive=""; for p in $pids; do kill -0 "$p" 2>/dev/null && alive=1; done
   [ -z "$alive" ] && break; sleep 0.2
