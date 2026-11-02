@@ -57,7 +57,7 @@ pub async fn working_entries(path: String, dir: String, show_ignored: bool) -> R
     for item in fs::read_dir(&folder).map_err(|e| format!("Couldn't read {}: {e}", shown(&dir)))? {
         let Ok(item) = item else { continue };
         let name = item.file_name().to_string_lossy().into_owned();
-        if dir.is_empty() && name == ".git" {
+        if dir.is_empty() && is_git_dir(&name) {
             continue;
         }
         let Ok(kind) = item.file_type() else { continue };
@@ -272,7 +272,7 @@ pub async fn rename_working_file(path: String, from: String, to: String) -> Resu
     let old = inside(&workdir, &from)?;
     let new = inside(&workdir, &to)?;
     fs::symlink_metadata(&old).map_err(|e| format!("Couldn't rename {from}: {e}"))?;
-    if fs::symlink_metadata(&new).is_ok() {
+    if fs::symlink_metadata(&new).is_ok() && !same_file_in_other_case(&old, &new) {
         return Err(format!("{to} already exists."));
     }
     // Neither end may be outside the working copy through a linked folder.
@@ -329,12 +329,38 @@ fn inside(workdir: &Path, relative: &str) -> Result<PathBuf, String> {
     let mut full = workdir.to_path_buf();
     for (i, part) in Path::new(relative).components().enumerate() {
         match part {
-            Component::Normal(name) if i == 0 && name == ".git" => return Err(format!("{relative} is inside .git.")),
+            Component::Normal(name) if i == 0 && name.to_str().is_some_and(is_git_dir) => {
+                return Err(format!("{relative} is inside .git."))
+            }
             Component::Normal(name) => full.push(name),
             _ => return Err(format!("{relative} isn't a path inside the repository.")),
         }
     }
     Ok(full)
+}
+
+/// Whether `name` at the top of the working copy is the repository's .git, which a
+/// Mac's disks, ignoring case, also find as ".GIT" or ".Git".
+fn is_git_dir(name: &str) -> bool {
+    name.eq_ignore_ascii_case(".git")
+}
+
+/// Whether `old` and `new` are one file under two names differing only in case, as on
+/// a Mac's disks, which ignore case: renaming one to the other changes its case.
+fn same_file_in_other_case(old: &Path, new: &Path) -> bool {
+    if old == new || old.to_string_lossy().to_lowercase() != new.to_string_lossy().to_lowercase() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (fs::symlink_metadata(old), fs::symlink_metadata(new)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    true
 }
 
 /// Identifies a version of a file by when it was last changed and how big it is.
@@ -385,7 +411,7 @@ mod tests {
     #[test]
     fn paths_stay_inside_the_working_copy() {
         let t = TempRepo::new("files-inside");
-        for bad in ["../outside", "/etc/passwd", ".git/config", "src/../../x"] {
+        for bad in ["../outside", "/etc/passwd", ".git/config", ".GIT/config", ".Git/hooks", "src/../../x"] {
             assert!(block_on(read_working_file(path(&t), bad.into(), None)).is_err(), "{bad}");
             assert!(block_on(working_entries(path(&t), bad.into(), false)).is_err(), "{bad}");
         }
@@ -535,6 +561,26 @@ mod tests {
         assert!(rename(".git", "git").is_err());
         assert!(rename("missing.md", "found.md").is_err());
         assert_eq!(fs::read_to_string(t.dir.join("b.md")).unwrap(), "b\n");
+    }
+
+    #[test]
+    fn renaming_to_change_case() {
+        let t = TempRepo::new("files-rename-case");
+        fs::create_dir_all(t.dir.join("docs")).unwrap();
+        fs::write(t.dir.join("readme.md"), "r\n").unwrap();
+        fs::write(t.dir.join("other.md"), "o\n").unwrap();
+        let rename = |from: &str, to: &str| block_on(rename_working_file(path(&t), from.into(), to.into()));
+
+        // Whether or not the disk ignores case, as a Mac's does.
+        rename("readme.md", "README.md").unwrap();
+        rename("docs", "Docs").unwrap();
+        let names: Vec<String> = fs::read_dir(&t.dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.contains(&"README.md".into()) && !names.contains(&"readme.md".into()), "{names:?}");
+        assert!(names.contains(&"Docs".into()) && !names.contains(&"docs".into()), "{names:?}");
+        assert_eq!(fs::read_to_string(t.dir.join("README.md")).unwrap(), "r\n");
+        // Still never over another file.
+        assert!(rename("other.md", "README.md").is_err());
+        assert_eq!(fs::read_to_string(t.dir.join("README.md")).unwrap(), "r\n");
     }
 
     #[test]
