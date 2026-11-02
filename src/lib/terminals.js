@@ -154,7 +154,8 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
   el.className = "terminal-host";
 
   const tab = reactive({ key: nextKey++, kind, title: "", id: null });
-  tab.session = markRaw({ term, fit, el, command, input, folder, started: false, typed: [] });
+  // `front` is the program in front in it, as last checked (see checkFront).
+  tab.session = markRaw({ term, fit, el, command, input, folder, started: false, typed: [], front: null, checkAt: 0 });
   term.onTitleChange((title) => (tab.title = title));
   term.onData((data) => type(tab, data));
   term.onResize(({ cols, rows }) => tab.id && invoke("terminal_resize", { id: tab.id, cols, rows }).catch(() => {}));
@@ -174,7 +175,10 @@ export async function startTab(path, tab) {
   fitTab(tab);
 
   const output = new Channel();
-  output.onmessage = (data) => session.term.write(new Uint8Array(data));
+  output.onmessage = (data) => {
+    session.term.write(new Uint8Array(data));
+    checkFront(tab);
+  };
   const exited = new Channel();
   exited.onmessage = () => removeTab(path, tab);
   try {
@@ -194,6 +198,32 @@ export async function startTab(path, tab) {
 export function fitTab(tab) {
   const { el, fit } = tab.session;
   if (el.isConnected && el.clientHeight > 0 && el.clientWidth > 0) fit.fit();
+}
+
+// Which program is in front in the terminal, checked as it prints, at most twice a
+// second: Claude Code prints as it starts and stops, so it's known before its keys are
+// pressed, with no waiting at the key.
+function checkFront(tab) {
+  const session = tab.session;
+  const now = Date.now();
+  if (tab.id == null || now < session.checkAt) return;
+  session.checkAt = now + 500;
+  setTimeout(() => {
+    if (tab.id == null) return;
+    invoke("terminal_foreground", { id: tab.id })
+      .then((name) => (session.front = name))
+      .catch(() => {});
+  }, 500);
+}
+
+/**
+ * Whether Claude Code is what's in front in the tab, as far as Palace can tell. Not
+ * knowing, or seeing only node, which Claude Code installed with npm runs as on a Mac,
+ * it goes by whether the tab was opened for Claude.
+ */
+function inClaude(tab) {
+  const front = tab.session.front;
+  return front && front !== "node" ? front === "claude" : tab.kind === "claude";
 }
 
 function type(tab, data) {
@@ -237,10 +267,10 @@ export async function paste(tab, { orKey = null } = {}) {
 // program in the terminal.
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
-  // In a Claude tab, Shift+Enter starts a new line in Claude Code's prompt instead of
-  // sending it, as Option+Enter does: Escape then Return. Elsewhere it's Enter, as other
-  // programs expect.
-  if (tab.kind === "claude" && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+  // Where Claude Code is running, in a Claude tab or started by hand, Shift+Enter starts
+  // a new line in its prompt instead of sending it, as Option+Enter does: Escape then
+  // Return. Elsewhere it's Enter, as other programs expect.
+  if (inClaude(tab) && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
     event.preventDefault();
     type(tab, "\x1b\r");
     return false;

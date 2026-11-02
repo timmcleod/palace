@@ -5,12 +5,19 @@
 use crate::terminal;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// Set once the user has said to quit anyway.
 static CONFIRMED: AtomicBool = AtomicBool::new(false);
 /// Whether the page has edits that aren't saved, as it last said.
 static UNSAVED_EDITS: AtomicBool = AtomicBool::new(false);
+/// When the page was last asked, until it says it's asking the user. A page that
+/// never says so, broken or still loading, can't ask, so quitting again goes ahead
+/// rather than leaving Palace impossible to quit.
+static UNANSWERED: Mutex<Option<Instant>> = Mutex::new(None);
+const PAGE_ANSWERS_WITHIN: Duration = Duration::from_secs(2);
 
 #[derive(Serialize, Clone)]
 struct Held {
@@ -30,8 +37,19 @@ pub fn hold(app: &AppHandle) -> bool {
     if held.terminals.is_empty() && !held.edits {
         return false;
     }
+    let mut unanswered = UNANSWERED.lock().unwrap();
+    if unanswered.is_some_and(|asked| asked.elapsed() >= PAGE_ANSWERS_WITHIN) {
+        return false;
+    }
+    unanswered.get_or_insert_with(Instant::now);
     let _ = app.emit("quit-requested", held);
     true
+}
+
+/// The page saying it's asking the user whether to quit.
+#[tauri::command]
+pub fn quit_asking() {
+    *UNANSWERED.lock().unwrap() = None;
 }
 
 /// The page saying whether it has edits that aren't saved.

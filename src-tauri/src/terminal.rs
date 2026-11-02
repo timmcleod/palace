@@ -165,6 +165,61 @@ fn is_busy(terminal: &Terminal) -> bool {
     }
 }
 
+/// The program in front in the terminal, by name, such as "zsh", "vim" or "claude",
+/// for keys that mean something different to Claude Code. None when it can't tell.
+#[tauri::command]
+pub async fn terminal_foreground(id: u32) -> Option<String> {
+    let front = TERMINALS.lock().unwrap().get(&id)?.master.process_group_leader()?;
+    program_name(front)
+}
+
+/// Whether the program at `path` is Claude Code's: its installer keeps it as
+/// ".../claude/versions/<version>", and Homebrew and others as ".../claude".
+fn is_claude_program(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "claude")
+        || path.parent().is_some_and(|dir| dir.ends_with("claude/versions"))
+}
+
+/// What the process `pid` runs. Claude Code installed with npm runs as node, so a node
+/// running Claude Code's script counts as "claude", where that can be read (Linux).
+#[cfg(target_os = "linux")]
+fn program_name(pid: i32) -> Option<String> {
+    if std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| is_claude_program(&exe)) {
+        return Some("claude".into());
+    }
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?.trim().to_string();
+    if name == "node" {
+        let args = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let runs_claude = args.split(|b| *b == 0).skip(1).take(2).any(|arg| {
+            let arg = String::from_utf8_lossy(arg);
+            arg.ends_with("/claude") || arg.contains("@anthropic-ai/claude-code")
+        });
+        if runs_claude {
+            return Some("claude".into());
+        }
+    }
+    Some(name)
+}
+
+#[cfg(target_os = "macos")]
+fn program_name(pid: i32) -> Option<String> {
+    let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: proc_pidpath writes at most the buffer's size, and returns how much it wrote.
+    let len = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+    if len > 0 && is_claude_program(Path::new(&*String::from_utf8_lossy(&path[..len as usize]))) {
+        return Some("claude".into());
+    }
+    let mut buffer = [0u8; 256];
+    // SAFETY: proc_name writes at most the buffer's size, and returns how much it wrote.
+    let len = unsafe { libc::proc_name(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    (len > 0).then(|| String::from_utf8_lossy(&buffer[..len as usize]).into_owned())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn program_name(_pid: i32) -> Option<String> {
+    None
+}
+
 /// Whether `program` can be run in a terminal: found on Palace's PATH, where installers
 /// usually put it, or on the PATH the user's shell sets up, which an app started from
 /// the desktop may not have. When it can't tell, it says yes, leaving the terminal to
@@ -309,6 +364,36 @@ mod tests {
         assert_eq!(exit.recv_timeout(Duration::from_secs(10)).unwrap(), "3");
         assert!(tauri::async_runtime::block_on(terminal_write(id, "more\n".into())).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn naming_the_program_in_front() {
+        let dir = std::env::temp_dir().join(format!("palace-test-terminal-front-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (id, _printed) = open_collecting(&dir.to_string_lossy());
+        let front = || tauri::async_runtime::block_on(terminal_foreground(id));
+        let wait_for = |want: &dyn Fn(&str) -> bool| {
+            let started = std::time::Instant::now();
+            while !front().is_some_and(|name| want(&name)) {
+                assert!(started.elapsed() < Duration::from_secs(10), "in front: {:?}", front());
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        };
+        wait_for(&|name| name != "sleep");
+        tauri::async_runtime::block_on(terminal_write(id, "sleep 30\n".into())).unwrap();
+        wait_for(&|name| name == "sleep");
+        tauri::async_runtime::block_on(terminal_close(id));
+        assert_eq!(front(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn recognizing_claude_code() {
+        assert!(is_claude_program(Path::new("/home/me/.local/share/claude/versions/2.1.316")));
+        assert!(is_claude_program(Path::new("/opt/homebrew/Caskroom/claude-code/2.1.316/claude")));
+        assert!(!is_claude_program(Path::new("/usr/bin/zsh")));
+        assert!(!is_claude_program(Path::new("/home/me/versions/2.1.316")));
     }
 
     #[test]

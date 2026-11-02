@@ -1182,6 +1182,8 @@ invoke("terminal_close_all").catch(() => {});
 let askingToQuit = false;
 const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const unlistenQuit = listen("quit-requested", async ({ payload }) => {
+  // Palace quits anyway on a second try if the page doesn't say it's asking.
+  invoke("quit_asking").catch(() => {});
   if (askingToQuit) return;
   askingToQuit = true;
   const lines = [];
