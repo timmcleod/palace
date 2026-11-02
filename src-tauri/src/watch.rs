@@ -1,5 +1,5 @@
-//! Watches the open repository and tells the window when something changes, so edits
-//! made in an editor or terminal show up without switching back to Palace.
+//! Watches each window's repository and tells that window when something changes, so
+//! edits made in an editor or terminal show up without switching back to Palace.
 //!
 //! Folders git ignores (vendor/, node_modules/, build output) are never watched: they
 //! change constantly, don't affect what Palace shows, and in a large project would use
@@ -9,20 +9,30 @@ use git2::Repository;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{Emitter, EventTarget, WebviewWindow};
 
-/// The watcher for the open repository. Replacing it stops the old one.
+/// The watcher for each window's repository, by window. Replacing one stops it.
 #[derive(Default)]
-pub struct RepoWatcher(Mutex<Option<Arc<Mutex<RecommendedWatcher>>>>);
+pub struct RepoWatcher(Mutex<HashMap<String, Arc<Mutex<RecommendedWatcher>>>>);
+
+impl RepoWatcher {
+    /// Stops watching for a window that's closed.
+    pub fn forget(&self, window: &str) {
+        self.0.lock().unwrap().remove(window);
+    }
+}
 
 #[tauri::command]
-pub fn watch_repo(app: AppHandle, state: tauri::State<'_, RepoWatcher>, path: String) -> Result<(), String> {
+pub fn watch_repo(window: WebviewWindow, state: tauri::State<'_, RepoWatcher>, path: String) -> Result<(), String> {
+    let label = window.label().to_string();
+    let target = EventTarget::webview_window(label.clone());
     let watcher = start(&path, move || {
-        let _ = app.emit("repo-changed", ());
+        let _ = window.emit_to(target.clone(), "repo-changed", ());
     })?;
-    *state.0.lock().unwrap() = Some(watcher);
+    state.0.lock().unwrap().insert(label, watcher);
     Ok(())
 }
 

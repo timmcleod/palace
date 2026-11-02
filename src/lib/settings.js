@@ -1,6 +1,6 @@
 import { reactive, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { readJson, writeJson } from "./storage.js";
+import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
 
 // App-wide preferences, kept in local storage and applied to the page as they change.
 const KEY = "palace.settings";
@@ -30,6 +30,9 @@ const DEFAULTS = {
 };
 
 export const settings = reactive({ ...DEFAULTS, ...readJson(KEY, {}) });
+
+// Changed in another window, they change here too.
+onSavedElsewhere((key, value) => key === KEY && Object.assign(settings, value));
 
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 

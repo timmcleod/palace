@@ -1,7 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -58,6 +58,7 @@ import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import {
   forgetRepository,
+  onSavedElsewhere,
   readJson,
   recentRepositories,
   rememberRepository,
@@ -614,11 +615,19 @@ function describe(place) {
 }
 
 function onNavKeydown(event) {
+  const key = event.key.toLowerCase();
+  // Cmd+N (Ctrl+N) opens a new window. On a Mac, from a terminal too, where Cmd keys
+  // are Palace's; Ctrl+N is the shell's on Linux.
+  const inTerminal = !!event.target.closest?.(".terminal-panel");
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "n" && (isMac || !inTerminal) && !dialogOpen()) {
+    event.preventDefault();
+    newWindow();
+    return;
+  }
   // Whatever's typed in a terminal is the terminal's.
-  if (event.target.closest?.(".terminal-panel")) return;
+  if (inTerminal) return;
   // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
   // dialogs, which keep their own. On a Mac, these and the shortcuts below use Cmd.
-  const key = event.key.toLowerCase();
   if (commandKey(event) && !event.altKey && (key === "z" || key === "y") && !inTextField(event.target) && !dialogOpen()) {
     event.preventDefault();
     if (key === "y" || event.shiftKey) redo();
@@ -1117,15 +1126,29 @@ function sidebarActivate(row) {
 watch(
   () => overview.value?.path,
   (path) => {
+    // Other windows show this one instead of opening the repository again, and the
+    // window's title names it, to tell windows apart when switching between them.
+    invoke("set_window_repo", { path: path ?? null }).catch(() => {});
+    thisWindow.setTitle(path ? `${repositoryName(path)} — Palace` : "Palace").catch(() => {});
     if (!path) return;
     invoke("watch_repo", { path }).catch(() => {});
     loadAvatars(path);
   },
 );
-const unlistenChanges = listen("repo-changed", () => refresh());
+
+// Recent repositories opened in other windows join the list here too.
+onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
+
+/** Opens a new window, to open another repository in, side by side with this one. */
+const newWindow = () => invoke("new_window").catch((e) => tell("Couldn't Open a Window", String(e)));
+const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
+// Events for this window only: each window watches its own repository.
+const thisWindow = getCurrentWebviewWindow();
+const unlistenChanges = thisWindow.listen("repo-changed", () => refresh());
 onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 
-const unlistenProgress = listen("remote-progress", (event) => {
+const unlistenProgress = thisWindow.listen("remote-progress", (event) => {
   if (remoteOp.value?.state === "running") {
     remoteOp.value.line = event.payload.line;
   }
@@ -1179,30 +1202,45 @@ invoke("terminal_close_all").catch(() => {});
 
 // Quitting, or closing the window, with programs still running in terminals or edits
 // not saved asks first, naming them (see quit.rs).
+// Closing a window asks about its own; quitting, about every window's.
 let askingToQuit = false;
-const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-const unlistenQuit = listen("quit-requested", async ({ payload }) => {
-  // Palace quits anyway on a second try if the page doesn't say it's asking.
+const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => {
+  // Palace goes ahead anyway on a second try if the page doesn't say it's asking.
   invoke("quit_asking").catch(() => {});
   if (askingToQuit) return;
   askingToQuit = true;
+  const { quitting } = payload;
+  const doing = quitting ? "Quitting" : "Closing the window";
   const lines = [];
   const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
   if (edited.length) {
-    lines.push(`Edits to ${edited.join(", ")} aren't saved. Quitting loses them.`);
+    lines.push(`Edits to ${edited.join(", ")} aren't saved. ${doing} loses them.`);
   }
   if (payload.terminals.length) {
     const { describeTerminals } = await import("./lib/terminals.js");
     const names = describeTerminals(payload.terminals).map((t) => `“${t.label}” in ${t.repository}`);
     lines.push(
       names.length === 1
-        ? `${names[0]} is still running. Quitting stops it.`
-        : `${names.length} terminals are still running: ${names.join(", ")}. Quitting stops them.`,
+        ? `${names[0]} is still running. ${doing} stops it.`
+        : `${names.length} terminals are still running: ${names.join(", ")}. ${doing} stops them.`,
     );
   }
-  const ok = await askConfirm({ title: "Quit Palace?", message: lines.join("\n\n"), confirmLabel: "Quit", danger: true });
+  const elsewhere = [
+    ...payload.other_edits.map((file) => `edits to ${file} aren't saved`),
+    ...payload.other_terminals.map((folder) => `a terminal in ${folder} is still running`),
+  ];
+  if (elsewhere.length) {
+    const said = elsewhere.join("; ");
+    lines.push(`In other windows, ${said}. Quitting ${payload.other_edits.length ? "loses" : "stops"} ${elsewhere.length === 1 ? "it" : "them"}.`);
+  }
+  const ok = await askConfirm({
+    title: quitting ? "Quit Palace?" : "Close Window?",
+    message: lines.join("\n\n"),
+    confirmLabel: quitting ? "Quit" : "Close",
+    danger: true,
+  });
   askingToQuit = false;
-  if (ok) invoke("quit_confirmed").catch(() => {});
+  if (ok) invoke("quit_confirmed", { quitting }).catch(() => {});
 });
 onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
 
@@ -1239,6 +1277,9 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
 
   try {
     const data = await invoke("repo_overview", { path });
+    if (seq !== loadSeq) return;
+    // Open in another window already, that window comes forward instead.
+    if (data.path !== overview.value?.path && (await invoke("show_window_with", { path: data.path }).catch(() => false))) return;
     if (seq !== loadSeq) return;
     if (data.path !== overview.value?.path) {
       selected.value = headHistoryKey(data);
@@ -1353,6 +1394,8 @@ function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
+    { label: "New Window", detail: shortcut("Ctrl+N"), action: newWindow },
+    { separator: true },
     current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => showTerminal({ newTab: true }) },
     current && { separator: true },
@@ -1403,8 +1446,11 @@ async function checkGit() {
     checkingGit.value = false;
   }
   if (!gitMissing.value && !overview.value) {
-    const last = recents.value[0];
-    if (last) await loadRepository(last.path);
+    // The repository this window had, as when its page reloads, or in the first window
+    // at startup, the last one opened. A new window starts with none, to choose one.
+    const start = await invoke("window_start").catch(() => ({ repo: null, first: true }));
+    const reopen = start.repo ?? (start.first ? recents.value[0]?.path : null);
+    if (reopen) await loadRepository(reopen);
   }
   starting.value = false;
 }

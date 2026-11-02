@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Whether the file was readable when Palace started. When it wasn't, nothing is
 /// saved over it.
@@ -34,12 +34,22 @@ pub fn load_store(app: AppHandle, store: tauri::State<Store>) -> Result<Option<M
 /// Saves each value under its key, leaving the others as they are in the file, which
 /// may have been saved by another copy of Palace.
 #[tauri::command]
-pub fn save_store(app: AppHandle, store: tauri::State<Store>, values: Map<String, Value>) -> Result<(), String> {
+pub fn save_store(app: AppHandle, window: tauri::WebviewWindow, store: tauri::State<Store>, values: Map<String, Value>) -> Result<(), String> {
     let readable = store.0.lock().unwrap();
     if *readable != Some(true) {
         return Err("Palace couldn't read its saved settings when it started, so it isn't saving over them.".into());
     }
-    write(&file(&app)?, values)
+    write(&file(&app)?, values.clone())?;
+    // The other windows take what's changed, so they don't save over it with what they had.
+    let _ = app.emit("store-changed", Changed { window: window.label().to_string(), values });
+    Ok(())
+}
+
+#[derive(serde::Serialize, Clone)]
+struct Changed {
+    /// The window that saved it, which has it already.
+    window: String,
+    values: Map<String, Value>,
 }
 
 /// When the file can't be read: renames it out of the way, kept in case it's needed,

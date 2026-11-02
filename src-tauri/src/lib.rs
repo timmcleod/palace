@@ -24,6 +24,7 @@ mod tree;
 mod undo;
 mod updates;
 mod watch;
+mod windows;
 #[cfg(test)]
 mod test_support;
 mod working;
@@ -40,13 +41,19 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(history::HistoryState::default())
-        .manage(cli::Running::default())
+        .manage(cli::Runnings::default())
         .manage(store::Store::default())
         .manage(watch::RepoWatcher::default())
         .manage(avatars::AvatarCache::default())
+        .manage(windows::Windows::default())
         .setup(|app| {
             #[cfg(target_os = "linux")]
-            no_pinch_zoom(app);
+            {
+                use tauri::Manager;
+                for window in app.webview_windows().values() {
+                    no_pinch_zoom(window);
+                }
+            }
             let _ = app;
             Ok(())
         })
@@ -114,6 +121,10 @@ pub fn run() {
             terminal::terminal_foreground,
             quit::quit_confirmed,
             quit::quit_asking,
+            windows::window_start,
+            windows::set_window_repo,
+            windows::show_window_with,
+            windows::new_window,
             quit::set_unsaved_edits,
             cli::install_git_tools,
             files::working_entries,
@@ -190,17 +201,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
-            // Quitting (Cmd+Q, or the last window closing), or closing the window, with
+            // Quitting (Cmd+Q, or the last window closing), or closing a window, with
             // programs running in terminals or edits not saved asks first; see quit.rs.
             // Not when Palace quits itself, as to restart into an update, which gives a
             // code.
-            tauri::RunEvent::ExitRequested { code: None, api, .. } if quit::hold(app) => api.prevent_exit(),
-            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if quit::hold(app) => {
+            tauri::RunEvent::ExitRequested { code: None, api, .. } if quit::hold(app, None) => api.prevent_exit(),
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. }
+                if quit::hold(app, Some(&label)) =>
+            {
                 api.prevent_close()
             }
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => windows::forget(app, &label),
             _ => {}
         });
 }
+
 
 /// Runs Palace as git's credential helper instead of as the app; see `github`.
 pub fn git_credential(action: Option<&str>) -> i32 {
@@ -211,18 +226,15 @@ pub fn git_credential(action: Option<&str>) -> i32 {
 /// in the web view's own event handler. Stopping the event first leaves it unzoomed,
 /// as Ctrl and +/- already do.
 #[cfg(target_os = "linux")]
-fn no_pinch_zoom(app: &tauri::App) {
+pub(crate) fn no_pinch_zoom(window: &tauri::WebviewWindow) {
     use gtk::prelude::WidgetExt;
-    use tauri::Manager;
-    for window in app.webview_windows().values() {
-        let _ = window.with_webview(|webview| {
-            webview.inner().connect_event(|_, event| {
-                if event.event_type() == gtk::gdk::EventType::TouchpadPinch {
-                    gtk::glib::Propagation::Stop
-                } else {
-                    gtk::glib::Propagation::Proceed
-                }
-            });
+    let _ = window.with_webview(|webview| {
+        webview.inner().connect_event(|_, event| {
+            if event.event_type() == gtk::gdk::EventType::TouchpadPinch {
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
         });
-    }
+    });
 }

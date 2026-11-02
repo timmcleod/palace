@@ -35,12 +35,17 @@ export const keyFor = (path, file) => `${path}\n${file}`;
 /** Whether `file` in the repository at `path` has edits that aren't saved. */
 export const isUnsaved = (path, file) => unsaved.has(keyFor(path, file));
 
-/** Notes whether the file has edits that aren't saved. */
+/**
+ * Notes whether the file has edits that aren't saved, and tells Palace which files
+ * have, so quitting from another window can name them.
+ */
 export function markUnsaved(path, file, dirty) {
-  const before = unsaved.size > 0;
-  if (dirty) unsaved.add(keyFor(path, file));
-  else unsaved.delete(keyFor(path, file));
-  if (before !== unsaved.size > 0) invoke("set_unsaved_edits", { unsaved: unsaved.size > 0 }).catch(() => {});
+  const key = keyFor(path, file);
+  if (dirty === unsaved.has(key)) return;
+  if (dirty) unsaved.add(key);
+  else unsaved.delete(key);
+  const files = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${f.path.split(/[\\/]/).filter(Boolean).pop() ?? f.path}`);
+  invoke("set_unsaved_edits", { files }).catch(() => {});
 }
 
 /** Drops the edits not saved to `file`, or to anything in it if it's a folder, as when it's deleted. */

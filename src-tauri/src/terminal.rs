@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, LazyLock, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::WebviewWindow;
 
 struct Terminal {
     master: Box<dyn MasterPty + Send>,
@@ -19,6 +20,10 @@ struct Terminal {
     input: mpsc::Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     shell: Option<u32>,
+    /// The window it's in, whose closing ends it.
+    window: String,
+    /// The folder it started in.
+    folder: String,
 }
 
 static TERMINALS: LazyLock<Mutex<HashMap<u32, Terminal>>> = LazyLock::new(Default::default);
@@ -60,12 +65,17 @@ fn size(cols: u16, rows: u16) -> PtySize {
 /// `output` receives what it prints, and `exited` its exit code once it's gone.
 #[tauri::command]
 pub async fn terminal_open(
+    window: WebviewWindow,
     path: String,
     cols: u16,
     rows: u16,
     output: Channel<InvokeResponseBody>,
     exited: Channel<u32>,
 ) -> Result<u32, String> {
+    open(window.label().to_string(), path, cols, rows, output, exited)
+}
+
+fn open(window: String, path: String, cols: u16, rows: u16, output: Channel<InvokeResponseBody>, exited: Channel<u32>) -> Result<u32, String> {
     let pair = native_pty_system().openpty(size(cols, rows)).map_err(|e| format!("Couldn't start a terminal: {e}"))?;
     let mut command = CommandBuilder::new_default_prog();
     command.cwd(&path);
@@ -109,7 +119,7 @@ pub async fn terminal_open(
             }
         }
     });
-    let terminal = Terminal { master: pair.master, input, killer: child.clone_killer(), shell: child.process_id() };
+    let terminal = Terminal { master: pair.master, input, killer: child.clone_killer(), shell: child.process_id(), window, folder: path };
     TERMINALS.lock().unwrap().insert(id, terminal);
 
     std::thread::spawn(move || {
@@ -264,9 +274,27 @@ fn available(program: &str) -> bool {
     }
 }
 
-/// The terminals with programs running in them, which quitting would stop.
-pub fn busy_terminals() -> Vec<u32> {
-    TERMINALS.lock().unwrap().iter().filter(|(_, t)| is_busy(t)).map(|(id, _)| *id).collect()
+/// A terminal with a program running in it, which closing its window would stop.
+pub struct Busy {
+    pub id: u32,
+    pub window: String,
+    /// The name of the folder it started in.
+    pub folder: String,
+}
+
+/// The terminals with programs running in them, in every window.
+pub fn busy_terminals() -> Vec<Busy> {
+    TERMINALS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, t)| is_busy(t))
+        .map(|(id, t)| Busy {
+            id: *id,
+            window: t.window.clone(),
+            folder: Path::new(&t.folder).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        })
+        .collect()
 }
 
 /// Hangs up the terminal, which ends its shell and what the shell started.
@@ -277,11 +305,20 @@ pub async fn terminal_close(id: u32) {
     }
 }
 
-/// Hangs up every terminal: those of a page that's since been reloaded.
+/// Hangs up the window's terminals: those of a page that's since been reloaded.
 #[tauri::command]
-pub async fn terminal_close_all() {
-    for (_, mut terminal) in TERMINALS.lock().unwrap().drain() {
-        let _ = terminal.killer.kill();
+pub async fn terminal_close_all(window: WebviewWindow) {
+    close_window(window.label());
+}
+
+/// Hangs up the terminals in `window`, as when it closes.
+pub fn close_window(window: &str) {
+    let mut terminals = TERMINALS.lock().unwrap();
+    let ids: Vec<u32> = terminals.iter().filter(|(_, t)| t.window == window).map(|(id, _)| *id).collect();
+    for id in ids {
+        if let Some(mut terminal) = terminals.remove(&id) {
+            let _ = terminal.killer.kill();
+        }
     }
 }
 
@@ -349,7 +386,7 @@ mod tests {
             Ok(())
         });
         let path = dir.to_string_lossy().into_owned();
-        let id = tauri::async_runtime::block_on(terminal_open(path, 80, 24, output, exited)).unwrap();
+        let id = open("test".into(), path, 80, 24, output, exited).unwrap();
 
         // Run with TERMINAL_EMULATOR or CLAUDE_CODE_SSE_PORT set, the shell shouldn't see them.
         let typed = "echo \"in:$(pwd) from:${TERMINAL_EMULATOR-}${CLAUDE_CODE_SSE_PORT-}:\"; exit 3\n";
@@ -417,7 +454,7 @@ mod tests {
             Ok(())
         });
         let exited = Channel::new(|_| Ok(()));
-        let id = tauri::async_runtime::block_on(terminal_open(path.into(), 80, 24, output, exited)).unwrap();
+        let id = open("test".into(), path.into(), 80, 24, output, exited).unwrap();
         (id, printed)
     }
 

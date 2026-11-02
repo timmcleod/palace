@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 // Palace's saved data, by key: kept by Palace in a file (see store.rs), and read from
 // memory once loadStore() has run, before the app starts. Values can be stale or
@@ -62,6 +64,24 @@ export async function setStoreAside() {
   save(values);
 }
 
+// Other windows' saves, taken in as they happen, so this window reads what they saved
+// and doesn't save over it with what it had. `watchers` hear of each key that changes.
+const watchers = new Set();
+
+/** Calls `fn(key, value)` whenever another window saves a value. */
+export function onSavedElsewhere(fn) {
+  watchers.add(fn);
+  return () => watchers.delete(fn);
+}
+
+listen("store-changed", ({ payload }) => {
+  if (payload.window === getCurrentWebviewWindow().label) return;
+  for (const [key, value] of Object.entries(payload.values)) {
+    values[key] = value;
+    for (const fn of watchers) fn(key, structuredClone(value));
+  }
+}).catch(() => {});
+
 export function readJson(key, fallback) {
   const value = values[key];
   // A copy, so changing what's read never changes what's saved.
@@ -70,6 +90,8 @@ export function readJson(key, fallback) {
 
 export function writeJson(key, value) {
   const copy = JSON.parse(JSON.stringify(value));
+  // Unchanged, as when taking in another window's save, there's nothing to save.
+  if (JSON.stringify(values[key]) === JSON.stringify(copy)) return;
   values[key] = copy;
   save({ [key]: copy });
 }
