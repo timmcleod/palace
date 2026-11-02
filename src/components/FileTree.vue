@@ -9,7 +9,8 @@ const remembered = reactive(new Map());
 <script setup>
 import { computed, nextTick, shallowRef, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen } from "lucide-vue-next";
+import { ChevronRight, CircleAlert } from "lucide-vue-next";
+import FileIcon from "./FileIcon.vue";
 import { focusOnOpen, isUnsaved } from "../lib/editing.js";
 import { fileManager } from "../lib/platform.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
@@ -129,7 +130,6 @@ const BADGES = {
   conflicted: ["!", "Conflicted"],
 };
 
-const ICONS = { file: File, link: FileSymlink, submodule: FolderGit2 };
 
 // --- New files and folders ---------------------------------------------------------
 
@@ -332,13 +332,7 @@ function onKeydown(event) {
     >
       <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: view.expanded.has(row.path) }" />
       <span v-else class="chevron" />
-      <component
-        :is="row.kind === 'dir' ? (view.expanded.has(row.path) ? FolderOpen : Folder) : ICONS[row.kind]"
-        :size="16"
-        :stroke-width="1.5"
-        class="row-icon"
-        :class="{ folder: row.kind === 'dir' }"
-      />
+      <FileIcon :name="row.name" :kind="row.kind" :open="view.expanded.has(row.path)" />
       <span class="name" :class="statuses.get(row.path)">{{ row.name }}</span>
       <span v-if="isUnsaved(path, row.path)" class="unsaved" title="Edits not saved" />
       <span v-if="row.kind === 'dir' && changedFolders.has(row.path)" class="changed-dot" title="Has changes" />
@@ -402,15 +396,6 @@ function onKeydown(event) {
 
 .chevron.open {
   transform: rotate(90deg);
-}
-
-.row-icon {
-  flex-shrink: 0;
-  color: var(--icon);
-}
-
-.row-icon.folder {
-  color: var(--accent);
 }
 
 .name {

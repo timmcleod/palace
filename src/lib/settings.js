@@ -18,6 +18,8 @@ const DEFAULTS = {
   wrapLines: false,
   // Color code by language in diffs and file contents.
   syntaxHighlighting: true,
+  // Colorful icons for files and folders, by name, rather than plain outlines.
+  fileIcons: true,
   githubAvatars: true,
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).

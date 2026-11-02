@@ -12,7 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatSize } from "../lib/format.js";
 import { highlightText } from "../lib/highlight.js";
 import { settings } from "../lib/settings.js";
-import { ChevronRight, CircleAlert, File, FileSymlink, Folder, FolderGit2, FolderOpen, UserRoundSearch } from "lucide-vue-next";
+import { ChevronRight, CircleAlert, UserRoundSearch } from "lucide-vue-next";
+import FileIcon from "./FileIcon.vue";
 
 // Every file as it was at a commit: a folder tree on top, the chosen file below.
 const props = defineProps({
@@ -144,7 +145,6 @@ const rows = computed(() => {
   return result;
 });
 
-const ICONS = { file: File, link: FileSymlink, submodule: FolderGit2 };
 
 function activate(row) {
   if (row.kind === "dir") toggle(row.path);
@@ -188,13 +188,7 @@ watch(
       >
         <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: expanded.has(row.path) }" />
         <span v-else class="chevron" />
-        <component
-          :is="row.kind === 'dir' ? (expanded.has(row.path) ? FolderOpen : Folder) : ICONS[row.kind]"
-          :size="16"
-          :stroke-width="1.5"
-          class="row-icon"
-          :class="{ folder: row.kind === 'dir' }"
-        />
+        <FileIcon :name="row.name" :kind="row.kind" :open="expanded.has(row.path)" />
         <span class="name">{{ row.name }}</span>
       </div>
     </div>
@@ -293,14 +287,6 @@ watch(
   transform: rotate(90deg);
 }
 
-.row-icon {
-  flex-shrink: 0;
-  color: var(--icon);
-}
-
-.row-icon.folder {
-  color: var(--accent);
-}
 
 .name {
   overflow: hidden;

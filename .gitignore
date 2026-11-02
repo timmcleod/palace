@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Made by scripts/file-icons.mjs before dev and build
+public/file-icons/
+src/lib/fileIconMap.json

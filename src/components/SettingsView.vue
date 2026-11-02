@@ -368,6 +368,16 @@ const SAMPLE = {
                 </button>
               </div>
             </div>
+            <div class="item">
+              <div class="text">
+                <div class="title">Colorful file icons</div>
+                <div class="desc">
+                  Icons for each kind of file and folder, in the Files view, the Working Copy, commits and search. Off,
+                  they're plain outlines.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.fileIcons" type="checkbox" /><span /></label>
+            </div>
           </div>
         </section>
 

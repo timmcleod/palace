@@ -1,7 +1,8 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { File, GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
+import { GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
+import FileIcon from "./FileIcon.vue";
 import { shortcut } from "../lib/platform.js";
 
 // The toolbar's search: files by name or path, and commits in the history being shown
@@ -217,7 +218,7 @@ defineExpose({ focus });
           @mouseenter="active = i"
           @click="pick(item)"
         >
-          <File :size="15" :stroke-width="1.5" class="icon" />
+          <FileIcon :name="file" :size="15" class="icon" />
           <span class="name">{{ item.name }}</span>
           <span class="dir">{{ item.dir }}</span>
         </div>

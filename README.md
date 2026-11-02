@@ -79,3 +79,5 @@ npm run package                 # build the packages into src-tauri/target/relea
 ## License
 
 [MIT](LICENSE)
+
+File and folder icons are from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme), also MIT licensed. Its license is included with them, in `file-icons/LICENSE`.

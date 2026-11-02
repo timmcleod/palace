@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
 import FileDiff from "./FileDiff.vue";
+import FileIcon from "./FileIcon.vue";
 import { splitIssueRefs } from "../lib/issues.js";
 
 const props = defineProps({
@@ -163,6 +164,7 @@ function splitPath(path) {
           <ChevronRight :size="14" class="chevron" :class="{ open: expanded.has(i) }" />
           <span class="status" :class="file.status">{{ file.status }}</span>
           <span class="badge" :class="file.status">{{ STATUS_LETTER[file.status] }}</span>
+          <FileIcon :name="file.path" :size="15" />
           <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
             <template v-if="file.old_path">
               <span class="dim">{{ file.old_path }} →</span>

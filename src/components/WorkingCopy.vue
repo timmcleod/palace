@@ -7,6 +7,7 @@ import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 import { commandKey, fileManager, shortcut } from "../lib/platform.js";
 import { useIssueSuggestions } from "../lib/issueSuggestions.js";
 import IssueSuggestions from "./IssueSuggestions.vue";
+import FileIcon from "./FileIcon.vue";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -392,6 +393,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
           @click.stop.prevent="toggle(file)"
         />
         <span class="badge" :class="statusOf(file)" :title="statusOf(file)">{{ STATUS_LETTER[statusOf(file)] }}</span>
+        <FileIcon :name="file.path" :size="15" />
         <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
           <span v-if="file.old_path" class="dim">{{ file.old_path }} → </span>
           <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}

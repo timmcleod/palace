@@ -4,7 +4,9 @@
   "version": "0.16.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/file-icons.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/file-icons.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -37,6 +39,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^6.0.7",
+    "material-icon-theme": "^5.40.0",
     "vite": "^8.0.16"
   }
 }
