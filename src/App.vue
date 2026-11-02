@@ -21,11 +21,9 @@ import {
   GitBranch,
   GitCommitVertical,
   GitMerge,
-  Redo2,
   RefreshCw,
   Search,
   SquareTerminal,
-  Undo2,
   X,
 } from "lucide-vue-next";
 import CommitDetails from "./components/CommitDetails.vue";
@@ -934,6 +932,35 @@ async function undoable({ cover, resumed, ...step }, work) {
   return result;
 }
 
+// What the Working Copy and diffs do runs through undoable directly, so it's followed by
+// the notice the toolbar's operations get (see runGit), offering to undo it. Undo and
+// redo are there and on Cmd+Z and Cmd+Shift+Z (Ctrl on Linux), not in the toolbar,
+// where they sat greyed out beside text whose own undo they don't touch.
+const DONE = { Discard: "Discarded", Commit: "Committed", Amend: "Amended", Stash: "Stashed" };
+const UNDO_OFFERED_FOR = 8000;
+
+async function undoableWithNotice(step, work) {
+  const before = undoStack.value.at(-1);
+  const result = await undoable(step, work);
+  if (undoStack.value.at(-1) !== before && !remoteBusy.value) {
+    clearTimeout(dismissTimer);
+    const op = reactive({
+      command: "undoable",
+      title: DONE[step.label] ?? `${step.label}: done`,
+      line: "",
+      state: "done",
+      message: "",
+      cancellable: false,
+      actions: [{ label: "Undo", run: undo }],
+    });
+    remoteOp.value = op;
+    dismissTimer = setTimeout(() => {
+      if (remoteOp.value === op) remoteOp.value = null;
+    }, UNDO_OFFERED_FOR);
+  }
+  return result;
+}
+
 const undo = () => replay(undoStack, redoStack, true);
 const redo = () => replay(redoStack, undoStack, false);
 
@@ -1670,7 +1697,7 @@ function startResize(event, pane, min, max) {
         :path="overview.path"
         :refresh-key="refreshKey"
         :selected-path="workingFile?.path"
-        :undoable="undoable"
+        :undoable="undoableWithNotice"
         :issue-repo="githubAccount ? issueRepo : null"
         @select="workingFile = $event"
         @changed="refresh"
@@ -1818,24 +1845,6 @@ function startResize(event, pane, min, max) {
             <ArchiveRestore :size="18" :stroke-width="1.5" />
           </button>
         </div>
-        <div class="action-group">
-          <button
-            class="icon-button"
-            :title="undoStack.length ? `Undo ${undoStack.at(-1).label} (${shortcut('Ctrl+Z')})` : 'Nothing to undo'"
-            :disabled="remoteBusy || !undoStack.length"
-            @click="undo"
-          >
-            <Undo2 :size="18" :stroke-width="1.5" />
-          </button>
-          <button
-            class="icon-button"
-            :title="redoStack.length ? `Redo ${redoStack.at(-1).label} (${shortcut('Ctrl+Shift+Z')})` : 'Nothing to redo'"
-            :disabled="remoteBusy || !redoStack.length"
-            @click="redo"
-          >
-            <Redo2 :size="18" :stroke-width="1.5" />
-          </button>
-        </div>
         <button
           class="icon-button terminal-toggle"
           :class="{ active: terminalOpen }"
@@ -1893,7 +1902,7 @@ function startResize(event, pane, min, max) {
           <span class="file-title">{{ workingFile?.path }}</span>
         </div>
         <ConflictView v-if="workingFile?.conflicted" :path="overview.path" :file="workingFile" @changed="refresh" />
-        <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" :undoable="undoable" @changed="refresh" />
+        <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" :undoable="undoableWithNotice" @changed="refresh" />
         <div v-else class="empty-state">
           <p>Select a file to see its changes.</p>
         </div>

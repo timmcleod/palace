@@ -35,7 +35,7 @@ const percent = computed(() => {
       <div class="bar"><div class="fill" :style="{ width: `${percent ?? 0}%` }" /></div>
       <div class="line">{{ operation.line || "Connecting…" }}</div>
     </template>
-    <pre v-else-if="operation.state !== 'running'" class="message">{{ operation.message }}</pre>
+    <pre v-else-if="operation.state !== 'running' && operation.message" class="message">{{ operation.message }}</pre>
     <div v-if="operation.actions?.length && operation.state !== 'running'" class="actions">
       <button v-for="action in operation.actions" :key="action.label" class="secondary-button" @click="emit('action', action)">
         {{ action.label }}
