@@ -21,7 +21,8 @@ import {
   X,
 } from "lucide-vue-next";
 import { buildTree, flattenTree } from "../lib/tree.js";
-import { commandKey } from "../lib/platform.js";
+import { commandKey, shortcut } from "../lib/platform.js";
+import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
 
 const props = defineProps({
@@ -97,8 +98,6 @@ const workspaceRows = computed(() =>
       depth: 0,
       count: props.pulls.count || null,
     },
-    { key: "workspace:github", label: "GitHub", icon: Github, depth: 0 },
-    { key: "workspace:settings", label: "Settings", icon: Settings, depth: 0 },
   ].filter(Boolean),
 );
 
@@ -323,6 +322,17 @@ function onRowClick(row, event) {
       <button class="icon-button" title="Open Repository…" @click="emit('open-repository')">
         <FolderOpen :size="18" :stroke-width="1.5" />
       </button>
+      <!-- Your GitHub account and repositories, to clone from: the app's, not the open
+           repository's, so not in the Workspace list. -->
+      <button
+        class="icon-button app-button"
+        :class="{ active: selected === 'workspace:github' }"
+        :title="githubAccount ? `GitHub: ${githubAccount.login}` : 'GitHub'"
+        @click="emit('update:selected', 'workspace:github')"
+      >
+        <img v-if="githubAccount?.avatar_url" :src="githubAccount.avatar_url" alt="" class="account-avatar" />
+        <Github v-else :size="18" :stroke-width="1.5" />
+      </button>
     </header>
 
     <nav class="sidebar-scroll">
@@ -399,6 +409,16 @@ function onRowClick(row, event) {
       </label>
       <button class="icon-button" title="Create a branch or tag, or add a remote" @click="emit('add-menu', $event)">
         <Plus :size="17" :stroke-width="1.5" />
+      </button>
+      <!-- Settings is the app's, not the open repository's, so it's here rather than in
+           the Workspace list. -->
+      <button
+        class="icon-button app-button"
+        :class="{ active: selected === 'workspace:settings' }"
+        :title="`Settings (${shortcut('Ctrl+,')})`"
+        @click="emit('update:selected', 'workspace:settings')"
+      >
+        <Settings :size="17" :stroke-width="1.5" />
       </button>
     </footer>
   </aside>
@@ -641,6 +661,17 @@ function onRowClick(row, event) {
   background: var(--accent);
   font-weight: 600;
   color: #fff;
+}
+
+.app-button.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.account-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
 }
 
 .sidebar-footer {
