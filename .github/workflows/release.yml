@@ -262,8 +262,19 @@ jobs:
             }}' > latest.json
           gh release upload "$tag" latest.json --clobber
 
+      # Marked latest, which is where updates come from, only when it's the newest:
+      # re-running an older release's workflow doesn't take everyone back to it.
       - name: Publish the release
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
+          latest="${latest#v}"
+          newest=true
+          if [ -n "$latest" ] && [ "$(printf '%s\n' "$latest" "$version" | sort -V | tail -1)" != "$version" ]; then
+            echo "v$latest is newer, so it stays the latest release."
+            newest=false
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest="$newest"
 
   website:
     # Only once the release is published, so the website never offers a version that
