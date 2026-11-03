@@ -1,8 +1,18 @@
 <script setup>
-import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
-import { asText, buffers, focusOnOpen, keyFor, markUnsaved, takeFocusRequest } from "../lib/editing.js";
+import {
+  asText,
+  buffers,
+  focusOnOpen,
+  keyFor,
+  markUnsaved,
+  openEditors,
+  savesUnderWay,
+  takeFocusRequest,
+  unsaved,
+} from "../lib/editing.js";
 import { formatSize } from "../lib/format.js";
 import { isMac, shortcut } from "../lib/platform.js";
 import { settings } from "../lib/settings.js";
@@ -12,7 +22,8 @@ import Spinner from "./Spinner.vue";
 // A file from the working copy, to read and edit. Edits that aren't saved stay with
 // their file (see editing.js) while you look at another, and the file is checked
 // against the disk whenever Palace refreshes: unchanged text follows it, and edited
-// text asks whether to reload it.
+// text asks whether to reload it. With Settings › Save files automatically, edits save
+// a moment after typing stops, and on leaving the file, the editor or Palace.
 const props = defineProps({
   path: { type: String, required: true },
   file: { type: String, default: null },
@@ -32,10 +43,19 @@ const dirty = ref(false);
 // Set when the file changed on disk while it has edits here.
 const changedOnDisk = ref(false);
 const saving = ref(false);
+// Why saving automatically last failed, shown until a save works.
+const saveError = ref("");
 
-// The file being edited: its key, the text as last saved or read, and what it was
-// read with ({ version, crlf, bom }).
+// The file being edited: { key, path, file, editable, saved, base, state }, with
+// `saved` the text as last saved or read, `base` what it was read with ({ version,
+// crlf, bom }) and `state` the editor as left, while it's kept in `buffers`. Saves
+// write one at a time: `writing` while one is under way, and `again` if another was
+// asked for meanwhile.
 let current = null;
+
+// How long after typing stops edits save, when saving automatically.
+const AUTOSAVE_DELAY = 1000;
+let autosaveTimer = 0;
 
 const settingsNow = () => ({ tabSize: settings.tabSize, highlight: settings.syntaxHighlighting, wrap: settings.wrapLines });
 
@@ -79,16 +99,29 @@ function newState(text, readOnly = false) {
       if (!current) return;
       dirty.value = !state.doc.eq(current.saved);
       markUnsaved(props.path, props.file, dirty.value);
+      if (dirty.value && settings.autoSave) {
+        clearTimeout(autosaveTimer);
+        autosaveTimer = setTimeout(autosave, AUTOSAVE_DELAY);
+      }
     },
   });
 }
 
-// Keeps the file being left, if it has edits, to come back to.
+// Keeps the file being left, if it has edits, to come back to, and saves them if
+// saving automatically.
 function leave() {
+  clearTimeout(autosaveTimer);
   if (!current || !view) return;
-  if (dirty.value) buffers.set(current.key, { state: view.state, saved: current.saved, base: current.base });
-  else buffers.delete(current.key);
+  const left = current;
   current = null;
+  saving.value = false;
+  if (!dirty.value) {
+    buffers.delete(left.key);
+    return;
+  }
+  left.state = view.state;
+  buffers.set(left.key, left);
+  if (settings.autoSave && !changedOnDisk.value) write(left, left.state.doc, true);
 }
 
 let loadSeq = 0;
@@ -98,6 +131,7 @@ async function open() {
   const focus = takeFocusRequest();
   const { path, file } = props;
   error.value = "";
+  saveError.value = "";
   changedOnDisk.value = false;
   dirty.value = false;
   if (!file) {
@@ -114,15 +148,18 @@ async function open() {
     const key = keyFor(path, file);
     const kept = buffers.get(key);
     let state;
+    const editable = read.kind === "text";
     if (kept) {
-      current = { key, saved: kept.saved, base: kept.base };
+      // The same file, kept as it was left, though it may have been renamed since.
+      current = Object.assign(kept, { key, path, file, editable });
       state = kept.state;
       dirty.value = true;
       changedOnDisk.value = read.version !== kept.base.version;
     } else {
       state = newState(read.text, read.kind === "read_only");
-      current = { key, saved: state.doc, base: { version: read.version, crlf: read.crlf, bom: read.bom } };
+      current = { key, path, file, editable, saved: state.doc, base: { version: read.version, crlf: read.crlf, bom: read.bom } };
     }
+    saving.value = !!current.writing;
     await showState(state, focus);
     if (seq !== loadSeq) return;
     cm.applySettings(view, settingsNow());
@@ -156,7 +193,7 @@ watch(() => [props.path, props.file], open, { immediate: true });
 
 // The file as it is on disk now: followed if it has no edits here, otherwise noted.
 async function checkDisk() {
-  if (!current || !view || saving.value) return;
+  if (!current || !view || current.writing) return;
   const key = current.key;
   let read;
   try {
@@ -207,6 +244,7 @@ async function keepMine() {
     const read = await readFile();
     current.base = { ...current.base, version: read.version };
     changedOnDisk.value = false;
+    if (settings.autoSave) save();
   } catch (e) {
     tell("Couldn't Read the File", String(e));
   }
@@ -214,17 +252,54 @@ async function keepMine() {
 
 const CHANGED_ON_DISK = "CHANGED_ON_DISK: ";
 
-async function save() {
-  if (!current || !view || saving.value || contents.value?.kind !== "text") return;
-  if (!dirty.value && !changedOnDisk.value) return;
-  saving.value = true;
-  const target = current;
-  const { path, file } = props;
-  const doc = view.state.doc;
+// Saves the file open now, as with Ctrl+S (⌘S).
+function save() {
+  if (!current || !view || (!dirty.value && !changedOnDisk.value)) return;
+  clearTimeout(autosaveTimer);
+  return write(current, view.state.doc, false);
+}
+
+// Saving automatically: a moment after typing stops, and on leaving the editor or
+// Palace. Not while the file has changed on disk, until Reload or Keep Mine says
+// which to keep.
+function autosave() {
+  clearTimeout(autosaveTimer);
+  if (!settings.autoSave || !current || !view || !dirty.value || changedOnDisk.value) return;
+  write(current, view.state.doc, true);
+}
+
+onMounted(() => {
+  window.addEventListener("blur", autosave);
+  openEditors.add(autosave);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("blur", autosave);
+  openEditors.delete(autosave);
+});
+
+// Writes `doc` to the file `target` is. Saved automatically, a failure is noted beside
+// the file's name rather than interrupting, and a file whose edits were dropped, as
+// when it was deleted, isn't saved at all. Quitting waits for it (see finishSaving).
+function write(target, doc, auto) {
+  const promise = writeNow(target, doc, auto);
+  savesUnderWay.add(promise);
+  promise.finally(() => savesUnderWay.delete(promise));
+  return promise;
+}
+
+async function writeNow(target, doc, auto) {
+  if (!target.editable) return;
+  if (auto && !unsaved.has(target.key)) return;
+  if (target.writing) {
+    target.again = true;
+    return;
+  }
+  target.writing = true;
+  if (current === target) saving.value = true;
   try {
     const version = await invoke("save_working_file", {
-      path,
-      file,
+      path: target.path,
+      file: target.file,
       text: doc.toString(),
       crlf: target.base.crlf,
       bom: target.base.bom,
@@ -235,27 +310,31 @@ async function save() {
     if (current === target) {
       dirty.value = !view.state.doc.eq(doc);
       changedOnDisk.value = false;
-      markUnsaved(path, file, dirty.value);
-    } else {
-      // Another file was opened while this one saved: what was kept of this one, if
-      // anything, is brought up to date, and dropped if nothing's left to save.
-      const kept = buffers.get(target.key);
-      if (kept) {
-        kept.saved = doc;
-        kept.base = target.base;
-        if (kept.state.doc.eq(doc)) {
-          buffers.delete(target.key);
-          markUnsaved(path, file, false);
-        }
-      }
+      saveError.value = "";
+      markUnsaved(target.path, target.file, dirty.value);
+    } else if (buffers.get(target.key) === target && target.state.doc.eq(doc)) {
+      // Left while it saved, with nothing more to save: there's nothing to keep.
+      buffers.delete(target.key);
+      markUnsaved(target.path, target.file, false);
     }
   } catch (e) {
     const message = String(e);
-    if (!message.startsWith(CHANGED_ON_DISK)) tell("Couldn't Save the File", message);
     // Noted only on the file still open; coming back to another, it's checked again.
-    else if (current === target) changedOnDisk.value = true;
+    if (message.startsWith(CHANGED_ON_DISK)) {
+      if (current === target) changedOnDisk.value = true;
+    } else if (!auto) {
+      tell("Couldn't Save the File", message);
+    } else if (current === target) {
+      saveError.value = message;
+    }
   } finally {
-    saving.value = false;
+    target.writing = false;
+    if (current === target) saving.value = false;
+  }
+  if (target.again) {
+    target.again = false;
+    const latest = current === target ? view?.state.doc : target.state?.doc;
+    if (latest && !latest.eq(target.saved)) write(target, latest, true);
   }
 }
 
@@ -293,7 +372,8 @@ function showAs(text) {
   <div class="file-editor">
     <div class="editor-header">
       <span class="file-title" :title="file">{{ file }}</span>
-      <span v-if="dirty" class="unsaved-note">Edited</span>
+      <span v-if="dirty && (!settings.autoSave || changedOnDisk)" class="unsaved-note">Edited</span>
+      <span v-if="saveError" class="unsaved-note failed" :title="saveError">Not Saved</span>
       <span v-if="contents?.kind === 'read_only'" class="unsaved-note" title="Files this large open read-only">Read Only</span>
       <span class="spacer" />
       <Spinner v-if="loading || saving" :size="13" class="dim" />
@@ -303,7 +383,7 @@ function showAs(text) {
       </button>
       <button v-if="file" class="icon-button small" title="Open in Your Editor" @click="openInEditor"><ExternalLink :size="14" /></button>
       <button
-        v-if="contents?.kind === 'text'"
+        v-if="contents?.kind === 'text' && (!settings.autoSave || saveError)"
         class="secondary-button save"
         :disabled="(!dirty && !changedOnDisk) || saving"
         :title="`Save (${shortcut('Ctrl+S')})`"
@@ -330,7 +410,7 @@ function showAs(text) {
       <p>{{ NOT_EDITABLE[contents.kind] }}</p>
       <button class="secondary-button" @click="openInEditor"><ExternalLink :size="14" /> Open in Your Editor</button>
     </div>
-    <div v-show="isText && !error" ref="host" class="editor-host" />
+    <div v-show="isText && !error" ref="host" class="editor-host" @focusout="autosave" />
     <div v-if="isText && !error && status" class="status-bar">
       <button class="status-item" :title="`Go to Line (${isMac ? '⌃G' : 'Ctrl+G'})`" @click="goToLine">
         Ln {{ status.line }}, Col {{ status.column }}
@@ -382,6 +462,11 @@ function showAs(text) {
   background: var(--pill-bg);
   font-size: 11.5px;
   color: var(--text-secondary);
+}
+
+.unsaved-note.failed {
+  background: var(--banner-warning-bg);
+  color: var(--text-primary);
 }
 
 .spacer {

@@ -7,6 +7,7 @@ import { FileDiff, FolderDown, GitCommitHorizontal, Github, Palette, RefreshCw, 
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
+import { shortcut } from "../lib/platform.js";
 import { cloneFolder } from "../lib/clone.js";
 import { checkForUpdates, updates } from "../lib/updates.js";
 import { PALACE_URL } from "../lib/star.js";
@@ -527,6 +528,16 @@ const SAMPLE = {
                   {{ minutes }} min
                 </button>
               </div>
+            </div>
+            <div class="item">
+              <div class="text">
+                <div class="title">Save files automatically</div>
+                <div class="desc">
+                  Edits in the Files view save a moment after you stop typing, and when you open another file or leave
+                  Palace. Off, save with {{ shortcut("Ctrl+S") }}.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.autoSave" type="checkbox" /><span /></label>
             </div>
           </div>
         </section>

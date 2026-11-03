@@ -30,6 +30,17 @@ export const unsaved = reactive(new Set());
 // ({ version, crlf, bom }). Not reactive: CodeMirror's states are kept as they are.
 export const buffers = new Map();
 
+// Saves under way, and what starts saving the files open in editors now: for quitting
+// to finish saving first, when saving automatically.
+export const savesUnderWay = new Set();
+export const openEditors = new Set();
+
+/** Saves what's open in editors, and waits for every save under way to finish. */
+export async function finishSaving() {
+  for (const save of openEditors) save();
+  while (savesUnderWay.size) await Promise.allSettled([...savesUnderWay]);
+}
+
 export const keyFor = (path, file) => `${path}\n${file}`;
 
 /** Whether `file` in the repository at `path` has edits that aren't saved. */

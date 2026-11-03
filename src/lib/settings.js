@@ -20,6 +20,9 @@ const DEFAULTS = {
   syntaxHighlighting: true,
   // Colorful icons for files and folders, by name, rather than plain outlines.
   fileIcons: true,
+  // Save edits in the Files view as they're made: a moment after typing stops, and on
+  // leaving the file, the editor or Palace.
+  autoSave: true,
   githubAvatars: true,
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).

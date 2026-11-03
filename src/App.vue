@@ -88,7 +88,7 @@ import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount, githubAccountChecked } from "./lib/github.js";
-import { focusOnOpen, forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
+import { finishSaving, focusOnOpen, forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
 import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
 import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
@@ -1230,6 +1230,9 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
   if (askingToQuit) return;
   askingToQuit = true;
   const { quitting } = payload;
+  // Saving automatically, edits are saved first, and only those that couldn't be are
+  // asked about.
+  if (settings.autoSave) await finishSaving();
   const doing = quitting ? "Quitting" : "Closing the window";
   const lines = [];
   const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
@@ -1252,6 +1255,11 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
   if (elsewhere.length) {
     const said = elsewhere.join("; ");
     lines.push(`In other windows, ${said}. Quitting ${payload.other_edits.length ? "loses" : "stops"} ${elsewhere.length === 1 ? "it" : "them"}.`);
+  }
+  if (!lines.length) {
+    askingToQuit = false;
+    invoke("quit_confirmed", { quitting }).catch(() => {});
+    return;
   }
   const ok = await askConfirm({
     title: quitting ? "Quit Palace?" : "Close Window?",
