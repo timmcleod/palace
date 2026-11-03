@@ -41,10 +41,27 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   }
 
   // A pull request, from `remote`: its head branch there if it has one, or else
-  // GitHub's copy of it (see checkout_pull).
+  // GitHub's copy of it (see checkout_pull). When the pull request has been rewritten
+  // since, as by its author force-pushing, pr-N is replaced, but if it has commits of
+  // your own on it, only once you've said to.
   async function checkoutPull(remote, number, branch) {
     if (!(await leaveDetached())) return "Canceled.";
-    return run(["Checking out…", `Checked out #${number}`, "Checkout failed"], "checkout_pull", { remote, number, branch });
+    const titles = ["Checking out…", `Checked out #${number}`, "Checkout failed"];
+    const rewritten = (e) => e.startsWith("PULL_REWRITTEN: ");
+    const error = await run(titles, "checkout_pull", { remote, number, branch }, { quietError: rewritten });
+    if (!error || !rewritten(error)) return error;
+    const count = error.slice("PULL_REWRITTEN: ".length);
+    const yours =
+      count === "?"
+        ? `pr-${number} may have commits of your own on it`
+        : `pr-${number} has ${count === "1" ? "a commit" : `${count} commits`} of your own on it`;
+    const replace = await confirm(
+      `Pull request #${number} has been rewritten since you checked it out, as when its author rebases, and ${yours}, which the new version doesn't have. Replace pr-${number} with the new version? Undo brings your commits back.`,
+      "Replace the Pull Request's Branch?",
+      "Replace",
+    );
+    if (!replace) return "Canceled.";
+    return run(titles, "checkout_pull", { remote, number, branch, replace: true });
   }
 
   // Whether it's fine to move HEAD elsewhere: asks first when it's detached at commits

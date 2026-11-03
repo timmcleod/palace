@@ -84,7 +84,9 @@ fn fetch_one(path: &str, remote: &str, running: &Running, report: Report) -> Res
 /// Checks out pull request `number` from `remote`. With `branch`, its head branch is a
 /// branch of that remote, checked out as any remote branch is: a local branch of the
 /// same name that tracks it. Without, it's from a fork, and GitHub's own copy of it,
-/// pull/N/head, becomes a local branch pr-N, brought up to date when checked out again.
+/// pull/N/head, becomes a local branch pr-N, brought up to date when checked out again
+/// (see checkout_fork_pull). `replace` replaces a pr-N with commits of the user's own
+/// on it by a pull request that's since been rewritten, once they've said to.
 #[tauri::command]
 pub async fn checkout_pull(
     window: WebviewWindow,
@@ -92,16 +94,25 @@ pub async fn checkout_pull(
     remote: String,
     number: u64,
     branch: Option<String>,
+    replace: Option<bool>,
 ) -> Result<String, String> {
-    in_background(window, move |running, report| checkout_pull_from(&path, &remote, number, branch.as_deref(), running, report))
-        .await
+    let replace = replace.unwrap_or(false);
+    in_background(window, move |running, report| {
+        checkout_pull_from(&path, &remote, number, branch.as_deref(), replace, running, report)
+    })
+    .await
 }
+
+/// Starts the refusal to replace pr-N's own commits with a rewritten pull request: then
+/// how many of them there are, or "?" when Palace can't tell which are the user's.
+const PULL_REWRITTEN: &str = "PULL_REWRITTEN: ";
 
 fn checkout_pull_from(
     path: &str,
     remote: &str,
     number: u64,
     branch: Option<&str>,
+    replace: bool,
     running: &Running,
     report: Report,
 ) -> Result<String, String> {
@@ -109,20 +120,78 @@ fn checkout_pull_from(
         git_with_progress(path, &["fetch", "--progress", remote, branch], running, report)?;
         return crate::branch::checkout_remote_branch(path, &format!("{remote}/{branch}"));
     }
+    git_with_progress(path, &["fetch", "--progress", remote, &format!("pull/{number}/head")], running, report)?;
+    checkout_fork_pull(path, remote, number, replace)
+}
+
+/// Brings pr-N to the pull request's newest version, fetched to FETCH_HEAD, and checks
+/// it out. Each time, the version it's brought to is noted under refs/palace/pull/, out
+/// of sight of the branch list, so that when the pull request is rewritten, as when its
+/// author rebases and force-pushes, the commits on pr-N beyond that version are known
+/// to be the user's own. Without any, pr-N is replaced by the new version; with some,
+/// or none known, only with `replace`. Changes in the working copy are kept either way.
+fn checkout_fork_pull(path: &str, remote: &str, number: u64, replace: bool) -> Result<String, String> {
+    let message = |e: git2::Error| e.message().to_string();
+    let repo = Repository::discover(path).map_err(message)?;
+    let tip = repo.revparse_single("FETCH_HEAD").and_then(|o| o.peel_to_commit()).map_err(message)?.id();
     let local = format!("pr-{number}");
-    let pull = format!("pull/{number}/head");
-    let repo = Repository::open(path).map_err(|e| e.message().to_string())?;
+    let noted = format!("refs/palace/pull/{remote}/{number}");
     let current = repo.head().ok().and_then(|h| h.shorthand().ok().map(str::to_string));
-    if current.as_deref() == Some(local.as_str()) {
-        // A branch that's checked out can't be fetched into, so it's merged instead.
-        git_with_progress(path, &["fetch", "--progress", remote, &pull], running, report)?;
-        crate::cli::git(path, &["merge", "--ff-only", "FETCH_HEAD"], None)?;
-        return Ok(format!("Brought {local} up to date with pull request #{number}."));
-    }
-    // Not forced, so commits of your own on pr-N are never thrown away.
-    git_with_progress(path, &["fetch", "--progress", remote, &format!("{pull}:{local}")], running, report)?;
-    crate::cli::git(path, &["switch", &local], None)?;
-    Ok(format!("Checked out pull request #{number} as {local}."))
+    let checked_out = current.as_deref() == Some(local.as_str());
+    let tip_hex = tip.to_string();
+
+    let done = match repo.find_branch(&local, git2::BranchType::Local).ok().and_then(|b| b.get().target()) {
+        None => {
+            crate::cli::git(path, &["branch", &local, &tip_hex], None)?;
+            crate::cli::git(path, &["switch", &local], None)?;
+            format!("Checked out pull request #{number} as {local}.")
+        }
+        // Up to date, or with commits of the user's own on top: as it is.
+        Some(mine) if mine == tip || repo.graph_descendant_of(mine, tip).map_err(message)? => {
+            if !checked_out {
+                crate::cli::git(path, &["switch", &local], None)?;
+            }
+            format!("Checked out pull request #{number} as {local}.")
+        }
+        // Moved on, from where pr-N is: brought up to date.
+        Some(mine) if repo.graph_descendant_of(tip, mine).map_err(message)? => {
+            if checked_out {
+                crate::cli::git(path, &["merge", "--ff-only", &tip_hex], None)?;
+            } else {
+                crate::cli::git(path, &["branch", "-f", &local, &tip_hex], None)?;
+                crate::cli::git(path, &["switch", &local], None)?;
+            }
+            format!("Brought {local} up to date with pull request #{number}.")
+        }
+        // Rewritten.
+        Some(mine) => {
+            let own = match repo.refname_to_id(&noted) {
+                Ok(before) => Some(commits_beyond(&repo, mine, before).map_err(message)?),
+                Err(_) => None,
+            };
+            if own != Some(0) && !replace {
+                let count = own.map_or("?".to_string(), |n| n.to_string());
+                return Err(format!("{PULL_REWRITTEN}{count}"));
+            }
+            if checked_out {
+                crate::cli::git(path, &["reset", "--keep", &tip_hex], None)?;
+            } else {
+                crate::cli::git(path, &["branch", "-f", &local, &tip_hex], None)?;
+                crate::cli::git(path, &["switch", &local], None)?;
+            }
+            format!("Pull request #{number} was rewritten; {local} now matches it.")
+        }
+    };
+    repo.reference(&noted, tip, true, "Palace: pull request checked out").map_err(message)?;
+    Ok(done)
+}
+
+/// How many commits `tip` has that `base` doesn't.
+fn commits_beyond(repo: &Repository, tip: git2::Oid, base: git2::Oid) -> Result<usize, git2::Error> {
+    let mut walk = repo.revwalk()?;
+    walk.push(tip)?;
+    walk.hide(base)?;
+    Ok(walk.count())
 }
 
 #[tauri::command]
@@ -550,7 +619,7 @@ mod tests {
         crate::cli::git(t.path(), &["push", "-q", "origin", "HEAD:refs/pull/7/head"], None).unwrap();
         crate::cli::git(t.path(), &["switch", "-q", &main], None).unwrap();
         crate::cli::git(t.path(), &["branch", "-qD", "feature"], None).unwrap();
-        let run = |branch| checkout_pull_from(t.path(), "origin", 7, branch, &Running::default(), &mut |_| {});
+        let run = |branch| checkout_pull_from(t.path(), "origin", 7, branch, false, &Running::default(), &mut |_| {});
 
         assert_eq!(run(Some("feature")).unwrap(), "Created feature, tracking origin/feature, and switched to it.");
         assert_eq!(t.head(), feature);
@@ -564,6 +633,62 @@ mod tests {
         crate::cli::git(t.path(), &["reset", "-q", "--hard", "HEAD~"], None).unwrap();
         assert_eq!(run(None).unwrap(), "Brought pr-7 up to date with pull request #7.");
         assert_eq!(t.head(), later);
+    }
+
+    /// GitHub's copy of pull request 7, rewritten to `files` on top of `base`, as when
+    /// its author rebases and force-pushes.
+    fn rewrite_pull(t: &TempRepo, base: &str, files: &[(&str, Option<&str>)]) -> Oid {
+        let back = t.branch();
+        crate::cli::git(t.path(), &["switch", "-qc", "rewrite", base], None).unwrap();
+        let rewritten = t.commit(files, "Rewritten");
+        crate::cli::git(t.path(), &["push", "-qf", "origin", "HEAD:refs/pull/7/head"], None).unwrap();
+        crate::cli::git(t.path(), &["switch", "-q", &back], None).unwrap();
+        crate::cli::git(t.path(), &["branch", "-qD", "rewrite"], None).unwrap();
+        rewritten
+    }
+
+    #[test]
+    fn checking_out_a_rewritten_pull_request() {
+        let server = TempRepo::bare("rewritten-pull-server");
+        let t = TempRepo::clone_of("rewritten-pull", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        crate::cli::git(t.path(), &["push", "-q", "origin", &main], None).unwrap();
+        rewrite_pull(&t, &main, &[("pr.txt", Some("one\n"))]);
+        let run = |replace| checkout_pull_from(t.path(), "origin", 7, None, replace, &Running::default(), &mut |_| {});
+        run(false).unwrap();
+
+        // Rewritten, with nothing of the user's on pr-7: replaced, even while checked out.
+        let second = rewrite_pull(&t, &main, &[("pr.txt", Some("two\n"))]);
+        assert_eq!(run(false).unwrap(), "Pull request #7 was rewritten; pr-7 now matches it.");
+        assert_eq!((t.branch(), t.head()), ("pr-7".to_string(), second));
+
+        // With a commit of the user's on it, it asks first, saying how many.
+        let mine = t.commit(&[("mine.txt", Some("mine\n"))], "Mine");
+        let third = rewrite_pull(&t, &main, &[("pr.txt", Some("three\n"))]);
+        assert_eq!(run(false).unwrap_err(), format!("{PULL_REWRITTEN}1"));
+        assert_eq!(t.head(), mine);
+        // Told to, it replaces it, keeping changes in the working copy.
+        std::fs::write(t.dir.join("a.txt"), "edited\n").unwrap();
+        run(true).unwrap();
+        assert_eq!(t.head(), third);
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "edited\n");
+    }
+
+    #[test]
+    fn a_rewritten_pull_request_checked_out_before_palace_noted_it_asks() {
+        let server = TempRepo::bare("unnoted-pull-server");
+        let t = TempRepo::clone_of("unnoted-pull", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        crate::cli::git(t.path(), &["push", "-q", "origin", &main], None).unwrap();
+        // pr-7 made the old way, with nothing noted.
+        let first = rewrite_pull(&t, &main, &[("pr.txt", Some("one\n"))]);
+        crate::cli::git(t.path(), &["branch", "pr-7", &first.to_string()], None).unwrap();
+        rewrite_pull(&t, &main, &[("pr.txt", Some("two\n"))]);
+        let run = |replace| checkout_pull_from(t.path(), "origin", 7, None, replace, &Running::default(), &mut |_| {});
+        assert_eq!(run(false).unwrap_err(), format!("{PULL_REWRITTEN}?"));
+        assert!(run(true).is_ok());
     }
 
     #[test]
