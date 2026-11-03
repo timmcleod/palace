@@ -198,6 +198,33 @@ pub async fn github_issue(owner: String, repo: String, number: u64) -> Result<Is
 struct RepoInfo {
     parent: Option<Parent>,
     permissions: Option<Permissions>,
+    /// Whether issues and pull requests are turned on; None where GitHub doesn't say,
+    /// as GitHub Enterprise servers that predate turning pull requests off don't.
+    has_issues: Option<bool>,
+    has_pull_requests: Option<bool>,
+}
+
+/// Which of issues and pull requests the repository has turned on.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct RepoFeatures {
+    issues: bool,
+    pulls: bool,
+}
+
+fn features(info: &RepoInfo) -> RepoFeatures {
+    RepoFeatures { issues: info.has_issues.unwrap_or(true), pulls: info.has_pull_requests.unwrap_or(true) }
+}
+
+/// Whether the repository has issues and pull requests turned on, so what's off can be
+/// left out of the sidebar.
+#[tauri::command]
+pub async fn github_repo_features(owner: String, repo: String) -> Result<RepoFeatures, String> {
+    let token = token()?;
+    blocking(move || {
+        let info: RepoInfo = api_get(&token, &format!("/repos/{owner}/{repo}")).map_err(plain)?;
+        Ok(features(&info))
+    })
+    .await
 }
 
 /// What the signed-in account may do in a repository.
@@ -392,6 +419,14 @@ fn plain(error: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_which_features_a_repository_has() {
+        let read = |json: &str| features(&serde_json::from_str::<RepoInfo>(json).unwrap());
+        assert_eq!(read(r#"{"has_issues": true, "has_pull_requests": false}"#), RepoFeatures { issues: true, pulls: false });
+        assert_eq!(read(r#"{"has_issues": false}"#), RepoFeatures { issues: false, pulls: true });
+        assert_eq!(read("{}"), RepoFeatures { issues: true, pulls: true });
+    }
 
     #[test]
     fn searching_a_repository() {

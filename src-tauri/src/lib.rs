@@ -155,6 +155,7 @@ pub fn run() {
             issues::github_issue,
             issues::github_issue_filters,
             issues::github_fork_parent,
+            issues::github_repo_features,
             issues::github_create_issue,
             issues::github_update_issue,
             issues::github_toggle_issue,

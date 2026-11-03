@@ -245,6 +245,17 @@ const issueRepo = computed(() => {
   return (forkParent.value && repos.find((r) => repoKey(r) === repoKey(forkParent.value))) ?? repos[0] ?? null;
 });
 
+// Which of issues and pull requests the repository has turned on, { issues, pulls },
+// or null until GitHub has said. What's off is left out of the sidebar; until it's
+// known, or if asking fails, both stay, so nothing disappears for a network hiccup.
+const repoFeatures = ref(null);
+const hasIssues = computed(() => repoFeatures.value?.issues !== false);
+const hasPulls = computed(() => repoFeatures.value?.pulls !== false);
+// Turned off while showing, it goes back to the history.
+watch([hasIssues, hasPulls], ([issues, pulls]) => {
+  if (overview.value && ((!issues && isIssues.value) || (!pulls && isPulls.value))) selected.value = headHistoryKey(overview.value);
+});
+
 const selectedIssue = shallowRef(null);
 const issueQuery = ref("");
 const openIssues = ref(null);
@@ -266,7 +277,8 @@ function onIssueUpdated(issue) {
 async function showIssue(number) {
   const repo = issueRepo.value ?? issueRemotes.value[0];
   if (!repo) return;
-  if (!githubAccount.value) {
+  // Signed out, or with issues off here, as for a pull request's number: on GitHub.
+  if (!githubAccount.value || !hasIssues.value) {
     openUrl(`https://github.com/${repo.owner}/${repo.repo}/issues/${number}`);
     return;
   }
@@ -410,6 +422,18 @@ async function checkIssues() {
   const repo = issueRepo.value;
   if (!repo || !githubAccount.value) return;
   issuesCheckedAt = Date.now();
+  const features = await invoke("github_repo_features", { owner: repo.owner, repo: repo.repo }).catch(() => null);
+  const stillThis = () => issueRepo.value && repoKey(issueRepo.value) === repoKey(repo);
+  if (features && stillThis()) repoFeatures.value = features;
+  if (hasIssues.value) await countIssues(repo);
+  if (!hasPulls.value) return;
+  const pulls = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1, pulls: true }).catch(
+    () => null,
+  );
+  if (pulls && stillThis()) openPulls.value = pulls.total;
+}
+
+async function countIssues(repo) {
   const found = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1 }).catch(
     () => null,
   );
@@ -420,10 +444,6 @@ async function checkIssues() {
   if (!seen) markIssuesSeen(repo);
   const isNew = (i) => Date.parse(i.created_at) > Date.parse(seen);
   freshIssues.value = isIssues.value || !seen ? 0 : found.issues.filter(isNew).length;
-  const pulls = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1, pulls: true }).catch(
-    () => null,
-  );
-  if (pulls && issueRepo.value && repoKey(issueRepo.value) === repoKey(repo)) openPulls.value = pulls.total;
 }
 
 watch(
@@ -434,6 +454,7 @@ watch(
     selectedIssue.value = null;
     openPulls.value = null;
     selectedPull.value = null;
+    repoFeatures.value = null;
     checkIssues();
   },
   { immediate: true },
@@ -1091,7 +1112,7 @@ function onPullRequestClosed(pull) {
 // or to view the one it has. Not for the repository's main branch, or while the
 // dialog is the one pushing.
 async function offerPullRequest(op, branch) {
-  if (!githubAccount.value || !branch || pullRequestDialog.value || !issueRemotes.value.length) return;
+  if (!githubAccount.value || !branch || pullRequestDialog.value || !issueRemotes.value.length || !hasPulls.value) return;
   await loadRepository(overview.value.path, { quiet: true });
   const plan = pullRequestPlan(overview.value, pullTarget(), branch);
   if (!plan || plan.push) return;
@@ -1111,7 +1132,7 @@ const actions = useGitActions({
   overview,
   run: runGit,
   compare: openComparison,
-  pullRequest: { available: () => issueRemotes.value.length > 0, create: createPullRequest },
+  pullRequest: { available: () => issueRemotes.value.length > 0 && hasPulls.value, create: createPullRequest },
   viewedBranch: () => {
     const r = historyRef.value;
     return r?.kind === "branch" && r.name !== overview.value?.head.branch ? r.name : null;
@@ -1725,8 +1746,8 @@ function startResize(event, pane, min, max) {
       v-model:selected="selected"
       :overview="overview"
       :compared="comparedKeys"
-      :issues="showsIssues ? { count: openIssues, fresh: freshIssues } : null"
-      :pulls="showsIssues ? { count: openPulls } : null"
+      :issues="showsIssues && hasIssues ? { count: openIssues, fresh: freshIssues } : null"
+      :pulls="showsIssues && hasPulls ? { count: openPulls } : null"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
