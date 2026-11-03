@@ -98,9 +98,13 @@ const isText = computed(() => TEXT.includes(contents.value?.kind));
 const isSvg = computed(() => /\.svg$/i.test(props.file ?? ""));
 
 function newState(text, readOnly = false) {
-  return cm.createState(text, props.file, {
-    ...settingsNow(),
-    readOnly,
+  return cm.createState(text, props.file, { ...settingsNow(), readOnly, ...hooks() });
+}
+
+// What the editor calls back into: this editor's, so a file kept with edits from an
+// editor that's since gone, as when the Files view was left, is rebound to these.
+function hooks() {
+  return {
     onSave: () => save(),
     review,
     onCursor: (state) => (status.value = cm.statusOf(state)),
@@ -113,7 +117,7 @@ function newState(text, readOnly = false) {
         autosaveTimer = setTimeout(autosave, AUTOSAVE_DELAY);
       }
     },
-  });
+  };
 }
 
 // Keeps the file being left, if it has edits, to come back to, and saves them if
@@ -150,6 +154,10 @@ async function open() {
   }
   loading.value = true;
   try {
+    // Left with edits that are still saving, as on going back to it quickly: read once
+    // that's done, or the read could find the text from before them.
+    if (buffers.get(keyFor(path, file))?.writing) await Promise.allSettled([...savesUnderWay]);
+    if (seq !== loadSeq) return;
     const [read] = await Promise.all([readFile(path, file), cm ?? import("../lib/codeEditor.js").then((m) => (cm = m))]);
     if (seq !== loadSeq) return;
     contents.value = read;
@@ -162,7 +170,7 @@ async function open() {
     if (kept) {
       // The same file, kept as it was left, though it may have been renamed since.
       current = Object.assign(kept, { key, path, file, editable });
-      state = kept.state;
+      state = cm.rebind(kept.state, hooks());
       dirty.value = true;
       changedOnDisk.value = read.version !== kept.base.version;
     } else {

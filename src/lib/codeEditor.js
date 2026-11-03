@@ -152,6 +152,14 @@ const language = new Compartment();
 const coloring = new Compartment();
 const tabs = new Compartment();
 const wrapping = new Compartment();
+// The page's own callbacks, swapped when a state kept from an editor that's since gone
+// is shown in a new one (see rebind).
+const host = new Compartment();
+const hostHooks = Facet.define({ combine: (values) => values[0] ?? {} });
+const hostOf = ({ onSave, onChange, onCursor, review = null }) => [
+  hostHooks.of({ onSave, onChange, onCursor }),
+  reviewHooks.of(review),
+];
 
 /** How the text indents: tabs, or the smallest run of spaces most lines start with. */
 function detectIndent(text) {
@@ -484,12 +492,11 @@ export function linesText(state, first, last) {
 const reviewExtensions = (hooks) =>
   hooks
     ? [
-        reviewHooks.of(hooks),
         notesField,
         hoverField,
         commentGutter,
         hoverTracking,
-        Prec.highest(keymap.of([{ key: "Mod-Shift-c", run: (view) => (hooks.comment(view, null), true), preventDefault: true }])),
+        Prec.highest(keymap.of([{ key: "Mod-Shift-c", run: (view) => (view.state.facet(reviewHooks)?.comment(view, null), true), preventDefault: true }])),
       ]
     : [];
 
@@ -522,11 +529,12 @@ export function createState(text, file, { tabSize, highlight, wrap, readOnly = f
       keymap.of([indentWithTab]),
       Prec.highest(
         keymap.of([
-          { key: "Mod-s", run: () => (onSave(), true), preventDefault: true },
+          { key: "Mod-s", run: (view) => (view.state.facet(hostHooks).onSave?.(), true), preventDefault: true },
           // As in most editors; Mod-Alt-g works too.
           { key: "Ctrl-g", run: gotoLine, preventDefault: true },
         ]),
       ),
+      host.of(hostOf({ onSave, onChange, onCursor, review })),
       reviewExtensions(review),
       changes,
       changeGutter,
@@ -536,13 +544,23 @@ export function createState(text, file, { tabSize, highlight, wrap, readOnly = f
       wrapping.of(wrap ? EditorView.lineWrapping : []),
       language.of([]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChange(update.state);
-        if (update.docChanged || update.selectionSet) onCursor?.(update.state);
+        const hooks = update.state.facet(hostHooks);
+        if (update.docChanged) hooks.onChange?.(update.state);
+        if (update.docChanged || update.selectionSet) hooks.onCursor?.(update.state);
       }),
       // Still selectable, to copy from.
       readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
     ],
   });
+}
+
+/**
+ * `state` with the page's callbacks replaced, as createState takes them, keeping its
+ * text, selection and undo history: for a state kept from an editor that's since gone,
+ * whose callbacks would otherwise still be that editor's.
+ */
+export function rebind(state, hooks) {
+  return state.update({ effects: host.reconfigure(hostOf(hooks)) }).state;
 }
 
 /** An editor showing `state` in `parent`. */
