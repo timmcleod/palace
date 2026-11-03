@@ -1,10 +1,10 @@
 # Builds Palace's Linux and macOS packages.
 #
 # Pushing a version tag such as v1.2.0 (made in Palace, with `npm run release`, or
-# with git) runs the tests, builds the .deb and AppImage with that version, and
-# publishes them as a GitHub release, then adds a macOS .dmg to it. Running the workflow by hand from the Actions
-# tab builds the packages without publishing anything, and attaches them to the run
-# instead. Once a release is published, the website shows its version.
+# with git) makes a draft GitHub release, builds the Linux and macOS packages for it
+# at the same time, then publishes it once both are there, and the website shows its
+# version. Running the workflow by hand from the Actions tab builds the packages
+# without publishing anything, and attaches them to the run instead.
 #
 # An annotated tag's message becomes the release's notes, above the install
 # instructions: `npm run release -- 1.2.0 notes.md`, or with git,
@@ -24,7 +24,75 @@ permissions:
   contents: write
 
 jobs:
+  # The release, as a draft for the builds to add their packages to, with its notes.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.create.outputs.id }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # actions/checkout leaves the tag without its message, so it's fetched again. A
+      # signed tag's signature isn't part of the notes, and nor is the message
+      # `npm run release` gives a tag without notes ("Palace v1.2.0").
+      - name: Read the release notes from the tag
+        id: notes
+        run: |
+          tag="refs/tags/$GITHUB_REF_NAME"
+          git fetch --force origin "$tag:$tag"
+          notes=""
+          if [ "$(git cat-file -t "$tag")" = tag ]; then
+            notes=$(git for-each-ref --format='%(contents)' "$tag" | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d')
+          fi
+          if [ "$notes" = "Palace $GITHUB_REF_NAME" ]; then notes=""; fi
+          # A delimiter the notes can't contain.
+          end="END_$(openssl rand -hex 16)"
+          {
+            echo "body<<$end"
+            if [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+              printf "## What's new\n\n%s\n\n## Install\n\n" "$notes"
+            fi
+            echo "$end"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Make the draft release
+        id: create
+        env:
+          BODY: ${{ steps.notes.outputs.body }}
+        run: |
+          # Run again, the workflow adds to the draft it made the first time.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -1)
+          if [ -z "$id" ]; then
+            {
+              printf '%s' "$BODY"
+              cat <<'INSTALL'
+          **Ubuntu / Debian:** download the `.deb`, then run
+          `sudo apt install ./Palace_*.deb` in the folder you saved it to.
+
+          **Other distributions:** download the `.AppImage`, make it executable
+          (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed,
+          and on Ubuntu 22.04 and later, `libfuse2` (`libfuse2t64` on 24.04 and later).
+
+          **macOS** (11 or later, Apple Silicon or Intel): download the `.dmg`, open it and
+          drag Palace to Applications. It isn't signed by Apple yet, so the first time
+          you open it, macOS refuses. Go to System Settings › Privacy & Security and click
+          **Open Anyway**. If macOS says Palace is damaged, run
+          `xattr -cr /Applications/Palace.app` in Terminal and open it again.
+          INSTALL
+            } > notes.md
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Palace $GITHUB_REF_NAME" --notes-file notes.md
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -1)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   build:
+    # After the draft release is made, or straight away when run by hand.
+    needs: release
+    if: ${{ !cancelled() && !failure() }}
     # Packages built against an older Ubuntu also install on newer ones, not the
     # other way around.
     runs-on: ubuntu-22.04
@@ -61,34 +129,10 @@ jobs:
         if: env.IS_RELEASE == 'true'
         run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
 
-      # actions/checkout leaves the tag without its message, so it's fetched again. A
-      # signed tag's signature isn't part of the notes, and nor is the message
-      # `npm run release` gives a tag without notes ("Palace v1.2.0").
-      - name: Read the release notes from the tag
-        id: notes
-        if: env.IS_RELEASE == 'true'
-        run: |
-          tag="refs/tags/$GITHUB_REF_NAME"
-          git fetch --force origin "$tag:$tag"
-          notes=""
-          if [ "$(git cat-file -t "$tag")" = tag ]; then
-            notes=$(git for-each-ref --format='%(contents)' "$tag" | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d')
-          fi
-          if [ "$notes" = "Palace $GITHUB_REF_NAME" ]; then notes=""; fi
-          # A delimiter the notes can't contain.
-          end="END_$(openssl rand -hex 16)"
-          {
-            echo "body<<$end"
-            if [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
-              printf "## What's new\n\n%s\n\n## Install\n\n" "$notes"
-            fi
-            echo "$end"
-          } >> "$GITHUB_OUTPUT"
-
-      # Releases also carry signed update files and a latest.json describing them,
-      # which installed copies of Palace check for updates. The signing key lives in
-      # the repository's secrets; Palace only installs updates signed with it.
-      - name: Build and publish the release
+      # Releases also carry signed update files, which installed copies of Palace check
+      # for updates, described by a latest.json the publish job writes. The signing key
+      # lives in the repository's secrets; Palace only installs updates signed with it.
+      - name: Build and add to the release
         if: env.IS_RELEASE == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
@@ -97,23 +141,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --config src-tauri/tauri.release.conf.json
-          includeUpdaterJson: true
-          tagName: ${{ github.ref_name }}
-          releaseName: Palace ${{ github.ref_name }}
-          releaseBody: |
-            ${{ steps.notes.outputs.body }}**Ubuntu / Debian:** download the `.deb`, then run
-            `sudo apt install ./Palace_*.deb` in the folder you saved it to.
-
-            **Other distributions:** download the `.AppImage`, make it executable
-            (`chmod +x Palace_*.AppImage`) and run it. It needs `git` installed,
-            and on Ubuntu 22.04 and later, `libfuse2` (`libfuse2t64` on 24.04 and later).
-
-            **macOS** (11 or later, Apple Silicon or Intel): download the `.dmg`, open it and
-            drag Palace to Applications. It isn't signed by Apple yet, so the first time
-            you open it, macOS refuses. Go to System Settings › Privacy & Security and click
-            **Open Anyway**. If macOS says Palace is damaged, run
-            `xattr -cr /Applications/Palace.app` in Terminal and open it again.
-          releaseDraft: false
+          releaseId: ${{ needs.release.outputs.id }}
+          includeUpdaterJson: false
 
       - name: Build the packages
         if: env.IS_RELEASE != 'true'
@@ -130,9 +159,9 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    # After the Linux build, which creates the release; adding to it one job at a time
-    # keeps the two from overwriting each other's entries in latest.json.
-    needs: build
+    # At the same time as the Linux build.
+    needs: release
+    if: ${{ !cancelled() && !failure() }}
     runs-on: macos-latest
     env:
       IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
@@ -175,10 +204,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
-          includeUpdaterJson: true
-          tagName: ${{ github.ref_name }}
-          releaseName: Palace ${{ github.ref_name }}
-          releaseDraft: false
+          releaseId: ${{ needs.release.outputs.id }}
+          includeUpdaterJson: false
 
       - name: Build the packages
         if: env.IS_RELEASE != 'true'
@@ -192,11 +219,49 @@ jobs:
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
-  website:
-    # Only after the release is out, so the website never offers a version that
-    # can't be downloaded yet.
-    needs: build
+  # Once both builds have added their packages: latest.json, describing the update
+  # for each platform, and then the release is published. If either build fails, the
+  # release stays a draft, and running the failed job again finishes it.
+  publish:
+    needs: [release, build, build-macos]
     if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Write latest.json
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          url="https://github.com/$GH_REPO/releases/download/$tag"
+          appimage="Palace_${version}_amd64.AppImage"
+          deb="Palace_${version}_amd64.deb"
+          app="Palace_universal.app.tar.gz"
+          for file in "$appimage" "$deb" "$app"; do
+            gh release download "$tag" --pattern "$file.sig" --dir sigs
+          done
+          entry() { jq -n --rawfile sig "sigs/$1.sig" --arg url "$url/$1" '{signature: $sig, url: $url}'; }
+          jq -n \
+            --arg version "$version" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --argjson appimage "$(entry "$appimage")" \
+            --argjson deb "$(entry "$deb")" \
+            --argjson app "$(entry "$app")" \
+            '{version: $version, notes: "", pub_date: $date, platforms: {
+              "linux-x86_64": $appimage, "linux-x86_64-appimage": $appimage, "linux-x86_64-deb": $deb,
+              "darwin-aarch64": $app, "darwin-x86_64": $app, "darwin-aarch64-app": $app, "darwin-x86_64-app": $app
+            }}' > latest.json
+          gh release upload "$tag" latest.json --clobber
+
+      - name: Publish the release
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+  website:
+    # Only once the release is published, so the website never offers a version that
+    # can't be downloaded yet.
+    needs: publish
     runs-on: ubuntu-latest
 
     steps:
