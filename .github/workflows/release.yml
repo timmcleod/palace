@@ -84,8 +84,15 @@ jobs:
           `xattr -cr /Applications/Palace.app` in Terminal and open it again.
           INSTALL
             } > notes.md
-            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Palace $GITHUB_REF_NAME" --notes-file notes.md
-            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -1)
+            # Its id from making it: GitHub's list of releases can take a moment to
+            # include a new draft.
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$GITHUB_REF_NAME" -f name="Palace $GITHUB_REF_NAME" -F draft=true -F body=@notes.md --jq .id)
+          fi
+          # Without it, the builds would build but have nowhere to put the packages.
+          if [ -z "$id" ]; then
+            echo "::error::Couldn't make or find the draft release."
+            exit 1
           fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
