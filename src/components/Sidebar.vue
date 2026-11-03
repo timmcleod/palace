@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  ChevronsUpDown,
   CircleDot,
   GitPullRequest,
   Cloud,
@@ -317,7 +318,8 @@ function onRowClick(row, event) {
   <aside class="sidebar">
     <header class="sidebar-toolbar">
       <button class="repo-name" :title="`${overview.path}\nSwitch to another repository`" @click="emit('recent-menu', below($event))">
-        {{ overview.name }}
+        <span class="repo-name-text">{{ overview.name }}</span>
+        <ChevronsUpDown :size="14" :stroke-width="1.75" class="repo-name-chevron" />
       </button>
       <button class="icon-button" title="Open Repository…" @click="emit('open-repository')">
         <FolderOpen :size="18" :stroke-width="1.5" />
@@ -434,6 +436,9 @@ function onRowClick(row, event) {
 
 /* The open repository's name; clicking it lists the recent ones to switch to. */
 .repo-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: 1;
   min-width: 0;
   margin-right: 6px;
@@ -453,6 +458,22 @@ function onRowClick(row, event) {
 
 .repo-name:hover {
   background: var(--button-hover);
+}
+
+.repo-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Says the name opens a menu, of other repositories to switch to. */
+.repo-name-chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.repo-name:hover .repo-name-chevron {
+  color: var(--text-secondary);
 }
 
 .sidebar-toolbar {
