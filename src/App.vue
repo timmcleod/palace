@@ -56,6 +56,8 @@ import TreeView from "./components/TreeView.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
+import ReviewTray from "./components/ReviewTray.vue";
+import { clearComments, clearSent, markSent, reviewMessage, unsentComments } from "./lib/review.js";
 import {
   forgetRepository,
   onSavedElsewhere,
@@ -1289,6 +1291,58 @@ async function showTerminal({ newTab = false, folder = "" } = {}) {
   else terminalPanel.value?.focus();
 }
 
+// Sends the repository's review comments not sent yet to its agent: into the prompt of
+// its agent tab, or a new one, for the user to add to and send.
+const sendingReview = ref(false);
+async function sendReview() {
+  const path = overview.value?.path;
+  const comments = path ? unsentComments(path) : [];
+  if (!comments.length || sendingReview.value) return;
+  sendingReview.value = true;
+  terminalOpen.value = true;
+  terminalLoaded.value = true;
+  try {
+    const { sendToAgent } = await import("./lib/terminals.js");
+    const tab = await sendToAgent(path, reviewMessage(comments));
+    if (!tab) {
+      tell(
+        "Couldn't Send the Comments",
+        "The agent tab's agent didn't start. Check the agent tab for why, then send the comments again.",
+      );
+      return;
+    }
+    markSent(path, comments.map((c) => c.id));
+    terminalPanel.value?.focus();
+  } finally {
+    sendingReview.value = false;
+  }
+}
+
+// A commit, made here or by the agent, or moving to another, ends the round of review:
+// the comments sent in it go.
+watch(
+  () => [overview.value?.path, overview.value?.head?.short_id],
+  ([path, id], [oldPath, oldId] = []) => {
+    if (path && path === oldPath && id && oldId && id !== oldId) clearSent(path);
+  },
+);
+
+async function clearReview() {
+  const path = overview.value?.path;
+  if (!path) return;
+  const unsent = unsentComments(path).length;
+  if (unsent) {
+    const ok = await askConfirm({
+      title: "Clear the Comments?",
+      message: `${unsent === 1 ? "A comment hasn't" : `${unsent} comments haven't`} been sent yet. Clearing deletes ${unsent === 1 ? "it" : "them"}.`,
+      confirmLabel: "Clear",
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  clearComments(path);
+}
+
 // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
 let loadSeq = 0;
 
@@ -2100,6 +2154,14 @@ function startResize(event, pane, min, max) {
           <p>{{ isStashes ? "Select a stash to see its changes." : "Select a commit to see its details." }}</p>
         </div>
       </template>
+
+      <ReviewTray
+        v-if="!isFiles && !isIssues && !isPulls"
+        :path="overview.path"
+        :sending="sendingReview"
+        @send="sendReview"
+        @clear="clearReview"
+      />
     </section>
 
     <TerminalPanel

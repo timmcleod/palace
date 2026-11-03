@@ -149,6 +149,8 @@ const SECTIONS = [
         <DiffTable
           :diff="diffs[section.staged ? 'staged' : 'unstaged']"
           :file="file.path"
+          :repo="path"
+          :where="section.staged ? 'staged' : 'unstaged'"
           :hunk-actions="section.hunkActions"
           :busy="busy"
           :loading-all="loadingAll === section.staged"

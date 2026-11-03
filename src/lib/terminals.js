@@ -6,7 +6,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
 import { isMac } from "./platform.js";
 
 // The terminals in the panel below the history, by repository: each tab is the user's
@@ -37,60 +36,9 @@ export function tabsFor(path) {
 
 // --- Agents -----------------------------------------------------------------------
 
-// The command an agent tab runs, for each repository that doesn't use the default:
-// Claude Code, or another agent that runs in a terminal, such as Codex or Gemini.
-// (Kept under its old name, from when only Claude was meant.)
-const AGENT_COMMANDS_KEY = "palace.claudeCommands";
-export const DEFAULT_AGENT_COMMAND = "claude";
-
-const agentCommands = reactive(readJson(AGENT_COMMANDS_KEY, {}));
-onSavedElsewhere((key, value) => {
-  if (key !== AGENT_COMMANDS_KEY) return;
-  for (const path of Object.keys(agentCommands)) delete agentCommands[path];
-  Object.assign(agentCommands, value);
-});
-
-export const agentCommand = (path) => agentCommands[path] || DEFAULT_AGENT_COMMAND;
-
-export function setAgentCommand(path, command) {
-  if (command.trim() && command.trim() !== DEFAULT_AGENT_COMMAND) agentCommands[path] = command.trim();
-  else delete agentCommands[path];
-  writeJson(AGENT_COMMANDS_KEY, { ...agentCommands });
-}
-
-// What the agents people run in terminals are called, by their programs' names.
-const AGENT_NAMES = {
-  claude: "Claude",
-  codex: "Codex",
-  gemini: "Gemini",
-  copilot: "Copilot",
-  "cursor-agent": "Cursor",
-  opencode: "opencode",
-  aider: "Aider",
-  amp: "Amp",
-  goose: "Goose",
-  qwen: "Qwen",
-  crush: "Crush",
-};
-
-// Commands that run another, which isn't what to call the tab.
-const LAUNCHERS = new Set(["cd", "env", "exec", "npx", "bunx", "pnpx", "uvx", "nice", "time", "&&", ";"]);
-
-/**
- * What to call an agent tab running `command`: the agent's name, where it's one
- * Palace knows, as in "npx @openai/codex" or "cd api && claude", or else the
- * program's, capitalized.
- */
-export function agentName(command) {
-  const words = command.trim().split(/\s+/).filter((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-  const base = (word) => word.slice(word.lastIndexOf("/") + 1).toLowerCase();
-  for (const word of words) {
-    const known = AGENT_NAMES[base(word)];
-    if (known) return known;
-  }
-  const program = words.map(base).find((word) => !LAUNCHERS.has(word) && !word.startsWith("-"));
-  return program ? program[0].toUpperCase() + program.slice(1) : "Agent";
-}
+// Which agent a repository's agent tabs run, and what they're called: see agents.js.
+export { agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand } from "./agents.js";
+import { agentCommand, agentName } from "./agents.js";
 
 // How Anthropic says to install Claude Code, on a Mac and on Linux, and where to read
 // about other ways (https://code.claude.com/docs/en/setup).
@@ -223,6 +171,7 @@ export async function startTab(path, tab) {
 
   const output = new Channel();
   output.onmessage = (data) => {
+    session.lastOutput = Date.now();
     session.term.write(new Uint8Array(data));
     checkFront(tab);
   };
@@ -239,6 +188,41 @@ export async function startTab(path, tab) {
   // Typed but left for the user to run, as an install command is.
   if (session.input) type(tab, session.input);
   for (const data of session.typed.splice(0)) type(tab, data);
+}
+
+/**
+ * Puts `text` in the prompt of the repository's agent, as if pasted, without sending
+ * it: in the agent tab showing, or else the last one opened, or else a new one, once
+ * its agent has started. Resolves to the tab, or null if a new agent never started.
+ */
+export async function sendToAgent(path, text) {
+  const group = tabsFor(path);
+  const agents = group.tabs.filter((tab) => tab.kind === "agent");
+  let tab = agents.find((t) => t.key === group.active) ?? agents.at(-1);
+  if (tab) {
+    group.active = tab.key;
+    tab.session.term.paste(text);
+    return tab;
+  }
+  tab = openTerminal(path, { command: agentCommand(path), kind: "agent" });
+  if (!(await agentStarted(tab))) return null;
+  tab.session.term.paste(text);
+  return tab;
+}
+
+// Whether the agent a new tab runs has started and settled: something other than the
+// shell is in front, and it's printed nothing for a moment. Not, after half a minute,
+// as when it isn't installed, so nothing's pasted into the shell instead.
+async function agentStarted(tab) {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const until = Date.now() + 30000;
+  while (Date.now() < until) {
+    await wait(250);
+    if (!tab.session.started || tab.id == null) continue;
+    if (!(await isBusy(tab))) continue;
+    if (Date.now() - (tab.session.lastOutput ?? 0) > 1200) return true;
+  }
+  return false;
 }
 
 /** Sizes the terminal to its part of the panel, unless the panel is hidden. */

@@ -1,5 +1,5 @@
 <script setup>
-import { inject, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import DiffTable from "./DiffTable.vue";
 
@@ -22,6 +22,11 @@ const error = ref("");
 const loading = ref(false);
 const root = ref(null);
 const scroller = inject("diffScroller", null);
+
+// Which diff this is, for review comments on it (see review.js).
+const where = computed(() =>
+  props.comparison ? `compare:${props.comparison.base}..${props.comparison.head}` : props.commitId ? `commit:${props.commitId}` : null,
+);
 
 async function load(maxLines) {
   loading.value = true;
@@ -59,7 +64,7 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <template>
   <div ref="root" class="file-diff">
-    <DiffTable v-if="diff" :diff="diff" :file="file" :loading-all="loading" @show-all="load(null)" />
+    <DiffTable v-if="diff" :diff="diff" :file="file" :repo="path" :where="where" :loading-all="loading" @show-all="load(null)" />
     <p v-else class="notice" :class="{ error }">{{ error || "Loading…" }}</p>
   </div>
 </template>
