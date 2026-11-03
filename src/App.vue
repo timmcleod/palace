@@ -785,10 +785,16 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
       op.state = "failed";
       op.title = failed;
       op.message = message;
-      // A push rejected because the branch was rewritten (amend, rebase) can be
-      // published by force pushing.
-      if (command === "push" && message.includes("non-fast-forward")) {
-        op.actions = [{ label: "Force Push…", run: () => actions.forcePush() }];
+      // A push rejected because the remote has commits this branch doesn't is usually
+      // fixed by pulling them in. If the branch was rewritten (amend, rebase) instead,
+      // force pushing publishes it.
+      if (command === "push") {
+        const fetchFirst = message.includes("(fetch first)");
+        const nonFastForward = message.includes("non-fast-forward");
+        if (fetchFirst || nonFastForward) {
+          op.actions = [{ label: "Pull…", run: () => actions.pull() }];
+          if (nonFastForward) op.actions.push({ label: "Force Push…", run: () => actions.forcePush() });
+        }
       }
     }
     return message;
