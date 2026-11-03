@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FileDiff, FolderDown, GitCommitHorizontal, Github, Palette, RefreshCw, Star } from "lucide-vue-next";
+import { FileCode, FileDiff, FolderDown, GitCommitHorizontal, Github, Palette, RefreshCw, Star } from "lucide-vue-next";
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
@@ -24,6 +24,7 @@ const SECTIONS = [
   { id: "commits", label: "Commits", icon: GitCommitHorizontal },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "diffs", label: "Diffs", icon: FileDiff },
+  { id: "files", label: "Files", icon: FileCode },
   { id: "repositories", label: "Repositories", icon: FolderDown },
   { id: "updates", label: "Updates", icon: RefreshCw },
 ];
@@ -462,13 +463,40 @@ const SAMPLE = {
             </div>
             <div class="item">
               <div class="text">
+                <div class="title">Syntax highlighting</div>
+                <div class="desc">In diffs and file contents.</div>
+              </div>
+              <label class="switch"><input v-model="settings.syntaxHighlighting" type="checkbox" /><span /></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Files -->
+        <section id="settings-files">
+          <h2>Files</h2>
+          <div class="card">
+            <div class="item">
+              <div class="text">
+                <div class="title">Save files automatically</div>
+                <div class="desc">
+                  Edits in the Files view save a moment after you stop typing, and when you open another file or leave
+                  Palace. Off, save with {{ shortcut("Ctrl+S") }}.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.autoSave" type="checkbox" /><span /></label>
+            </div>
+            <div class="item">
+              <div class="text">
                 <div class="title">Wrap long lines</div>
-                <div class="desc">In unified diffs and the Files view's editor, instead of scrolling sideways. Side by side always wraps.</div>
+                <div class="desc">In the editor and unified diffs, instead of scrolling sideways. Side by side diffs always wrap.</div>
               </div>
               <label class="switch"><input v-model="settings.wrapLines" type="checkbox" /><span /></label>
             </div>
             <div class="item">
-              <div class="text"><div class="title">Tab width</div></div>
+              <div class="text">
+                <div class="title">Tab width</div>
+                <div class="desc">In the editor and diffs.</div>
+              </div>
               <div class="segmented">
                 <button
                   v-for="size in TAB_SIZES"
@@ -479,13 +507,6 @@ const SAMPLE = {
                   {{ size }}
                 </button>
               </div>
-            </div>
-            <div class="item">
-              <div class="text">
-                <div class="title">Syntax highlighting</div>
-                <div class="desc">In diffs and file contents.</div>
-              </div>
-              <label class="switch"><input v-model="settings.syntaxHighlighting" type="checkbox" /><span /></label>
             </div>
           </div>
         </section>
@@ -528,16 +549,6 @@ const SAMPLE = {
                   {{ minutes }} min
                 </button>
               </div>
-            </div>
-            <div class="item">
-              <div class="text">
-                <div class="title">Save files automatically</div>
-                <div class="desc">
-                  Edits in the Files view save a moment after you stop typing, and when you open another file or leave
-                  Palace. Off, save with {{ shortcut("Ctrl+S") }}.
-                </div>
-              </div>
-              <label class="switch"><input v-model="settings.autoSave" type="checkbox" /><span /></label>
             </div>
           </div>
         </section>
