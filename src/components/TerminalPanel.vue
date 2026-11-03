@@ -79,13 +79,15 @@ function onTabDragStart(event, tab) {
   event.dataTransfer.setData(TAB_TYPE, tab.key);
   event.dataTransfer.effectAllowed = "move";
 
-  dragImage = document.createElement("div");
-  dragImage.className = "drag-image";
-  const icon = event.currentTarget.querySelector("svg")?.cloneNode(true);
-  if (icon) dragImage.append(icon);
-  dragImage.append(label(tab));
+  // A copy of the tab itself, as the shown one looks, held where it was grabbed.
+  const el = event.currentTarget;
+  const rect = el.getBoundingClientRect();
+  dragImage = el.cloneNode(true);
+  dragImage.classList.remove("drop-before", "drop-after");
+  dragImage.classList.add("active", "dragged");
+  dragImage.style.width = `${rect.width}px`;
   document.body.append(dragImage);
-  setDragImage(event, dragImage);
+  setDragImage(event, dragImage, { x: event.clientX - rect.left, y: event.clientY - rect.top });
 }
 
 function onTabDragEnd() {
@@ -388,6 +390,13 @@ function startResize(event) {
 
 /* The row scrolls, so clips anything outside it: at the start, the line goes inside. */
 .tab:first-child.drop-before::before {
+  left: 0;
+}
+
+/* The copy of a tab that follows the pointer while it's dragged, kept off the page. */
+.tab.dragged {
+  position: fixed;
+  top: -100px;
   left: 0;
 }
 
