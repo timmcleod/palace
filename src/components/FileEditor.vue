@@ -1,5 +1,6 @@
 <script setup>
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, h, markRaw, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from "vue";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
 import {
@@ -16,7 +17,10 @@ import {
 import { formatSize } from "../lib/format.js";
 import { isMac, shortcut } from "../lib/platform.js";
 import { settings } from "../lib/settings.js";
-import { tell } from "../lib/overlays.js";
+import { openMenu, tell } from "../lib/overlays.js";
+import { addComment, commentsOn, deleteComment, editComment } from "../lib/review.js";
+import { agentCommand, agentName } from "../lib/agents.js";
+import ReviewComment from "./ReviewComment.vue";
 import Spinner from "./Spinner.vue";
 
 // A file from the working copy, to read and edit. Edits that aren't saved stay with
@@ -29,6 +33,8 @@ const props = defineProps({
   file: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
 });
+// "send-to-agent" with text to put in the agent's prompt.
+const emit = defineEmits(["send-to-agent"]);
 
 // The editor module, loaded with the first file opened.
 let cm = null;
@@ -43,6 +49,8 @@ const dirty = ref(false);
 // Set when the file changed on disk while it has edits here.
 const changedOnDisk = ref(false);
 const saving = ref(false);
+// The review comment being written: { key, last, lines }, or null (see below).
+const draft = shallowRef(null);
 // Why saving automatically last failed, shown until a save works.
 const saveError = ref("");
 
@@ -94,6 +102,7 @@ function newState(text, readOnly = false) {
     ...settingsNow(),
     readOnly,
     onSave: () => save(),
+    review,
     onCursor: (state) => (status.value = cm.statusOf(state)),
     onChange: (state) => {
       if (!current) return;
@@ -132,6 +141,7 @@ async function open() {
   const { path, file } = props;
   error.value = "";
   saveError.value = "";
+  draft.value = null;
   changedOnDisk.value = false;
   dirty.value = false;
   if (!file) {
@@ -170,6 +180,7 @@ async function open() {
       if (current?.key === key) language.value = name ?? "Plain Text";
     });
     loadCommitted();
+    placeNotes();
   } catch (e) {
     if (seq === loadSeq) {
       contents.value = null;
@@ -219,6 +230,7 @@ function takeFromDisk(read) {
   changedOnDisk.value = false;
   markUnsaved(props.path, props.file, false);
   buffers.delete(current.key);
+  placeNotes();
 }
 
 watch(
@@ -349,6 +361,124 @@ onBeforeUnmount(() => {
   view = null;
 });
 
+// --- Review comments ----------------------------------------------------------------
+// Comments for the agent on lines of the file, as on lines of a diff (see review.js),
+// shown under their lines. A comment is found again by its lines' text, near where
+// they were, so it follows them as lines come and go above it. One whose lines have
+// changed since is shown above the file if it's still to be sent, and goes if it was
+// sent, as the agent has acted on it.
+
+const WHERE = "file";
+const agent = computed(() => agentName(agentCommand(props.path)));
+const comments = computed(() => (props.file ? commentsOn(props.path, props.file, WHERE) : []));
+const lost = shallowRef([]);
+
+// Where `lines` start in the text now, the nearest to where they were, or null.
+function findLines(state, lines) {
+  const { doc } = state;
+  const want = lines[0].new ?? 1;
+  let best = null;
+  for (let first = 1; first + lines.length - 1 <= doc.lines; first++) {
+    if (!lines.every((line, k) => doc.line(first + k).text === line.text)) continue;
+    if (best == null || Math.abs(first - want) < Math.abs(best - want)) best = first;
+  }
+  return best;
+}
+
+function placeNotes() {
+  if (!view || !current || !cm) return;
+  const notes = [];
+  const missing = [];
+  for (const comment of comments.value) {
+    const first = findLines(view.state, comment.lines);
+    if (first == null) {
+      if (comment.sent) deleteComment(props.path, comment.id);
+      else missing.push(comment);
+      continue;
+    }
+    const data = { comment };
+    notes.push({ key: `c${comment.id}`, version: `${comment.body}|${comment.sent}`, line: first + comment.lines.length - 1, data });
+  }
+  if (draft.value) notes.push({ key: "draft", version: draft.value.key, line: draft.value.last, data: { draft: draft.value } });
+  lost.value = missing;
+  cm.setReviewNotes(view, notes);
+}
+
+watch(() => comments.value.map((c) => `${c.id}|${c.body}|${c.sent}`).join(","), placeNotes);
+watch(draft, placeNotes);
+
+// What the editor shows under the lines: a comment, or the box for writing one.
+const review = {
+  mount(el, { comment, draft: writing }) {
+    const path = props.path;
+    render(
+      comment
+        ? h(ReviewComment, {
+            comment,
+            onSave: (body) => editComment(path, comment.id, body),
+            onDelete: () => deleteComment(path, comment.id),
+          })
+        : h(ReviewComment, { lines: writing.lines, onSave: saveDraft, onCancel: () => (draft.value = null) }),
+      el,
+    );
+  },
+  unmount(el) {
+    render(null, el);
+  },
+  comment: (_, line) => startComment(line),
+};
+
+// Starts a comment on the line `line`, or on the lines selected, if it's one of them
+// or null.
+function startComment(line = null) {
+  if (!view || !props.file) return;
+  const [first, last] = cm.commentLines(view.state, line);
+  const lines = cm.linesText(view.state, first, last).map((text, i) => ({ kind: " ", old: null, new: first + i, text }));
+  draft.value = { key: Date.now(), last, lines };
+  requestAnimationFrame(() => host.value?.querySelector(".cm-review-note textarea")?.focus());
+}
+
+function saveDraft(body) {
+  addComment(props.path, { file: props.file, where: WHERE, lines: draft.value.lines, body });
+  draft.value = null;
+}
+
+// Puts the lines selected, or the cursor's line, in the agent's prompt straight away.
+function addSelection() {
+  if (!view || !props.file) return;
+  const [first, last] = cm.commentLines(view.state, null);
+  const where = first === last ? `line ${first}` : `lines ${first}–${last}`;
+  const quoted = cm.linesText(view.state, first, last).map((text) => `    ${text}`);
+  emit("send-to-agent", `${props.file}, ${where}:\n${quoted.join("\n")}\n`);
+}
+
+// The editor's menu: commenting, and what the web view's menu offered.
+async function editorMenu(event) {
+  if (!view || event.target.closest(".cm-review-note")) return;
+  event.preventDefault();
+  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  const line = view.state.doc.lineAt(pos).number;
+  const { empty } = view.state.selection.main;
+  const readOnly = view.state.readOnly;
+  openMenu(event, [
+    { label: `Comment for ${agent.value}…`, detail: shortcut("Ctrl+Shift+C"), action: () => startComment(line) },
+    { label: empty ? `Add Line to ${agent.value}` : `Add Selection to ${agent.value}`, action: addSelection },
+    { separator: true },
+    { label: "Cut", disabled: empty || readOnly, action: () => (view.focus(), document.execCommand("cut")) },
+    { label: "Copy", disabled: empty, action: () => (view.focus(), document.execCommand("copy")) },
+    {
+      label: "Paste",
+      disabled: readOnly,
+      action: async () => {
+        const text = await readText().catch(() => "");
+        if (text) view.dispatch(view.state.replaceSelection(text));
+        view.focus();
+      },
+    },
+    { label: "Select All", action: () => (view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }), view.focus()) },
+  ]);
+}
+
 function openInEditor() {
   invoke("open_in_editor", { path: props.path, file: props.file }).catch((e) => tell("Couldn't Open the File", String(e)));
 }
@@ -410,7 +540,18 @@ function showAs(text) {
       <p>{{ NOT_EDITABLE[contents.kind] }}</p>
       <button class="secondary-button" @click="openInEditor"><ExternalLink :size="14" /> Open in Your Editor</button>
     </div>
-    <div v-show="isText && !error" ref="host" class="editor-host" @focusout="autosave" />
+    <div v-if="lost.length && isText && !error" class="lost-comments">
+      <p class="lost-title">On lines that have changed since</p>
+      <ReviewComment
+        v-for="c in lost"
+        :key="c.id"
+        :comment="c"
+        quote
+        @save="editComment(path, c.id, $event)"
+        @delete="deleteComment(path, c.id)"
+      />
+    </div>
+    <div v-show="isText && !error" ref="host" class="editor-host" @focusout="autosave" @contextmenu="editorMenu" />
     <div v-if="isText && !error && status" class="status-bar">
       <button class="status-item" :title="`Go to Line (${isMac ? '⌃G' : 'Ctrl+G'})`" @click="goToLine">
         Ln {{ status.line }}, Col {{ status.column }}
@@ -484,6 +625,21 @@ function showAs(text) {
   gap: 5px;
   padding: 3px 11px;
   font-size: 12.5px;
+}
+
+.lost-comments {
+  max-height: 40%;
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--diff-gutter-bg);
+}
+
+.lost-title {
+  margin: 6px 12px 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
 }
 
 .disk-banner {

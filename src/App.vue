@@ -1299,23 +1299,28 @@ async function sendReview() {
   const comments = path ? unsentComments(path) : [];
   if (!comments.length || sendingReview.value) return;
   sendingReview.value = true;
-  terminalOpen.value = true;
-  terminalLoaded.value = true;
   try {
-    const { sendToAgent } = await import("./lib/terminals.js");
-    const tab = await sendToAgent(path, reviewMessage(comments));
-    if (!tab) {
-      tell(
-        "Couldn't Send the Comments",
-        "The agent tab's agent didn't start. Check the agent tab for why, then send the comments again.",
-      );
-      return;
-    }
-    markSent(path, comments.map((c) => c.id));
-    terminalPanel.value?.focus();
+    if (await pasteToAgent(reviewMessage(comments))) markSent(path, comments.map((c) => c.id));
   } finally {
     sendingReview.value = false;
   }
+}
+
+// Puts `text` in the prompt of the repository's agent, showing the terminal panel, and
+// says whether it could.
+async function pasteToAgent(text) {
+  const path = overview.value?.path;
+  if (!path) return false;
+  terminalOpen.value = true;
+  terminalLoaded.value = true;
+  const { sendToAgent } = await import("./lib/terminals.js");
+  const tab = await sendToAgent(path, text);
+  if (!tab) {
+    tell("Couldn't Reach the Agent", "The agent tab's agent didn't start. Check the agent tab for why, then try again.");
+    return false;
+  }
+  terminalPanel.value?.focus();
+  return true;
 }
 
 // A commit, made here or by the agent, or moving to another, ends the round of review:
@@ -2068,7 +2073,13 @@ function startResize(event, pane, min, max) {
         </div>
       </template>
 
-      <FileEditor v-else-if="isFiles" :path="overview.path" :file="openFiles[overview.path] ?? null" :refresh-key="refreshKey" />
+      <FileEditor
+        v-else-if="isFiles"
+        :path="overview.path"
+        :file="openFiles[overview.path] ?? null"
+        :refresh-key="refreshKey"
+        @send-to-agent="pasteToAgent"
+      />
 
       <template v-else-if="isIssues">
         <div class="subheader">
@@ -2156,7 +2167,7 @@ function startResize(event, pane, min, max) {
       </template>
 
       <ReviewTray
-        v-if="!isFiles && !isIssues && !isPulls"
+        v-if="!isIssues && !isPulls"
         :path="overview.path"
         :sending="sendingReview"
         @send="sendReview"

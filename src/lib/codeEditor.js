@@ -1,6 +1,6 @@
 import { basicSetup } from "codemirror";
-import { Compartment, countColumn, EditorState, Prec, RangeSet, StateEffect, StateField, Text } from "@codemirror/state";
-import { Decoration, EditorView, gutter, GutterMarker, keymap, WidgetType } from "@codemirror/view";
+import { Compartment, countColumn, EditorState, Facet, Prec, RangeSet, StateEffect, StateField, Text } from "@codemirror/state";
+import { Decoration, EditorView, gutter, GutterMarker, keymap, ViewPlugin, WidgetType } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { gotoLine } from "@codemirror/search";
 import { Chunk } from "@codemirror/merge";
@@ -45,6 +45,20 @@ const theme = EditorView.theme({
   ".cm-tooltip": { border: "1px solid var(--border)", backgroundColor: "var(--content-bg)", color: "var(--text-primary)" },
   ".cm-tooltip-autocomplete > ul > li[aria-selected]": { color: "#fff", backgroundColor: "var(--accent)" },
   ".cm-panels": { color: "var(--text-primary)", backgroundColor: "var(--sidebar-bg)" },
+  ".cm-comment-gutter": { width: "20px" },
+  ".cm-comment-gutter .cm-gutterElement": { display: "flex", alignItems: "center", justifyContent: "center", padding: "0" },
+  ".cm-comment-button": {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "18px",
+    height: "18px",
+    borderRadius: "4px",
+    backgroundColor: "var(--accent)",
+    color: "#fff",
+    cursor: "pointer",
+  },
+  ".cm-review-note": { padding: "1px 0" },
   ".cm-changes-gutter": { width: "6px", backgroundColor: "var(--diff-gutter-bg)" },
   ".cm-changes-gutter .cm-gutterElement": { padding: "0", cursor: "pointer" },
   ".cm-change-mark": { height: "100%", width: "3px", margin: "0 1px", borderRadius: "1px" },
@@ -322,6 +336,163 @@ export function setCommittedText(view, text) {
   view.dispatch({ effects: setCommitted.of(text) });
 }
 
+// --- Review comments ----------------------------------------------------------------
+// Comments for the agent under the lines they're on (see review.js), shown by the
+// page's own components in boxes the editor makes room for, and a button beside the
+// line under the pointer for writing one. The boxes follow their lines as the text
+// changes around them.
+
+/**
+ * What the page gives the editor for comments: mount(el, data) and unmount(el) show a
+ * comment's box, and comment(view, line) starts one on the line (a line number), or on
+ * the lines selected, if it's one of them or null.
+ */
+const reviewHooks = Facet.define({ combine: (values) => values[0] ?? null });
+
+// [{ key, version, pos, data }]: each box, after the end of its line at `pos`.
+const setNotes = StateEffect.define();
+const notesField = StateField.define({
+  create: () => [],
+  update(notes, tr) {
+    for (const effect of tr.effects) if (effect.is(setNotes)) return effect.value;
+    return tr.docChanged ? notes.map((note) => ({ ...note, pos: tr.changes.mapPos(note.pos, 1) })) : notes;
+  },
+  provide: (field) =>
+    EditorView.decorations.from(field, (notes) =>
+      Decoration.set(
+        notes.map((note) => Decoration.widget({ widget: new NoteWidget(note), block: true, side: 1 }).range(note.pos)),
+        true,
+      ),
+    ),
+});
+
+class NoteWidget extends WidgetType {
+  constructor(note) {
+    super();
+    this.note = note;
+  }
+  eq(other) {
+    return other.note.key === this.note.key && other.note.version === this.note.version;
+  }
+  toDOM(view) {
+    const box = document.createElement("div");
+    box.className = "cm-review-note";
+    const hooks = view.state.facet(reviewHooks);
+    box.unmountNote = () => hooks?.unmount(box);
+    hooks?.mount(box, this.note.data);
+    return box;
+  }
+  destroy(box) {
+    box.unmountNote?.();
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** Shows the comment boxes: [{ key, version, line (the line number it goes under), data }]. */
+export function setReviewNotes(view, notes) {
+  const { doc } = view.state;
+  const placed = notes
+    .filter((n) => n.line >= 1 && n.line <= doc.lines)
+    .map(({ key, version, line, data }) => ({ key, version, pos: doc.line(line).to, data }));
+  view.dispatch({ effects: setNotes.of(placed) });
+}
+
+// The line under the pointer, by where it starts, or null.
+const setHover = StateEffect.define();
+const hoverField = StateField.define({
+  create: () => null,
+  update(at, tr) {
+    for (const effect of tr.effects) if (effect.is(setHover)) at = effect.value;
+    return at != null && tr.docChanged ? tr.changes.mapPos(at) : at;
+  },
+});
+
+class CommentButton extends GutterMarker {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const button = document.createElement("div");
+    button.className = "cm-comment-button";
+    button.title = "Comment for the agent";
+    button.innerHTML =
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v6"/><path d="M9 10h6"/></svg>';
+    return button;
+  }
+}
+const COMMENT_BUTTON = new CommentButton();
+
+const commentGutter = gutter({
+  class: "cm-comment-gutter",
+  markers(view) {
+    const at = view.state.field(hoverField);
+    return at == null || at > view.state.doc.length ? RangeSet.empty : RangeSet.of([COMMENT_BUTTON.range(at)]);
+  },
+  domEventHandlers: {
+    mousedown(view, line) {
+      if (view.state.field(hoverField) !== line.from) return false;
+      view.state.facet(reviewHooks)?.comment(view, view.state.doc.lineAt(line.from).number);
+      return true;
+    },
+  },
+});
+
+// Over the whole editor, gutters included, so the button stays while the pointer moves
+// from the line onto it. The line is found by height, which works over the gutters too.
+const hoverTracking = ViewPlugin.define((view) => {
+  const move = (event) => {
+    const block = view.lineBlockAtHeight(event.clientY - view.documentTop);
+    const from = view.state.doc.lineAt(Math.min(block.from, view.state.doc.length)).from;
+    if (from !== view.state.field(hoverField)) view.dispatch({ effects: setHover.of(from) });
+  };
+  const leave = () => {
+    if (view.state.field(hoverField) != null) view.dispatch({ effects: setHover.of(null) });
+  };
+  view.dom.addEventListener("mousemove", move);
+  view.dom.addEventListener("mouseleave", leave);
+  return {
+    destroy() {
+      view.dom.removeEventListener("mousemove", move);
+      view.dom.removeEventListener("mouseleave", leave);
+    },
+  };
+});
+
+/**
+ * The lines a comment started at `line` is on, as [first, last] line numbers: the
+ * lines selected, if `line` is one of them or null, and otherwise just `line`.
+ */
+export function commentLines(state, line = null) {
+  const { from, to, empty } = state.selection.main;
+  const first = state.doc.lineAt(from).number;
+  // A selection ending at the start of a line leaves that line out.
+  let last = state.doc.lineAt(to).number;
+  if (!empty && last > first && state.doc.line(last).from === to) last--;
+  if (line == null) return [first, last];
+  return !empty && line >= first && line <= last ? [first, last] : [line, line];
+}
+
+/** The text of lines `first` to `last`. */
+export function linesText(state, first, last) {
+  const texts = [];
+  for (let n = first; n <= last; n++) texts.push(state.doc.line(n).text);
+  return texts;
+}
+
+const reviewExtensions = (hooks) =>
+  hooks
+    ? [
+        reviewHooks.of(hooks),
+        notesField,
+        hoverField,
+        commentGutter,
+        hoverTracking,
+        Prec.highest(keymap.of([{ key: "Mod-Shift-c", run: (view) => (hooks.comment(view, null), true), preventDefault: true }])),
+      ]
+    : [];
+
 // --- Status -----------------------------------------------------------------------
 
 /** Where the cursor is and how the text is laid out, for the status bar. */
@@ -343,7 +514,7 @@ export function goToLine(view) {
   gotoLine(view);
 }
 
-export function createState(text, file, { tabSize, highlight, wrap, readOnly = false, onSave, onChange, onCursor }) {
+export function createState(text, file, { tabSize, highlight, wrap, readOnly = false, onSave, onChange, onCursor, review = null }) {
   return EditorState.create({
     doc: text,
     extensions: [
@@ -356,6 +527,7 @@ export function createState(text, file, { tabSize, highlight, wrap, readOnly = f
           { key: "Ctrl-g", run: gotoLine, preventDefault: true },
         ]),
       ),
+      reviewExtensions(review),
       changes,
       changeGutter,
       theme,

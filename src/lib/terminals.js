@@ -201,13 +201,21 @@ export async function sendToAgent(path, text) {
   let tab = agents.find((t) => t.key === group.active) ?? agents.at(-1);
   if (tab) {
     group.active = tab.key;
-    tab.session.term.paste(text);
+    pasteInto(tab, text);
     return tab;
   }
   tab = openTerminal(path, { command: agentCommand(path), kind: "agent" });
   if (!(await agentStarted(tab))) return null;
-  tab.session.term.paste(text);
+  pasteInto(tab, text);
   return tab;
+}
+
+// Pasted as a terminal pastes, marked as a paste for programs that ask, as agents do,
+// so its line breaks stay in the prompt. To one that doesn't, each would be Enter and
+// send the text a line at a time, so it gets the text as one line instead.
+function pasteInto(tab, text) {
+  const { term } = tab.session;
+  term.paste(term.modes.bracketedPasteMode ? text : text.trim().replace(/\s*\n\s*/g, " "));
 }
 
 // Whether the agent a new tab runs has started and settled: something other than the
