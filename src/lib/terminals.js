@@ -215,7 +215,16 @@ export async function sendToAgent(path, text) {
 // send the text a line at a time, so it gets the text as one line instead.
 function pasteInto(tab, text) {
   const { term } = tab.session;
-  term.paste(term.modes.bracketedPasteMode ? text : text.trim().replace(/\s*\n\s*/g, " "));
+  const safe = withoutControls(text);
+  term.paste(term.modes.bracketedPasteMode ? safe : safe.trim().replace(/\s*\n\s*/g, " "));
+}
+
+// The text, quoted from files and diffs that may be anyone's, as in a pull request,
+// without control characters but line breaks and tabs: an escape sequence ending the
+// paste early, or a carriage return, would otherwise press Enter partway through.
+export function withoutControls(text) {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 }
 
 // Whether the agent a new tab runs has started and settled: something other than the
