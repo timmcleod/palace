@@ -26,7 +26,9 @@ function save() {
   writeJson(KEY, reviews);
 }
 
-let nextId = Date.now();
+// Unique across windows, which share the comments: ids counted from when a window
+// opened could match another's opened the same moment.
+const newId = () => crypto.randomUUID();
 
 /** The comments on `file` in the diff `where`. */
 export const commentsOn = (path, file, where) => (reviews[path] ?? []).filter((c) => c.file === file && c.where === where);
@@ -36,7 +38,7 @@ export const unsentComments = (path) => (reviews[path] ?? []).filter((c) => !c.s
 
 export function addComment(path, { file, where, lines, body }) {
   (reviews[path] ??= []).push({
-    id: nextId++,
+    id: newId(),
     file,
     where,
     lines: lines.map(({ kind, old, new: added, text }) => ({ kind, old: old ?? null, new: added ?? null, text })),
