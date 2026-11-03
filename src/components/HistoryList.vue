@@ -5,6 +5,7 @@ import { CircleAlert, History, Search } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
+import { setDragImage } from "../lib/dragImage.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -266,7 +267,7 @@ function onDragStart(index, event) {
   image.className = "drag-image";
   image.textContent = `${commit.short_id}  ${commit.summary}`;
   document.body.append(image);
-  event.dataTransfer.setDragImage(image, 14, image.offsetHeight / 2);
+  setDragImage(event, image);
   dragged.image = image;
 }
 

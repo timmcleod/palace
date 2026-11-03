@@ -22,6 +22,7 @@ import {
   tabLabel as label,
   tabsFor,
 } from "../lib/terminals.js";
+import { setDragImage } from "../lib/dragImage.js";
 
 // The panel below the history and details: the repository's terminals, in tabs. An
 // agent tab runs the command set for the repository: Claude Code unless it says
@@ -84,7 +85,7 @@ function onTabDragStart(event, tab) {
   if (icon) dragImage.append(icon);
   dragImage.append(label(tab));
   document.body.append(dragImage);
-  event.dataTransfer.setDragImage(dragImage, 14, dragImage.offsetHeight / 2);
+  setDragImage(event, dragImage);
 }
 
 function onTabDragEnd() {

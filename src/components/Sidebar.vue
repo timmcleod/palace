@@ -25,6 +25,7 @@ import { buildTree, flattenTree } from "../lib/tree.js";
 import { commandKey, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
+import { setDragImage } from "../lib/dragImage.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -237,7 +238,7 @@ function onDragStart(row, event) {
   if (icon) dragImage.append(icon);
   dragImage.append(row.divider ? row.label || "Divider" : row.label);
   document.body.append(dragImage);
-  event.dataTransfer.setDragImage(dragImage, 14, dragImage.offsetHeight / 2);
+  setDragImage(event, dragImage);
 }
 
 function onDragEnd() {
