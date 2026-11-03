@@ -66,7 +66,7 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
         ref="field"
         v-model="body"
         rows="3"
-        placeholder="What should the agent change here?"
+        placeholder="Discuss this with your agent…"
         spellcheck="true"
         @keydown="onKey"
       />
