@@ -6,7 +6,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { readJson, writeJson } from "./storage.js";
+import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
 import { isMac } from "./platform.js";
 
 // The terminals in the panel below the history, by repository: each tab is the user's
@@ -18,7 +18,7 @@ export const terminals = reactive({});
 let nextKey = 1;
 
 /** What the tab's called: the title its program gives it, or what it is. */
-export const tabLabel = (tab) => tab.title || (tab.kind === "claude" ? "Claude" : "Terminal");
+export const tabLabel = (tab) => tab.title || (tab.kind === "agent" ? tab.agent : "Terminal");
 
 /** The tabs with these terminal ids, each as { label, repository }. */
 export function describeTerminals(ids) {
@@ -35,13 +35,62 @@ export function tabsFor(path) {
   return terminals[path];
 }
 
-// --- Claude Code ------------------------------------------------------------------
+// --- Agents -----------------------------------------------------------------------
 
-// The command a Claude tab runs, for each repository that doesn't use the default.
-const CLAUDE_COMMANDS_KEY = "palace.claudeCommands";
-export const DEFAULT_CLAUDE_COMMAND = "claude";
+// The command an agent tab runs, for each repository that doesn't use the default:
+// Claude Code, or another agent that runs in a terminal, such as Codex or Gemini.
+// (Kept under its old name, from when only Claude was meant.)
+const AGENT_COMMANDS_KEY = "palace.claudeCommands";
+export const DEFAULT_AGENT_COMMAND = "claude";
 
-export const claudeCommand = (path) => readJson(CLAUDE_COMMANDS_KEY, {})[path] || DEFAULT_CLAUDE_COMMAND;
+const agentCommands = reactive(readJson(AGENT_COMMANDS_KEY, {}));
+onSavedElsewhere((key, value) => {
+  if (key !== AGENT_COMMANDS_KEY) return;
+  for (const path of Object.keys(agentCommands)) delete agentCommands[path];
+  Object.assign(agentCommands, value);
+});
+
+export const agentCommand = (path) => agentCommands[path] || DEFAULT_AGENT_COMMAND;
+
+export function setAgentCommand(path, command) {
+  if (command.trim() && command.trim() !== DEFAULT_AGENT_COMMAND) agentCommands[path] = command.trim();
+  else delete agentCommands[path];
+  writeJson(AGENT_COMMANDS_KEY, { ...agentCommands });
+}
+
+// What the agents people run in terminals are called, by their programs' names.
+const AGENT_NAMES = {
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+  copilot: "Copilot",
+  "cursor-agent": "Cursor",
+  opencode: "opencode",
+  aider: "Aider",
+  amp: "Amp",
+  goose: "Goose",
+  qwen: "Qwen",
+  crush: "Crush",
+};
+
+// Commands that run another, which isn't what to call the tab.
+const LAUNCHERS = new Set(["cd", "env", "exec", "npx", "bunx", "pnpx", "uvx", "nice", "time", "&&", ";"]);
+
+/**
+ * What to call an agent tab running `command`: the agent's name, where it's one
+ * Palace knows, as in "npx @openai/codex" or "cd api && claude", or else the
+ * program's, capitalized.
+ */
+export function agentName(command) {
+  const words = command.trim().split(/\s+/).filter((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+  const base = (word) => word.slice(word.lastIndexOf("/") + 1).toLowerCase();
+  for (const word of words) {
+    const known = AGENT_NAMES[base(word)];
+    if (known) return known;
+  }
+  const program = words.map(base).find((word) => !LAUNCHERS.has(word) && !word.startsWith("-"));
+  return program ? program[0].toUpperCase() + program.slice(1) : "Agent";
+}
 
 // How Anthropic says to install Claude Code, on a Mac and on Linux, and where to read
 // about other ways (https://code.claude.com/docs/en/setup).
@@ -51,13 +100,6 @@ export const CLAUDE_SETUP_URL = "https://code.claude.com/docs/en/setup";
 /** The program a command runs: its first word, after any VAR=value settings. */
 export function programOf(command) {
   return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
-}
-
-export function setClaudeCommand(path, command) {
-  const commands = readJson(CLAUDE_COMMANDS_KEY, {});
-  if (command.trim() && command.trim() !== DEFAULT_CLAUDE_COMMAND) commands[path] = command.trim();
-  else delete commands[path];
-  writeJson(CLAUDE_COMMANDS_KEY, commands);
 }
 
 // --- Colors -----------------------------------------------------------------------
@@ -157,7 +199,8 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
   const el = document.createElement("div");
   el.className = "terminal-host";
 
-  const tab = reactive({ key: nextKey++, kind, title: "", id: null });
+  // An agent tab is called after its agent until its program names it.
+  const tab = reactive({ key: nextKey++, kind, agent: kind === "agent" ? agentName(command ?? "") : null, title: "", id: null });
   // `front` is the program in front in it, as last checked (see checkFront).
   tab.session = markRaw({ term, fit, el, command, input, folder, started: false, typed: [], front: null, checkAt: 0 });
   term.onTitleChange((title) => (tab.title = title));
@@ -227,7 +270,7 @@ function checkFront(tab) {
  */
 function inClaude(tab) {
   const front = tab.session.front;
-  return front && front !== "node" ? front === "claude" : tab.kind === "claude";
+  return front && front !== "node" ? front === "claude" : tab.agent === "Claude";
 }
 
 function type(tab, data) {
@@ -267,7 +310,7 @@ export async function paste(tab) {
 // program in the terminal.
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
-  // Where Claude Code is running, in a Claude tab or started by hand, Shift+Enter starts
+  // Where Claude Code is running, in an agent tab or started by hand, Shift+Enter starts
   // a new line in its prompt instead of sending it, as Option+Enter does: Escape then
   // Return. Elsewhere it's Enter, as other programs expect.
   if (inClaude(tab) && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
