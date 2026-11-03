@@ -142,8 +142,7 @@ fn checkout_fork_pull(path: &str, remote: &str, number: u64, replace: bool) -> R
 
     let done = match repo.find_branch(&local, git2::BranchType::Local).ok().and_then(|b| b.get().target()) {
         None => {
-            crate::cli::git(path, &["branch", &local, &tip_hex], None)?;
-            crate::cli::git(path, &["switch", &local], None)?;
+            crate::cli::git(path, &["switch", "-c", &local, &tip_hex], None)?;
             format!("Checked out pull request #{number} as {local}.")
         }
         // Up to date, or with commits of the user's own on top: as it is.
@@ -158,8 +157,7 @@ fn checkout_fork_pull(path: &str, remote: &str, number: u64, replace: bool) -> R
             if checked_out {
                 crate::cli::git(path, &["merge", "--ff-only", &tip_hex], None)?;
             } else {
-                crate::cli::git(path, &["branch", "-f", &local, &tip_hex], None)?;
-                crate::cli::git(path, &["switch", &local], None)?;
+                switch_resetting(path, &local, &tip_hex)?;
             }
             format!("Brought {local} up to date with pull request #{number}.")
         }
@@ -176,14 +174,20 @@ fn checkout_fork_pull(path: &str, remote: &str, number: u64, replace: bool) -> R
             if checked_out {
                 crate::cli::git(path, &["reset", "--keep", &tip_hex], None)?;
             } else {
-                crate::cli::git(path, &["branch", "-f", &local, &tip_hex], None)?;
-                crate::cli::git(path, &["switch", &local], None)?;
+                switch_resetting(path, &local, &tip_hex)?;
             }
             format!("Pull request #{number} was rewritten; {local} now matches it.")
         }
     };
     repo.reference(&noted, tip, true, "Palace: pull request checked out").map_err(message)?;
     Ok(done)
+}
+
+/// Switches to `branch`, moved to `tip`, in one step: git checks out the files first
+/// and moves the branch only once that's worked, so if local changes are in the way,
+/// the branch, and any commits of the user's on it, stay where they were.
+fn switch_resetting(path: &str, branch: &str, tip: &str) -> Result<String, String> {
+    crate::cli::git(path, &["switch", "-C", branch, tip], None)
 }
 
 /// How many commits `tip` has that `base` doesn't.
@@ -672,6 +676,29 @@ mod tests {
         std::fs::write(t.dir.join("a.txt"), "edited\n").unwrap();
         run(true).unwrap();
         assert_eq!(t.head(), third);
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "edited\n");
+    }
+
+    #[test]
+    fn replacing_a_rewritten_pull_request_that_cant_be_switched_to_keeps_it() {
+        let server = TempRepo::bare("blocked-pull-server");
+        let t = TempRepo::clone_of("blocked-pull", &server);
+        t.commit(&[("a.txt", Some("1\n"))], "First");
+        let main = t.branch();
+        crate::cli::git(t.path(), &["push", "-q", "origin", &main], None).unwrap();
+        rewrite_pull(&t, &main, &[("pr.txt", Some("one\n"))]);
+        let run = |replace| checkout_pull_from(t.path(), "origin", 7, None, replace, &Running::default(), &mut |_| {});
+        run(false).unwrap();
+        let mine = t.commit(&[("mine.txt", Some("mine\n"))], "Mine");
+        crate::cli::git(t.path(), &["switch", "-q", &main], None).unwrap();
+
+        // The rewrite changes a.txt, which is edited here, so switching to it fails.
+        rewrite_pull(&t, &main, &[("a.txt", Some("theirs\n"))]);
+        std::fs::write(t.dir.join("a.txt"), "edited\n").unwrap();
+        assert!(run(true).is_err());
+        assert_eq!(t.branch(), main);
+        let kept = t.repo.find_branch("pr-7", git2::BranchType::Local).unwrap().get().target();
+        assert_eq!(kept, Some(mine));
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "edited\n");
     }
 
