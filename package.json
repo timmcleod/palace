@@ -4,9 +4,9 @@
   "version": "0.19.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/file-icons.mjs",
+    "predev": "node scripts/file-icons.mjs && node scripts/acknowledgments.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/file-icons.mjs",
+    "prebuild": "node scripts/file-icons.mjs && node scripts/acknowledgments.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",

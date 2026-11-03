@@ -3,7 +3,8 @@ import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FileCode, FileDiff, FolderDown, GitCommitHorizontal, Github, Palette, RefreshCw, Star } from "lucide-vue-next";
+import { FileCode, FileDiff, FolderDown, GitCommitHorizontal, Github, Heart, Palette, RefreshCw, Star } from "lucide-vue-next";
+import Acknowledgments from "./Acknowledgments.vue";
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
@@ -27,6 +28,7 @@ const SECTIONS = [
   { id: "files", label: "Files", icon: FileCode },
   { id: "repositories", label: "Repositories", icon: FolderDown },
   { id: "updates", label: "Updates", icon: RefreshCw },
+  { id: "acknowledgments", label: "Acknowledgments", icon: Heart },
 ];
 
 const scroller = ref(null);
@@ -568,6 +570,12 @@ const SAMPLE = {
               <label class="switch"><input v-model="settings.checkForUpdates" type="checkbox" /><span /></label>
             </div>
           </div>
+        </section>
+
+        <!-- Acknowledgments -->
+        <section id="settings-acknowledgments">
+          <h2>Acknowledgments</h2>
+          <Acknowledgments />
         </section>
       </div>
     </div>

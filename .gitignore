@@ -26,3 +26,5 @@ dist-ssr
 # Made by scripts/file-icons.mjs before dev and build
 public/file-icons/
 src/lib/fileIconMap.json
+# Made by scripts/acknowledgments.mjs before dev and build
+src/lib/acknowledgments.json
