@@ -64,6 +64,9 @@ const AGENT_NAMES = {
   claude: "Claude",
   codex: "Codex",
   gemini: "Gemini",
+  // Their npm packages, as run with npx: @anthropic-ai/claude-code, @google/gemini-cli.
+  "claude-code": "Claude",
+  "gemini-cli": "Gemini",
   copilot: "Copilot",
   "cursor-agent": "Cursor",
   opencode: "opencode",

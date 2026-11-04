@@ -232,7 +232,8 @@ async function editAgentCommand() {
 // with the menu still open.
 function moreMenu(event) {
   const missing = (program) => (installed.value[program] === false ? "Not installed" : "");
-  const others = AGENTS.filter((a) => a.program !== programOf(command.value)).map((a) => ({
+  // By name, as the tab's called: "npx @openai/codex" is Codex, though it runs npx.
+  const others = AGENTS.filter((a) => a.name !== agent.value).map((a) => ({
     label: `New ${a.name} Tab`,
     get detail() {
       return missing(a.program);
