@@ -3,7 +3,18 @@ import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FileCode, FileDiff, FolderDown, GitCommitHorizontal, Github, Heart, Palette, RefreshCw, Star } from "lucide-vue-next";
+import {
+  FileCode,
+  FileDiff,
+  FolderDown,
+  GitCommitHorizontal,
+  Github,
+  Heart,
+  Palette,
+  RefreshCw,
+  SquareTerminal,
+  Star,
+} from "lucide-vue-next";
 import Acknowledgments from "./Acknowledgments.vue";
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
@@ -26,6 +37,7 @@ const SECTIONS = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "diffs", label: "Diffs", icon: FileDiff },
   { id: "files", label: "Files", icon: FileCode },
+  { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "repositories", label: "Repositories", icon: FolderDown },
   { id: "updates", label: "Updates", icon: RefreshCw },
   { id: "acknowledgments", label: "Acknowledgments", icon: Heart },
@@ -514,6 +526,22 @@ const SAMPLE = {
         </section>
 
         <!-- Repositories -->
+        <section id="settings-terminal">
+          <h2>Terminal</h2>
+          <div class="card">
+            <div class="item">
+              <div class="text">
+                <div class="title">Notify when an agent finishes or needs you</div>
+                <div class="desc">
+                  While you're in another tab, repository or window, a notice says so, or the system's notification
+                  with another app in front. Agent tabs show it either way. Needs Claude Code 2.1.295 or later.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.agentNotifications" type="checkbox" /><span /></label>
+            </div>
+          </div>
+        </section>
+
         <section id="settings-repositories">
           <h2>Repositories</h2>
           <div class="card">

@@ -8,6 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { isMac } from "./platform.js";
+import { settings } from "./settings.js";
 import { OSC, SUPPORTED_REPLY, applyReport, describe, dropRunning, parseReport, summarize } from "./programStatus.js";
 
 // The terminals in the panel below the history, by repository: each tab is the user's
@@ -422,7 +423,7 @@ function updateStatus(path, tab) {
   if (before?.state === record.state && before?.kind === tab.status.kind) return;
   if (watched(tab)) return;
   tab.unseen = true;
-  notify(path, tab, record);
+  if (settings.agentNotifications) notify(path, tab, record);
 }
 
 // Whether the tab is in front of the user: shown, in the window they're using.

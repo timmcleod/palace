@@ -27,6 +27,10 @@ const DEFAULTS = {
   // Where new clones go, as <folder>/<owner>/<repository>; null until chosen, when
   // it's worked out from where recent repositories are (see clone.js).
   cloneFolder: null,
+  // Say when a terminal's agent finishes or needs you while you're looking elsewhere:
+  // a notice in the Palace window you're in, or the system's notification. The tabs
+  // show it either way.
+  agentNotifications: true,
   // Fetch the open repository's remotes every `fetchMinutes` minutes.
   fetchInBackground: true,
   fetchMinutes: 5,
