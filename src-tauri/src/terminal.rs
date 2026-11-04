@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, LazyLock, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -236,24 +236,35 @@ fn program_name(_pid: i32) -> Option<String> {
 /// say otherwise.
 #[tauri::command]
 pub async fn program_available(program: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || available(&program, &mut None)).await.unwrap_or(true)
+    tauri::async_runtime::spawn_blocking(move || available(&program)).await.unwrap_or(true)
 }
 
-/// Whether each of `programs` can be run, as `program_available` says, asking the
-/// user's shell for its PATH once at most.
+/// Whether each of `programs` can be run, as `program_available` says.
 #[tauri::command]
 pub async fn programs_available(programs: Vec<String>) -> Vec<bool> {
     let count = programs.len();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut login = None;
-        programs.iter().map(|program| available(program, &mut login)).collect()
-    })
-    .await
-    .unwrap_or_else(|_| vec![true; count])
+    tauri::async_runtime::spawn_blocking(move || programs.iter().map(|program| available(program)).collect())
+        .await
+        .unwrap_or_else(|_| vec![true; count])
 }
 
-/// `login` keeps the shell's PATH once it's been asked for, None until then.
-fn available(program: &str, login: &mut Option<Option<String>>) -> bool {
+/// The PATH the user's login shell sets up, as last asked for: starting the shell can
+/// take a moment, and the terminal panel's ⋯ menu asks each time it opens, so the
+/// answer is kept for a minute. None if the shell didn't say.
+fn shell_path() -> Option<String> {
+    static KEPT: Mutex<Option<(Instant, Option<String>)>> = Mutex::new(None);
+    // Held while the shell runs, so that calls at the same time start it only once.
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, path)) = kept.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(60)) {
+        return path.clone();
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let path = crate::shell_path::login_path(&shell, Duration::from_secs(5));
+    *kept = Some((Instant::now(), path.clone()));
+    path
+}
+
+fn available(program: &str) -> bool {
     let program = program.trim();
     if program.is_empty() {
         return false;
@@ -281,12 +292,8 @@ fn available(program: &str, login: &mut Option<Option<String>>) -> bool {
     if ["/opt/homebrew/bin", "/usr/local/bin"].iter().any(|dir| Path::new(dir).join(program).is_file()) {
         return true;
     }
-    let path = login.get_or_insert_with(|| {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        crate::shell_path::login_path(&shell, Duration::from_secs(5))
-    });
-    match path {
-        Some(path) => on(OsStr::new(path)),
+    match shell_path() {
+        Some(path) => on(OsStr::new(&path)),
         None => true,
     }
 }
@@ -452,13 +459,13 @@ mod tests {
 
     #[test]
     fn finding_programs() {
-        assert!(available("sh", &mut None));
-        assert!(available("/bin/sh", &mut None));
-        assert!(!available("palace-no-such-program", &mut None));
-        assert!(!available("/no/such/program", &mut None));
-        assert!(!available("  ", &mut None));
+        assert!(available("sh"));
+        assert!(available("/bin/sh"));
+        assert!(!available("palace-no-such-program"));
+        assert!(!available("/no/such/program"));
+        assert!(!available("  "));
         // Relative to wherever it's run, so not something to check here.
-        assert!(available("./bin/claude", &mut None));
+        assert!(available("./bin/claude"));
     }
 
     /// A terminal whose output is collected, and its id.

@@ -259,19 +259,19 @@ function checkFront(tab) {
   }, 500);
 }
 
-// Programs agents run as, rather than as themselves, as Gemini CLI and Codex installed
-// with npm run as node.
-const RUNTIMES = /^(node|bun|deno|python[\d.]*)$/i;
+// What agents run as, rather than as themselves: Gemini CLI and Codex installed with npm
+// run as node.
+const RUNTIME = "node";
 
 /**
  * Which agent Palace offers is in front in the tab, as far as it can tell, or null:
- * the one the program in front is, or where that's a runtime one could run as, or
+ * the one the program in front is, or where that's node, which one could run as, or
  * not known, the one the tab was opened for. Started by hand in a terminal tab, it's
  * known where it runs as itself, as Claude Code does.
  */
 function agentInFront(tab) {
   const front = tab.session.front;
-  if (front && !RUNTIMES.test(front)) return agentNamed(agentOfProgram(front));
+  if (front && front !== RUNTIME) return agentNamed(agentOfProgram(front));
   return agentNamed(tab.agent);
 }
 
