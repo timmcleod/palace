@@ -6,7 +6,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { isMac } from "./platform.js";
 import { settings } from "./settings.js";
 import { OSC, SUPPORTED_REPLY, applyReport, describe, dropRunning, parseReport, summarize } from "./programStatus.js";
@@ -471,7 +472,23 @@ async function notify(path, tab, record) {
   allowed ??= isPermissionGranted()
     .then((granted) => granted || requestPermission().then((answer) => answer === "granted"))
     .catch(() => false);
-  if (await allowed) sendNotification({ title: text.title, body: plain(body) });
+  if (!(await allowed)) return;
+  // Listening first: only a notification sent while something listens reports a click.
+  await listenForClicks();
+  sendNotification({ title: text.title, body: plain(body), extra: { path, key: tab.key } });
+}
+
+// Clicking one of this window's notifications brings its tab forward, as clicking a
+// notice does: the window comes forward, with the repository and the tab showing.
+let listening = null;
+function listenForClicks() {
+  listening ??= onAction((performed) => {
+    const { path, key } = performed?.notification?.extra ?? {};
+    if (typeof path !== "string" || typeof key !== "number") return;
+    const label = getCurrentWebviewWindow().label;
+    invoke("show_terminal_tab", { label, path, key }).catch(() => {});
+  }).catch(() => null);
+  return listening;
 }
 
 // What the program said is shown as it is. On Linux, notification servers read the
