@@ -14,7 +14,7 @@ const MAX_RECORDS = 64;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\x00-\x1f\x7f-\x9f]/;
 // Characters that reorder or hide text, which a message shouldn't bring into a notification.
-const INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
 
 // Standard base64 of UTF-8, without control characters, or undefined if it isn't.
 function decode(value, maxEncoded, maxDecoded) {

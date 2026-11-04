@@ -525,7 +525,7 @@ const SAMPLE = {
           </div>
         </section>
 
-        <!-- Repositories -->
+        <!-- Terminal -->
         <section id="settings-terminal">
           <h2>Terminal</h2>
           <div class="card">
@@ -542,6 +542,7 @@ const SAMPLE = {
           </div>
         </section>
 
+        <!-- Repositories -->
         <section id="settings-repositories">
           <h2>Repositories</h2>
           <div class="card">
