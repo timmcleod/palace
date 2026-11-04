@@ -323,11 +323,12 @@ function onKey(tab, event) {
   // tab, leaving Ctrl+C to stop what's running and Ctrl+V to programs that use it: Vim,
   // and Claude Code, which pastes an image with it. Cmd+V does on a Mac, through the Edit
   // menu. Cmd+C is copied here: WebKit sees no selection in the page, since the terminal
-  // draws its own, so its Copy is turned off and macOS beeps.
+  // draws its own, so its Copy is turned off and macOS beeps. With nothing selected, it
+  // does nothing, quietly: a program like Claude Code may have selected and copied text
+  // itself, with the mouse.
   if (isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.code === "KeyC") {
-    if (!tab.session.term.hasSelection()) return true;
     event.preventDefault();
-    copySelection(tab);
+    if (tab.session.term.hasSelection()) copySelection(tab);
     return false;
   }
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
