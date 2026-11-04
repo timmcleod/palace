@@ -45,6 +45,12 @@ function apply() {
   const root = document.documentElement;
   const dark = settings.theme === "dark" || (settings.theme === "system" && systemDark.matches);
   root.dataset.theme = dark ? "dark" : "light";
+  // For the next window to start with, before it's read the settings (see index.html).
+  try {
+    localStorage.setItem("palace.theme", root.dataset.theme);
+  } catch {
+    // Without it, a new window starts light, then turns dark.
+  }
   root.dataset.diffColors = settings.diffColors;
   root.style.setProperty("--tab-size", String(settings.tabSize));
 }

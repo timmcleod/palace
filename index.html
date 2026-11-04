@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/palace.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Palace</title>
+    <script>
+      // The theme the last window showed, so a new one starts dark if it is, rather than
+      // flashing light until the settings load (see apply in settings.js).
+      try {
+        const theme = localStorage.getItem("palace.theme");
+        if (theme) document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
 
   <body>

@@ -1193,7 +1193,10 @@ watch(
 onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
 
 /** Opens a new window, to open another repository in, side by side with this one. */
-const newWindow = () => invoke("new_window").catch((e) => tell("Couldn't Open a Window", String(e)));
+const newWindow = () =>
+  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark" }).catch((e) =>
+    tell("Couldn't Open a Window", String(e)),
+  );
 const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 // Events for this window only: each window watches its own repository.

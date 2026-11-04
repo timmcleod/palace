@@ -6,7 +6,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, EventTarget, Manager, State, WebviewWindow, WebviewWindowBuilder};
+use tauri::window::Color;
+use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Theme, WebviewWindow, WebviewWindowBuilder};
 
 /// The repository open in each window, by window.
 #[derive(Default)]
@@ -90,9 +91,10 @@ struct TerminalTab {
 }
 
 /// Opens a new window, a little below and to the right of `window`, with no repository
-/// open yet.
+/// open yet. `dark` is the theme Palace is showing, which the window takes from the
+/// start: otherwise it shows white until its page has loaded and turned it dark.
 #[tauri::command]
-pub async fn new_window(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+pub async fn new_window(app: AppHandle, window: WebviewWindow, dark: bool) -> Result<(), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let mut builder = WebviewWindowBuilder::from_config(&app, &config).map_err(|e| format!("Couldn't open a window: {e}"))?;
@@ -100,9 +102,16 @@ pub async fn new_window(app: AppHandle, window: WebviewWindow) -> Result<(), Str
         let position = position.to_logical::<f64>(scale);
         builder = builder.position(position.x + CASCADE, position.y + CASCADE);
     }
+    // The sidebar's color in each theme (--sidebar-bg in styles.css), the page's background.
+    let (theme, background) = if dark { (Theme::Dark, Color(0x21, 0x2a, 0x3a, 0xff)) } else { (Theme::Light, Color(0xf4, 0xf4, 0xf4, 0xff)) };
+    // On Linux the window's theme is the system's as it's made, whatever it's asked to be,
+    // and that's every window's title bar: it's made hidden, and shown once it's set.
+    builder = builder.theme(Some(theme)).background_color(background).visible(false);
     let opened = builder.build().map_err(|e| format!("Couldn't open a window: {e}"))?;
+    let _ = opened.set_theme(Some(theme));
     #[cfg(target_os = "linux")]
     crate::no_pinch_zoom(&opened);
+    let _ = opened.show();
     let _ = opened.set_focus();
     Ok(())
 }
