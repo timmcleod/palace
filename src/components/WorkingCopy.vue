@@ -77,28 +77,35 @@ const fullyStaged = (file) => file.staged && !file.unstaged;
 // From a row's checkbox, `event` is its click.
 function toggle(file, event) {
   // The boxes stay enabled while git works, so they don't all flicker gray with each
-  // click: one clicked meanwhile does nothing.
-  if (busy.value) {
-    event?.preventDefault();
-    return;
+  // click: one clicked meanwhile does nothing. A conflicted file's box waits for git,
+  // as what staging it does depends on the conflict.
+  if (busy.value || file.conflicted) event?.preventDefault();
+  if (!busy.value) toggleFiles([file]);
+}
+
+// Stages the files, or unstages them if they're all staged already, as Space does for
+// the selected files.
+function toggleFiles(list) {
+  if (busy.value || !list.length) return;
+  const staging = !list.every(fullyStaged);
+  // The boxes change at once: reading the status again after staging can take a moment
+  // in a working copy with many changes, and that reading puts them right if this was
+  // wrong. Conflicted files wait for it.
+  const shown = new Map();
+  for (const file of list) {
+    if (file.conflicted) continue;
+    shown.set(
+      file,
+      staging
+        ? { staged: file.staged ?? (file.unstaged === "untracked" ? "added" : file.unstaged), unstaged: null }
+        : { staged: null, unstaged: file.staged === "added" ? "untracked" : file.staged },
+    );
   }
-  const staging = !fullyStaged(file);
-  // The box changes at once, as clicked: reading the status again after staging can
-  // take a moment in a working copy with many changes, and that reading puts it right
-  // if this was wrong. A conflicted file's box waits for it, as what staging it does
-  // depends on the conflict.
-  if (file.conflicted) {
-    event?.preventDefault();
-  } else {
-    const shown = staging
-      ? { staged: file.staged ?? (file.unstaged === "untracked" ? "added" : file.unstaged), unstaged: null }
-      : { staged: null, unstaged: file.staged === "added" ? "untracked" : file.staged };
-    files.value = files.value.map((f) => (f === file ? { ...f, ...shown } : f));
-  }
+  if (shown.size) files.value = files.value.map((f) => (shown.has(f) ? { ...f, ...shown.get(f) } : f));
   if (staging) {
-    run("stage_files", { files: [file.path] });
+    run("stage_files", { files: list.filter((f) => !fullyStaged(f)).map((f) => f.path) });
   } else {
-    run("unstage_files", { files: pathsOf(file) });
+    run("unstage_files", { files: list.flatMap(pathsOf) });
   }
 }
 
@@ -179,6 +186,12 @@ function onListKeydown(event) {
   if ((event.ctrlKey || event.metaKey) && event.key === "a" && list.length) {
     event.preventDefault();
     chosen.value = new Set(list.map((f) => f.path));
+    return;
+  }
+  // Space stages the selected files, or unstages them, rather than scrolling.
+  if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    toggleFiles(list.filter((f) => chosen.value.has(f.path)));
     return;
   }
   if ((event.key !== "ArrowDown" && event.key !== "ArrowUp") || !list.length) return;
