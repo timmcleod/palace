@@ -2276,7 +2276,7 @@ function startResize(event, pane, min, max) {
 
   <main v-else class="welcome">
     <div class="welcome-card">
-      <FolderGit2 :size="44" :stroke-width="1.25" class="welcome-icon" />
+      <img src="/palace.svg" alt="" class="welcome-icon" />
       <h1>Palace</h1>
       <p class="dim">Open a Git repository to get started.</p>
 
@@ -2720,8 +2720,12 @@ function startResize(event, pane, min, max) {
   height: 28px;
 }
 
+/* Palace's icon. Its tile leaves a margin, as desktop icons do, which the negative
+   margin takes back. */
 .welcome-icon {
-  color: var(--accent);
+  width: 72px;
+  height: 72px;
+  margin: -4px;
 }
 
 .welcome h1 {
