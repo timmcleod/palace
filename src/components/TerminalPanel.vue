@@ -562,6 +562,14 @@ function startResize(event) {
   clip-path: inset(0 -2ch 0 0);
 }
 
+/* xterm draws the selection as solid blocks over the rows, which would hide the
+   selected text; the rows paint their selected letters in the selection's color
+   themselves, so they go on top, and the blocks fill in past the ends of the lines. */
+.terminal-body :deep(.xterm-rows) {
+  position: relative;
+  z-index: 2;
+}
+
 .terminal-empty {
   position: absolute;
   inset: 34px 0 0;
