@@ -659,6 +659,15 @@ function onNavKeydown(event) {
     newWindow();
     return;
   }
+  // Ctrl+' (Cmd+') shows the terminal panel and goes to it, or from it, hides it.
+  // Programs in a terminal can't use it, so it's Palace's there too. By the key, not the
+  // character, which needs Shift on some layouts.
+  if (commandKey(event) && !event.shiftKey && !event.altKey && event.code === "Quote" && overview.value && !dialogOpen()) {
+    event.preventDefault();
+    if (inTerminal && terminalOpen.value) terminalOpen.value = false;
+    else showTerminal();
+    return;
+  }
   // Whatever's typed in a terminal is the terminal's.
   if (inTerminal) return;
   // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
@@ -2041,7 +2050,7 @@ function startResize(event, pane, min, max) {
         <button
           class="icon-button terminal-toggle"
           :class="{ active: terminalOpen }"
-          :title="terminalOpen ? 'Hide Terminal' : 'Terminal'"
+          :title="`${terminalOpen ? 'Hide Terminal' : 'Terminal'} (${shortcut('Ctrl+\'')})`"
           @click="toggleTerminal"
         >
           <SquareTerminal :size="18" :stroke-width="1.5" />

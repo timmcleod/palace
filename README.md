@@ -32,7 +32,7 @@ When your agent writes the code, your job changes: less typing, more steering, r
 
 ## Features
 
-- **Claude Code:** a Claude tab starts Claude Code in the repository you're looking at, with a command you set for each repository, and its changes appear in the Working Copy as it works. Prefer another agent that runs in a terminal, such as Codex or Gemini? Set its command instead, and the tab is named after it. Ordinary terminal tabs sit beside it for your dev server or tests, and keep running while you look at another repository.
+- **Claude Code:** a Claude tab starts Claude Code in the repository you're looking at, with a command you set for each repository, and its changes appear in the Working Copy as it works. Prefer another agent that runs in a terminal, such as Codex or Gemini? Set its command instead, and the tab is named after it. Ordinary terminal tabs sit beside it for your dev server or tests, and keep running while you look at another repository. Ctrl+' (⌘' on a Mac) shows and hides the panel.
 - **Files:** browse the working copy and edit files in place, with syntax highlighting, marks on lines changed since the last commit, Ctrl+P (⌘P on a Mac) to find a file, and colorful icons by file type. Palace isn't an IDE: no autocomplete, debugger or plugins, on purpose.
 - **Windows:** open a window for each repository with Ctrl+N (⌘N), each with its own terminals. Closing a window or quitting with a busy terminal or an unsaved file asks first.
 - **History:** every commit on a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash. Search files and commits together with Ctrl+F (⌘F on a Mac), browse each commit's files, and blame them line by line.

@@ -331,6 +331,8 @@ function onKey(tab, event) {
     if (tab.session.term.hasSelection()) copySelection(tab);
     return false;
   }
+  // Ctrl+' (Cmd+') shows and hides the panel, in App.vue, and isn't typed.
+  if ((isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey && event.code === "Quote") return false;
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {
       event.preventDefault();

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-vue-next";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
-import { isMac } from "../lib/platform.js";
+import { isMac, shortcut } from "../lib/platform.js";
 import {
   agentCommand,
   agentName,
@@ -294,7 +294,7 @@ function startResize(event) {
         <Sparkle :size="13" :stroke-width="1.75" /> {{ agent }}
       </button>
       <button class="icon-button small" title="More" @click="moreMenu"><Ellipsis :size="15" /></button>
-      <button class="icon-button small" title="Hide" @click="emit('hide')"><ChevronDown :size="15" /></button>
+      <button class="icon-button small" :title="`Hide (${shortcut('Ctrl+\'')})`" @click="emit('hide')"><ChevronDown :size="15" /></button>
     </header>
     <div ref="body" class="terminal-body" @contextmenu="terminalMenu" />
     <div v-if="!group.tabs.length" class="terminal-empty">
