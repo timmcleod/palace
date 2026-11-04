@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { MessageSquarePlus } from "lucide-vue-next";
 import { wordHighlights } from "../lib/wordDiff.js";
 import { combine, highlightBlocks } from "../lib/highlight.js";
@@ -257,11 +257,33 @@ function onKey(event) {
   startComment(picked.value.hunk, Math.max(...picked.value.lines));
 }
 onMounted(() => window.addEventListener("keydown", onKey));
+
+// When a comment's row goes, as on canceling one, WebKit can leave the table as tall as
+// it was, with a gap under the last line until something else has it laid out again
+// (seen in the commit details' list of many files). Taking the table out of the layout
+// for a moment has it laid out afresh. The diff keeps its height meanwhile, so what's
+// scrolled near the end doesn't jump.
+const root = ref(null);
+watch(
+  () => [draft.value, comments.value.length],
+  async () => {
+    await nextTick();
+    const el = root.value;
+    if (!el) return;
+    el.style.minHeight = `${el.offsetHeight}px`;
+    for (const table of el.querySelectorAll("table")) {
+      table.style.display = "none";
+      void table.offsetHeight;
+      table.style.display = "";
+    }
+    el.style.minHeight = "";
+  },
+);
 onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </script>
 
 <template>
-  <div class="diff-table">
+  <div ref="root" class="diff-table">
     <ImageDiff v-if="diff.images" :images="diff.images" />
     <div v-if="placed.unplaced.length || (draft && !placed.draft)" class="unplaced">
       <p class="unplaced-title">On lines that have changed since</p>
