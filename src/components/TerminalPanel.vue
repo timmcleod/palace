@@ -472,6 +472,16 @@ function startResize(event) {
   height: 100%;
 }
 
+/* xterm cuts each row off at its columns' width, but WebKit rounds the width of every
+   letter a little, and across a long row that adds up to a few pixels: enough to cut
+   off part of the last letter. The row's letters may run past it into the room kept
+   for the scrollbar, still cut off above and below so they don't spill onto the next
+   row. */
+.terminal-body :deep(.xterm-rows > div) {
+  overflow: visible !important;
+  clip-path: inset(0 -2ch 0 0);
+}
+
 .terminal-empty {
   position: absolute;
   inset: 34px 0 0;
