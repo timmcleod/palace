@@ -95,7 +95,8 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
   position: sticky;
   left: 0;
   box-sizing: border-box;
-  width: min(640px, 100%);
+  /* Within the room it has, its margins included, so a narrow diff doesn't scroll. */
+  width: min(640px, calc(100% - 20px));
   margin: 6px 10px;
   padding: 8px 10px;
   border: 1px solid var(--border);
