@@ -3016,7 +3016,7 @@ dependencies = [
 
 [[package]]
 name = "palace"
-version = "0.21.3"
+version = "0.21.4"
 dependencies = [
  "base64 0.23.1",
  "git2",
