@@ -321,8 +321,15 @@ function onKey(tab, event) {
   }
   // On Linux, as in its terminals, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, in every
   // tab, leaving Ctrl+C to stop what's running and Ctrl+V to programs that use it: Vim,
-  // and Claude Code, which pastes an image with it. Cmd+C and Cmd+V do on a Mac, through
-  // the Edit menu.
+  // and Claude Code, which pastes an image with it. Cmd+V does on a Mac, through the Edit
+  // menu. Cmd+C is copied here: WebKit sees no selection in the page, since the terminal
+  // draws its own, so its Copy is turned off and macOS beeps.
+  if (isMac && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.code === "KeyC") {
+    if (!tab.session.term.hasSelection()) return true;
+    event.preventDefault();
+    copySelection(tab);
+    return false;
+  }
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {
       event.preventDefault();
