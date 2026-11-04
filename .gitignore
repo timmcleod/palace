@@ -1,0 +1,12 @@
+# The website, on its own branch. These are the app's files, from main, which stay
+# behind in a checkout switched to this branch: they're not part of the site.
+node_modules
+dist
+src
+src-tauri
+public
+.idea
+.vscode
+.DS_Store
+*.log
+*.local
