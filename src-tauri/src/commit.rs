@@ -13,6 +13,8 @@ pub struct CommitDetails {
     files: Vec<ChangedFile>,
     additions: usize,
     deletions: usize,
+    /// Whether the files' lines were counted; see MAX_COUNTED.
+    counted: bool,
 }
 
 #[derive(Serialize)]
@@ -104,7 +106,7 @@ fn read_details(path: &str, id: &str) -> Result<CommitDetails, git2::Error> {
     let repo = Repository::discover(path)?;
     let commit = repo.find_commit(Oid::from_str(id)?)?;
     let diff = commit_diff(&repo, &commit)?;
-    let files = changed_files(&diff)?;
+    let (files, counted) = changed_files(&diff)?;
 
     Ok(CommitDetails {
         id: commit.id().to_string(),
@@ -115,16 +117,25 @@ fn read_details(path: &str, id: &str) -> Result<CommitDetails, git2::Error> {
         tree_id: commit.tree_id().to_string(),
         additions: files.iter().map(|f| f.additions).sum(),
         deletions: files.iter().map(|f| f.deletions).sum(),
+        counted,
         files,
     })
 }
 
-/// Each file a diff changes, with its line counts.
-pub(crate) fn changed_files(diff: &Diff) -> Result<Vec<ChangedFile>, git2::Error> {
+/// Past this many files, a diff's lines aren't counted: counting reads every file in
+/// it, both versions, which for a commit adding a vendored folder of tens of thousands
+/// of files took seconds.
+const MAX_COUNTED: usize = 5000;
+
+/// Each file a diff changes, with its line counts, and whether they were counted (see
+/// MAX_COUNTED).
+pub(crate) fn changed_files(diff: &Diff) -> Result<(Vec<ChangedFile>, bool), git2::Error> {
+    let counted = diff.deltas().len() <= MAX_COUNTED;
     let mut files = Vec::new();
     for (index, delta) in diff.deltas().enumerate() {
         let (mut additions, mut deletions, mut binary) = (0, 0, delta.flags().is_binary());
-        if let Some(patch) = Patch::from_diff(diff, index)? {
+        if !counted {
+        } else if let Some(patch) = Patch::from_diff(diff, index)? {
             (_, additions, deletions) = patch.line_stats()?;
             // Binary detection needs the file contents, which loading the patch reads.
             binary |= patch.delta().flags().is_binary();
@@ -150,7 +161,7 @@ pub(crate) fn changed_files(diff: &Diff) -> Result<Vec<ChangedFile>, git2::Error
             binary,
         });
     }
-    Ok(files)
+    Ok((files, counted))
 }
 
 fn read_file_diff(path: &str, id: &str, index: usize, max_lines: Option<usize>) -> Result<FileDiff, git2::Error> {

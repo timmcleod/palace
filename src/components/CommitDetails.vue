@@ -95,7 +95,10 @@ function plural(count, word) {
 
 const changeSummary = computed(() => {
   const d = details.value;
-  return `Showing ${plural(d.files.length, "changed file")} with ${plural(d.additions, "addition")} and ${plural(d.deletions, "deletion")}`;
+  const files = plural(d.files.length, "changed file");
+  // Past a few thousand files, the lines aren't counted (see commit.rs).
+  if (!d.counted) return `Showing ${files}`;
+  return `Showing ${files} with ${plural(d.additions, "addition")} and ${plural(d.deletions, "deletion")}`;
 });
 
 function splitPath(path) {
@@ -172,7 +175,7 @@ function splitPath(path) {
             <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
           </span>
           <span v-if="file.binary" class="counts dim">binary</span>
-          <span v-else class="counts">
+          <span v-else-if="details.counted" class="counts">
             <span v-if="file.additions" class="plus">+{{ file.additions }}</span>
             <span v-if="file.deletions" class="minus">−{{ file.deletions }}</span>
           </span>

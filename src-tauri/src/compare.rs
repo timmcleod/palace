@@ -22,6 +22,8 @@ pub struct Comparison {
     files: Vec<ChangedFile>,
     additions: usize,
     deletions: usize,
+    /// Whether the files' lines were counted, as for a commit's details.
+    counted: bool,
 }
 
 #[tauri::command]
@@ -47,7 +49,7 @@ fn read_comparison(path: &str, base: &str, head: &str) -> Result<Comparison, git
     let (base, head) = (resolve(&repo, base)?, resolve(&repo, head)?);
     let merge_base = repo.merge_base(base.id(), head.id()).ok();
     let (ahead, behind) = repo.graph_ahead_behind(head.id(), base.id())?;
-    let files = changed_files(&changes(&repo, &base, &head)?)?;
+    let (files, counted) = changed_files(&changes(&repo, &base, &head)?)?;
     Ok(Comparison {
         base_id: base.id().to_string(),
         head_id: head.id().to_string(),
@@ -56,6 +58,7 @@ fn read_comparison(path: &str, base: &str, head: &str) -> Result<Comparison, git
         behind,
         additions: files.iter().map(|f| f.additions).sum(),
         deletions: files.iter().map(|f| f.deletions).sum(),
+        counted,
         files,
     })
 }
