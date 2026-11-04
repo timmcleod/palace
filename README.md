@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  Run your agent. Review its work. Ship it.<br>
-  Claude Code, your files and a full Git client in one fast window, for Linux and macOS.<br>
+  <strong>Run your agent. Review its work. Ship it.</strong><br>
+  Your agent writes the code. Palace shows you every line it changed, so you can keep what's right and commit it clean. For Linux and macOS.<br>
   <a href="https://timmcleod.github.io/palace/"><strong>Website</strong></a> ·
   <a href="https://github.com/timmcleod/palace/releases/latest"><strong>Download</strong></a> ·
   <a href="LICENSE">MIT license</a>
@@ -20,9 +20,15 @@
   </picture>
 </p>
 
-## Features
+## Why Palace
 
-When your agent writes the code, your job is steering it, reading what it changed and deciding what to commit. Palace keeps all of that in one window.
+When your agent writes the code, your job changes: less typing, more steering, reading diffs and deciding what to commit. Most tools weren't built for that, so you end up gluing a Git client, an editor and a terminal together yourself. Palace puts all three in one window.
+
+- **Run your agent beside the repository.** A Claude tab starts Claude Code in the repository you're looking at (or Codex, Gemini or any agent that runs in a terminal), and its changes appear in the Working Copy as it works.
+- **Review every line it changed.** Read each change as a diff, comment on the lines you'd change and send your comments back to the agent, or fix things yourself in the editor.
+- **Ship clean commits.** Stage or discard whole files, single chunks or individual lines, then commit and push with your own `git`, hooks and signing.
+
+## Features
 
 - **Claude Code:** a Claude tab starts Claude Code in the repository you're looking at, with a command you set for each repository, and its changes appear in the Working Copy as it works. Prefer another agent that runs in a terminal, such as Codex or Gemini? Set its command instead, and the tab is named after it. Ordinary terminal tabs sit beside it for your dev server or tests, and keep running while you look at another repository.
 - **Files:** browse the working copy and edit files in place, with syntax highlighting, marks on lines changed since the last commit, Ctrl+P (⌘P on a Mac) to find a file, and colorful icons by file type. Palace isn't an IDE: no autocomplete, debugger or plugins, on purpose.
