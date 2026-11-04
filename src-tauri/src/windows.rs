@@ -85,9 +85,9 @@ pub fn show_terminal_tab(app: AppHandle, label: String, path: String, key: u32) 
 }
 
 #[derive(Serialize, Clone)]
-struct TerminalTab {
-    path: String,
-    key: u32,
+pub(crate) struct TerminalTab {
+    pub path: String,
+    pub key: u32,
 }
 
 /// Opens a new window, a little below and to the right of `window`, with no repository

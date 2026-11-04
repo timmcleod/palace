@@ -43,6 +43,9 @@ tauri-plugin-notification = "2"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 # The web view's own widget, for turning off pinch to zoom. The versions Tauri uses.
 gtk = "0.18"
+# For sending notifications to the desktop's server ourselves (see notify.rs). The
+# version the notification plugin uses.
+zbus = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

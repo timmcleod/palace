@@ -3086,6 +3086,7 @@ dependencies = [
  "tauri-plugin-updater",
  "trash",
  "ureq",
+ "zbus 5.19.0",
 ]
 
 [[package]]

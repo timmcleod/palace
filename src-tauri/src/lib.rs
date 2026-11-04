@@ -9,6 +9,7 @@ mod git;
 mod github;
 mod history;
 mod issues;
+mod notify;
 mod open;
 mod pulls;
 mod quit;
@@ -128,6 +129,8 @@ pub fn run() {
             windows::show_window_with,
             windows::show_notice,
             windows::show_terminal_tab,
+            notify::notify_tab,
+            notify::withdraw_notifications,
             windows::new_window,
             quit::set_unsaved_edits,
             cli::install_git_tools,

@@ -350,7 +350,7 @@ export async function paste(tab) {
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
   // Typing in it is looking at it.
-  tab.unseen = false;
+  markTabSeen(tab);
   // Where an agent Palace knows is running, Shift+Enter starts a new line in its prompt
   // instead of sending it, typing what that agent takes for one (see AGENTS). Elsewhere
   // it's Enter, as other programs expect.
@@ -419,7 +419,7 @@ function updateStatus(path, tab) {
   tab.status = statusOf(record);
   // Working again, it's been answered, or set going again, so seen. Gone idle, the
   // result's still there to look at, or the question to answer.
-  if (record?.state === "working") tab.unseen = false;
+  if (record?.state === "working") markTabSeen(tab);
   if (!record || !CALLS.has(record.state)) return;
   if (before?.state === record.state && before?.kind === tab.status.kind) return;
   if (watched(tab)) return;
@@ -433,8 +433,16 @@ const watched = (tab) => document.hasFocus() && tab.session.el.isConnected && ta
 /** Marks the tabs being looked at as seen, as when the window or the tab is shown. */
 export function markSeen() {
   for (const group of Object.values(terminals)) {
-    for (const tab of group.tabs) if (tab.unseen && watched(tab)) tab.unseen = false;
+    for (const tab of group.tabs) if (tab.unseen && watched(tab)) markTabSeen(tab);
   }
+}
+
+// Seen, its notifications are done with: on Linux they're withdrawn from the desktop's
+// list, and so from the count on Palace's icon in the dock (see notify.rs).
+function markTabSeen(tab) {
+  if (!tab.unseen) return;
+  tab.unseen = false;
+  if (!isMac) invoke("withdraw_notifications", { key: tab.key }).catch(() => {});
 }
 window.addEventListener("focus", markSeen);
 
@@ -473,6 +481,9 @@ async function notify(path, tab, record) {
     .then((granted) => granted || requestPermission().then((answer) => answer === "granted"))
     .catch(() => false);
   if (!(await allowed)) return;
+  // On Linux, Palace sends it itself, to raise the window with the token the desktop
+  // gives with a click (see notify.rs).
+  if (!isMac && (await invoke("notify_tab", { title: text.title, body: plain(body), path, key: tab.key }).then(() => true, () => false))) return;
   // Listening first: only a notification sent while something listens reports a click.
   await listenForClicks();
   sendNotification({ title: text.title, body: plain(body), extra: { path, key: tab.key } });
