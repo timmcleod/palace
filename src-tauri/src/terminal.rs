@@ -236,10 +236,24 @@ fn program_name(_pid: i32) -> Option<String> {
 /// say otherwise.
 #[tauri::command]
 pub async fn program_available(program: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || available(&program)).await.unwrap_or(true)
+    tauri::async_runtime::spawn_blocking(move || available(&program, &mut None)).await.unwrap_or(true)
 }
 
-fn available(program: &str) -> bool {
+/// Whether each of `programs` can be run, as `program_available` says, asking the
+/// user's shell for its PATH once at most.
+#[tauri::command]
+pub async fn programs_available(programs: Vec<String>) -> Vec<bool> {
+    let count = programs.len();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut login = None;
+        programs.iter().map(|program| available(program, &mut login)).collect()
+    })
+    .await
+    .unwrap_or_else(|_| vec![true; count])
+}
+
+/// `login` keeps the shell's PATH once it's been asked for, None until then.
+fn available(program: &str, login: &mut Option<Option<String>>) -> bool {
     let program = program.trim();
     if program.is_empty() {
         return false;
@@ -267,9 +281,12 @@ fn available(program: &str) -> bool {
     if ["/opt/homebrew/bin", "/usr/local/bin"].iter().any(|dir| Path::new(dir).join(program).is_file()) {
         return true;
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    match crate::shell_path::login_path(&shell, Duration::from_secs(5)) {
-        Some(path) => on(OsStr::new(&path)),
+    let path = login.get_or_insert_with(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        crate::shell_path::login_path(&shell, Duration::from_secs(5))
+    });
+    match path {
+        Some(path) => on(OsStr::new(path)),
         None => true,
     }
 }
@@ -435,13 +452,13 @@ mod tests {
 
     #[test]
     fn finding_programs() {
-        assert!(available("sh"));
-        assert!(available("/bin/sh"));
-        assert!(!available("palace-no-such-program"));
-        assert!(!available("/no/such/program"));
-        assert!(!available("  "));
+        assert!(available("sh", &mut None));
+        assert!(available("/bin/sh", &mut None));
+        assert!(!available("palace-no-such-program", &mut None));
+        assert!(!available("/no/such/program", &mut None));
+        assert!(!available("  ", &mut None));
         // Relative to wherever it's run, so not something to check here.
-        assert!(available("./bin/claude"));
+        assert!(available("./bin/claude", &mut None));
     }
 
     /// A terminal whose output is collected, and its id.

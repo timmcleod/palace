@@ -5,10 +5,9 @@ import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 import { isMac, shortcut } from "../lib/platform.js";
 import {
+  AGENTS,
   agentCommand,
   agentName,
-  CLAUDE_INSTALL,
-  CLAUDE_SETUP_URL,
   copySelection,
   DEFAULT_AGENT_COMMAND,
   fitTab,
@@ -154,42 +153,82 @@ function newTerminal() {
 const command = computed(() => agentCommand(props.path));
 const agent = computed(() => agentName(command.value));
 
-// An agent tab running Claude Code checks it's installed first: without it, the tab
-// would open to "command not found". Instead it says how to install it, and can type
-// the installer into a new terminal to run. A command that starts with something else,
-// such as "cd api && claude" or an alias, is the shell's to run, so it isn't checked.
-async function newAgent() {
-  const run = command.value;
-  const checked = programOf(run) === "claude";
-  if (checked && !(await invoke("program_available", { program: "claude" }).catch(() => true))) {
+// An agent tab running an agent Palace knows checks it's installed first: without it,
+// the tab would open to "command not found". Instead it says how to install it, and can
+// type the installer into a new terminal to run. A command that starts with something
+// else, such as "cd api && claude" or an alias, is the shell's to run, so it isn't
+// checked. `run` is the repository's agent command, unless another agent is picked
+// from the menu for this one tab.
+async function newAgent(run = command.value) {
+  const known = AGENTS.find((a) => a.program === programOf(run));
+  if (known && !(await invoke("program_available", { program: known.program }).catch(() => true))) {
+    const isDefault = run === command.value;
     const install = await askConfirm({
-      title: "Claude Code Isn't Installed",
-      message: `Claude tabs run Claude Code, which isn't installed here yet. Anthropic's installer, for macOS and Linux, is:\n\n${CLAUDE_INSTALL}\n\nPalace can type it into a terminal for you to run. Other ways to install it are at ${CLAUDE_SETUP_URL}. Once it's installed, open a Claude tab again.\n\nTo use another agent instead, such as Codex or Gemini, change the agent command in the terminal panel's ⋯ menu.`,
+      title: `${known.title} Isn't Installed`,
+      message: [
+        `${known.name} tabs run ${known.title}, which isn't installed here yet. Its installer, for macOS and Linux, is:`,
+        known.install,
+        `Palace can type it into a terminal for you to run. Other ways to install it are at ${known.setup}. Once it's installed, open a ${known.name} tab again.`,
+        isDefault && "To use another agent instead, change the agent command in the terminal panel's ⋯ menu.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       confirmLabel: "Install in Terminal",
     });
-    if (install) openTerminal(props.path, { input: CLAUDE_INSTALL });
+    if (install) openTerminal(props.path, { input: known.install });
     return;
   }
   openTerminal(props.path, { command: run, kind: "agent" });
 }
 
+// Which of the agents Palace offers are installed, by program, as last checked: when
+// the panel opens, and again each time the ⋯ menu does.
+const installed = ref({});
+async function checkInstalled() {
+  const programs = AGENTS.map((a) => a.program);
+  const found = await invoke("programs_available", { programs }).catch(() => null);
+  if (found) installed.value = Object.fromEntries(programs.map((program, i) => [program, found[i]]));
+}
+onMounted(checkInstalled);
+
 async function editAgentCommand() {
   const values = await openForm({
     title: "Agent Command",
-    message: `What the ${agent.value} button runs in “${props.name}”: “claude” for Claude Code, or another agent that runs in a terminal, such as “codex” or “gemini”. Leave it empty for “${DEFAULT_AGENT_COMMAND}”.`,
+    message: `What the ${agent.value} button runs in “${props.name}”: “claude” for Claude Code, or another agent that runs in a terminal, such as “codex” or “gemini”. Shift+Enter starts a new line in the prompts of Claude Code, Codex and Gemini CLI. Leave it empty for “${DEFAULT_AGENT_COMMAND}”.`,
     fields: [{ key: "command", label: "Command", type: "text", value: command.value, placeholder: DEFAULT_AGENT_COMMAND }],
     confirmLabel: "Save",
   });
   if (values) setAgentCommand(props.path, values.command ?? "");
 }
 
+// The ⋯ menu: a new tab of the repository's agent, then of each other agent Palace
+// offers, for one tab, without changing the repository's. Opening it checks again
+// which are installed, and an agent installed since shows so as soon as that's known,
+// with the menu still open.
 function moreMenu(event) {
+  const missing = (program) => (installed.value[program] === false ? "Not installed" : "");
+  const others = AGENTS.filter((a) => a.program !== programOf(command.value)).map((a) => ({
+    label: `New ${a.name} Tab`,
+    get detail() {
+      return missing(a.program);
+    },
+    action: () => newAgent(a.program),
+  }));
   openMenu(event, [
     { label: "New Terminal", action: newTerminal },
-    { label: `New ${agent.value} Tab`, action: newAgent },
+    {
+      label: `New ${agent.value} Tab`,
+      get detail() {
+        return missing(programOf(command.value));
+      },
+      action: () => newAgent(),
+    },
+    { separator: true },
+    ...others,
     { separator: true },
     { label: "Agent Command…", action: editAgentCommand },
   ]);
+  checkInstalled();
 }
 
 // Closing a tab with something still running in it, such as a dev server or Claude
@@ -290,7 +329,7 @@ function startResize(event) {
         </div>
       </div>
       <button class="icon-button small" title="New Terminal" @click="newTerminal"><Plus :size="15" /></button>
-      <button class="agent-button" :title="`New ${agent} tab: ${command}`" @click="newAgent">
+      <button class="agent-button" :title="`New ${agent} tab: ${command}`" @click="newAgent()">
         <Sparkle :size="13" :stroke-width="1.75" /> {{ agent }}
       </button>
       <button class="icon-button small" title="More" @click="moreMenu"><Ellipsis :size="15" /></button>
@@ -299,7 +338,7 @@ function startResize(event) {
     <div ref="body" class="terminal-body" @contextmenu="terminalMenu" />
     <div v-if="!group.tabs.length" class="terminal-empty">
       <button class="secondary-button" @click="newTerminal"><SquareTerminal :size="14" /> New Terminal</button>
-      <button class="secondary-button" @click="newAgent"><Sparkle :size="14" /> {{ agent }}</button>
+      <button class="secondary-button" @click="newAgent()"><Sparkle :size="14" /> {{ agent }}</button>
     </div>
   </section>
 </template>

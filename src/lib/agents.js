@@ -25,6 +25,40 @@ export function setAgentCommand(path, command) {
   writeJson(AGENT_COMMANDS_KEY, { ...agentCommands });
 }
 
+// The agents Palace offers by name, in the terminal panel's ⋯ menu: Claude Code first,
+// the default. Each says how to install it, and what Shift+Enter types in its prompt to
+// start a new line rather than send: Esc then Enter for Claude Code, and Ctrl+J for
+// Codex and Gemini CLI.
+export const AGENTS = [
+  {
+    name: "Claude",
+    title: "Claude Code",
+    program: "claude",
+    install: "curl -fsSL https://claude.ai/install.sh | bash",
+    setup: "https://code.claude.com/docs/en/setup",
+    newline: "\x1b\r",
+  },
+  {
+    name: "Codex",
+    title: "Codex CLI",
+    program: "codex",
+    install: "npm install -g @openai/codex",
+    setup: "https://github.com/openai/codex",
+    newline: "\n",
+  },
+  {
+    name: "Gemini",
+    title: "Gemini CLI",
+    program: "gemini",
+    install: "npm install -g @google/gemini-cli",
+    setup: "https://github.com/google-gemini/gemini-cli",
+    newline: "\n",
+  },
+];
+
+/** The agent Palace offers by that name, such as "Codex", if it's one. */
+export const agentNamed = (name) => AGENTS.find((agent) => agent.name === name) ?? null;
+
 // What the agents people run in terminals are called, by their programs' names.
 const AGENT_NAMES = {
   claude: "Claude",
@@ -39,6 +73,9 @@ const AGENT_NAMES = {
   qwen: "Qwen",
   crush: "Crush",
 };
+
+/** The agent a program is, by its name, such as "Codex" for "codex", or null. */
+export const agentOfProgram = (program) => AGENT_NAMES[program?.toLowerCase()] ?? null;
 
 // Commands that run another, which isn't what to call the tab.
 const LAUNCHERS = new Set(["cd", "env", "exec", "npx", "bunx", "pnpx", "uvx", "nice", "time", "&&", ";"]);

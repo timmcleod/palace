@@ -37,13 +37,8 @@ export function tabsFor(path) {
 // --- Agents -----------------------------------------------------------------------
 
 // Which agent a repository's agent tabs run, and what they're called: see agents.js.
-export { agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand } from "./agents.js";
-import { agentCommand, agentName } from "./agents.js";
-
-// How Anthropic says to install Claude Code, on a Mac and on Linux, and where to read
-// about other ways (https://code.claude.com/docs/en/setup).
-export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
-export const CLAUDE_SETUP_URL = "https://code.claude.com/docs/en/setup";
+export { AGENTS, agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand } from "./agents.js";
+import { agentCommand, agentName, agentNamed, agentOfProgram } from "./agents.js";
 
 /** The program a command runs: its first word, after any VAR=value settings. */
 export function programOf(command) {
@@ -264,14 +259,20 @@ function checkFront(tab) {
   }, 500);
 }
 
+// Programs agents run as, rather than as themselves, as Gemini CLI and Codex installed
+// with npm run as node.
+const RUNTIMES = /^(node|bun|deno|python[\d.]*)$/i;
+
 /**
- * Whether Claude Code is what's in front in the tab, as far as Palace can tell. Not
- * knowing, or seeing only node, which Claude Code installed with npm runs as on a Mac,
- * it goes by whether the tab was opened for Claude.
+ * Which agent Palace offers is in front in the tab, as far as it can tell, or null:
+ * the one the program in front is, or where that's a runtime one could run as, or
+ * not known, the one the tab was opened for. Started by hand in a terminal tab, it's
+ * known where it runs as itself, as Claude Code does.
  */
-function inClaude(tab) {
+function agentInFront(tab) {
   const front = tab.session.front;
-  return front && front !== "node" ? front === "claude" : tab.agent === "Claude";
+  if (front && !RUNTIMES.test(front)) return agentNamed(agentOfProgram(front));
+  return agentNamed(tab.agent);
 }
 
 function type(tab, data) {
@@ -311,13 +312,16 @@ export async function paste(tab) {
 // program in the terminal.
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
-  // Where Claude Code is running, in an agent tab or started by hand, Shift+Enter starts
-  // a new line in its prompt instead of sending it, as Option+Enter does: Escape then
-  // Return. Elsewhere it's Enter, as other programs expect.
-  if (inClaude(tab) && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
-    event.preventDefault();
-    type(tab, "\x1b\r");
-    return false;
+  // Where an agent Palace knows is running, Shift+Enter starts a new line in its prompt
+  // instead of sending it, typing what that agent takes for one (see AGENTS). Elsewhere
+  // it's Enter, as other programs expect.
+  if (event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    const agent = agentInFront(tab);
+    if (agent) {
+      event.preventDefault();
+      type(tab, agent.newline);
+      return false;
+    }
   }
   // On Linux, as in its terminals, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, in every
   // tab, leaving Ctrl+C to stop what's running and Ctrl+V to programs that use it: Vim,

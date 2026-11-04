@@ -118,6 +118,7 @@ pub fn run() {
             terminal::terminal_close,
             terminal::terminal_close_all,
             terminal::program_available,
+            terminal::programs_available,
             terminal::terminal_foreground,
             quit::quit_confirmed,
             quit::quit_asking,
