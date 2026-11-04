@@ -499,6 +499,12 @@ async function notify(path, tab, record) {
 // Clicking one of this window's notifications brings its tab forward, as clicking a
 // notice does: the window comes forward, with the repository and the tab showing. Every
 // window listens, and tabs are numbered in each window, so one answers only its own.
+//
+// On macOS no click reaches this yet. The plugin shows notifications through
+// mac-notification-sys, which uses NSUserNotification, deprecated since macOS 11: a
+// click still brings Palace forward, but its callback never fires, so the tab isn't
+// chosen. notify-rust's preview-macos-un backend uses UNUserNotificationCenter, which
+// should report clicks; once the plugin moves to it, this works as it is.
 let listening = null;
 function listenForClicks() {
   listening ??= onAction((performed) => {
