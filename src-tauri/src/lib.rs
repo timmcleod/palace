@@ -55,7 +55,7 @@ pub fn run() {
                     no_pinch_zoom(window);
                 }
             }
-            let _ = app;
+            windows::show_first(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -71,6 +71,12 @@ fn seconds_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// The theme Palace's settings choose, "light", "dark" or "system", if it can tell.
+pub fn saved_theme(app: &AppHandle) -> Option<String> {
+    let all = read(&file(app).ok()?).ok()??;
+    all.get("palace.settings")?.get("theme")?.as_str().map(String::from)
+}
+
 fn read(path: &Path) -> Result<Option<Map<String, Value>>, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,

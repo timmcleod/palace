@@ -102,18 +102,46 @@ pub async fn new_window(app: AppHandle, window: WebviewWindow, dark: bool) -> Re
         let position = position.to_logical::<f64>(scale);
         builder = builder.position(position.x + CASCADE, position.y + CASCADE);
     }
-    // The sidebar's color in each theme (--sidebar-bg in styles.css), the page's background.
-    let (theme, background) = if dark { (Theme::Dark, Color(0x21, 0x2a, 0x3a, 0xff)) } else { (Theme::Light, Color(0xf4, 0xf4, 0xf4, 0xff)) };
-    // On Linux the window's theme is the system's as it's made, whatever it's asked to be,
-    // and that's every window's title bar: it's made hidden, and shown once it's set.
-    builder = builder.theme(Some(theme)).background_color(background).visible(false);
+    let theme = if dark { Theme::Dark } else { Theme::Light };
+    builder = builder.theme(Some(theme)).background_color(background(dark));
     let opened = builder.build().map_err(|e| format!("Couldn't open a window: {e}"))?;
-    let _ = opened.set_theme(Some(theme));
     #[cfg(target_os = "linux")]
     crate::no_pinch_zoom(&opened);
-    let _ = opened.show();
-    let _ = opened.set_focus();
+    show_themed(&opened, Some(theme));
     Ok(())
+}
+
+/// The sidebar's color in each theme (--sidebar-bg in styles.css), the page's
+/// background, for a window to show until its page is drawn.
+fn background(dark: bool) -> Color {
+    if dark {
+        Color(0x21, 0x2a, 0x3a, 0xff)
+    } else {
+        Color(0xf4, 0xf4, 0xf4, 0xff)
+    }
+}
+
+/// Shows a window, made hidden (see tauri.conf.json), in `theme`, or the system's for
+/// None. On Linux a window's theme is the system's as it's made, whatever it was asked
+/// to be, and that's every window's title bar, so it's set again before it's shown.
+fn show_themed(window: &WebviewWindow, theme: Option<Theme>) {
+    let _ = window.set_theme(theme);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Shows the first window, which opens with Palace, in the theme its settings choose,
+/// so it isn't light until its page has loaded them and turned it dark.
+pub fn show_first(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else { return };
+    let theme = match crate::store::saved_theme(app).as_deref() {
+        Some("dark") => Some(Theme::Dark),
+        Some("light") => Some(Theme::Light),
+        _ => None,
+    };
+    let dark = theme.unwrap_or_else(|| window.theme().unwrap_or(Theme::Light)) == Theme::Dark;
+    let _ = window.set_background_color(Some(background(dark)));
+    show_themed(&window, theme);
 }
 
 /// Lets go of everything a closed window had: its terminals, the watch on its
