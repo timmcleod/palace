@@ -14,6 +14,9 @@ const props = defineProps({
   file: { type: String, default: null },
 });
 
+// "loaded" says the diff has come, as when it shows after "Loading…".
+const emit = defineEmits(["loaded"]);
+
 // Bigger diffs wait for an explicit click, so expanding a lockfile doesn't stall the UI.
 const MAX_LINES = 3000;
 
@@ -36,6 +39,7 @@ async function load(maxLines) {
       : ["file_diff", { id: props.commitId }];
     diff.value = await invoke(where[0], { path: props.path, ...where[1], index: props.index, maxLines });
     error.value = "";
+    emit("loaded");
   } catch (e) {
     error.value = String(e);
   } finally {

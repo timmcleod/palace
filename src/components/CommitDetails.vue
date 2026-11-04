@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
@@ -48,7 +48,11 @@ async function load() {
       ? await invoke("compare", { path: props.path, base: props.comparison.base, head: props.comparison.head })
       : await invoke("commit_details", { path: props.path, id: props.commit.id });
     if (seq !== loadSeq) return;
+    heights = new Array(result.files.length).fill(ROW_HEIGHT);
+    held.clear();
+    layout.value++;
     details.value = result;
+    scrollTop.value = scroller.value?.scrollTop ?? 0;
     if (props.focusFile) focus(props.focusFile);
   } catch (e) {
     if (seq === loadSeq) error.value = String(e);
@@ -67,8 +71,115 @@ async function focus(file) {
   if (index < 0) return;
   expanded.add(index);
   await nextTick();
-  scroller.value?.querySelectorAll(".file")[index]?.scrollIntoView({ block: "start" });
+  if (windowed.value) {
+    scroller.value.scrollTop = listEl.value.offsetTop + offsets.value[index];
+  } else {
+    scroller.value?.querySelectorAll(".file")[index]?.scrollIntoView({ block: "start" });
+  }
 }
+
+// --- Drawing only the files in view -----------------------------------------------
+// A commit can change tens of thousands of files, as one adding a vendored folder
+// does, and a row for each froze the window. Past WINDOW_FROM files, only those in
+// view and a little either side are drawn, one after another, moved down to where the
+// first of them falls in the list.
+// Rows are ROW_HEIGHT until drawn and measured; an open file's diff makes it taller.
+// A diff that scrolls out of view loads again when it's back, so an open file keeps
+// its height until then, rather than shrinking to "Loading…" and moving what's below.
+// Only until then: held any longer, a file didn't shrink back as it should, as on
+// canceling a comment, where WebKit lays the diff's table out again late.
+
+const WINDOW_FROM = 300;
+const ROW_HEIGHT = 35;
+const OVERSCAN = 800;
+const windowed = computed(() => (details.value?.files.length ?? 0) > WINDOW_FROM);
+const listEl = ref(null);
+const scrollTop = ref(0);
+const viewHeight = ref(0);
+// Each file's height, as last measured; `layout` changes when one does.
+let heights = [];
+const layout = ref(0);
+// The open files back in view whose diffs are loading again, which keep their heights.
+const held = reactive(new Set());
+
+// Where each file starts in the list, and, last, how tall the list is.
+const offsets = computed(() => {
+  layout.value;
+  const result = new Array(heights.length + 1);
+  result[0] = 0;
+  for (let i = 0; i < heights.length; i++) result[i + 1] = result[i] + heights[i];
+  return result;
+});
+
+// The files to draw, as [file, index], and how far down the first of them goes.
+const shownFiles = computed(() => {
+  const files = details.value?.files ?? [];
+  if (!windowed.value) return { top: 0, files: files.map((file, i) => [file, i]) };
+  const at = offsets.value;
+  const from = scrollTop.value - (listEl.value?.offsetTop ?? 0) - OVERSCAN;
+  const to = from + viewHeight.value + 2 * OVERSCAN;
+  // The first file ending below `from`.
+  let lo = 0;
+  let hi = files.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (at[mid + 1] <= from) lo = mid + 1;
+    else hi = mid;
+  }
+  const shown = [];
+  for (let i = lo; i < files.length && at[i] < to; i++) shown.push([files[i], i]);
+  return { top: at[lo], files: shown };
+});
+
+function onScroll() {
+  if (windowed.value) scrollTop.value = scroller.value.scrollTop;
+}
+
+const sizes = new ResizeObserver((entries) => {
+  let changed = false;
+  for (const entry of entries) {
+    const el = entry.target;
+    if (!el.isConnected || el.dataset.index === undefined) continue;
+    const i = Number(el.dataset.index);
+    // The file's own height, with its border: not the box around it, which an open
+    // file's kept height may hold taller than it is.
+    const box = el.parentElement;
+    const height = el.offsetHeight + box.offsetHeight - box.clientHeight;
+    // A diff loading again keeps the height it had.
+    if (held.has(i) && height < heights[i]) continue;
+    if (heights[i] !== undefined && heights[i] !== height) {
+      heights[i] = height;
+      changed = true;
+    }
+  }
+  if (changed) layout.value++;
+  if (scroller.value) viewHeight.value = scroller.value.clientHeight;
+});
+watch(
+  scroller,
+  (el, old) => {
+    if (old) sizes.unobserve(old);
+    if (el) sizes.observe(el);
+  },
+  { immediate: true },
+);
+// Files are measured as they're drawn, and let go of when they're not.
+const measured = new Map();
+function measure(el, i) {
+  const was = measured.get(i);
+  if (was === el) return;
+  if (was) sizes.unobserve(was);
+  measured.delete(i);
+  if (el && windowed.value) {
+    // Drawn again, open, as it comes back into view.
+    if (!was && expanded.has(i) && heights[i] > ROW_HEIGHT) held.add(i);
+    sizes.observe(el);
+    measured.set(i, el);
+  } else {
+    held.delete(i);
+  }
+}
+onBeforeUnmount(() => sizes.disconnect());
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "long" });
 const formatDate = (seconds) => dateFormat.format(seconds * 1000);
@@ -86,7 +197,15 @@ function toggleAll() {
 }
 
 function toggle(index) {
-  expanded.has(index) ? expanded.delete(index) : expanded.add(index);
+  if (expanded.has(index)) {
+    expanded.delete(index);
+    // Its kept height goes with it (see "Drawing only the files in view").
+    heights[index] = ROW_HEIGHT;
+    held.delete(index);
+    layout.value++;
+  } else {
+    expanded.add(index);
+  }
 }
 
 function plural(count, word) {
@@ -108,7 +227,7 @@ function splitPath(path) {
 </script>
 
 <template>
-  <div ref="scroller" class="details selectable">
+  <div ref="scroller" class="details selectable" @scroll="onScroll">
     <div v-if="error" class="message">
       <CircleAlert :size="28" :stroke-width="1.25" />
       <p>{{ error }}</p>
@@ -162,32 +281,44 @@ function splitPath(path) {
         This is a merge commit; changes are shown against its first parent.
       </p>
 
-      <div v-for="(file, i) in details.files" :key="i" class="file">
-        <div class="file-header" @click="toggle(i)">
-          <ChevronRight :size="14" class="chevron" :class="{ open: expanded.has(i) }" />
-          <span class="status" :class="file.status">{{ file.status }}</span>
-          <span class="badge" :class="file.status">{{ STATUS_LETTER[file.status] }}</span>
-          <FileIcon :name="file.path" :size="15" />
-          <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
-            <template v-if="file.old_path">
-              <span class="dim">{{ file.old_path }} →</span>
-            </template>
-            <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
-          </span>
-          <span v-if="file.binary" class="counts dim">binary</span>
-          <span v-else-if="details.counted" class="counts">
-            <span v-if="file.additions" class="plus">+{{ file.additions }}</span>
-            <span v-if="file.deletions" class="minus">−{{ file.deletions }}</span>
-          </span>
+      <div ref="listEl" class="files" :style="windowed ? { height: `${offsets[offsets.length - 1]}px` } : null">
+        <div :style="windowed ? { transform: `translateY(${shownFiles.top}px)` } : null">
+          <div
+            v-for="[file, i] in shownFiles.files"
+            :key="i"
+            class="file"
+            :style="held.has(i) ? { minHeight: `${heights[i]}px` } : null"
+          >
+            <div :ref="(el) => measure(el, i)" class="file-body" :data-index="i">
+              <div class="file-header" @click="toggle(i)">
+                <ChevronRight :size="14" class="chevron" :class="{ open: expanded.has(i) }" />
+                <span class="status" :class="file.status">{{ file.status }}</span>
+                <span class="badge" :class="file.status">{{ STATUS_LETTER[file.status] }}</span>
+                <FileIcon :name="file.path" :size="15" />
+                <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
+                  <template v-if="file.old_path">
+                    <span class="dim">{{ file.old_path }} →</span>
+                  </template>
+                  <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
+                </span>
+                <span v-if="file.binary" class="counts dim">binary</span>
+                <span v-else-if="details.counted" class="counts">
+                  <span v-if="file.additions" class="plus">+{{ file.additions }}</span>
+                  <span v-if="file.deletions" class="minus">−{{ file.deletions }}</span>
+                </span>
+              </div>
+              <FileDiff
+                v-if="expanded.has(i)"
+                :path="path"
+                :commit-id="details.id ?? null"
+                :comparison="comparison"
+                :index="i"
+                :file="file.path"
+                @loaded="held.delete(i)"
+              />
+            </div>
+          </div>
         </div>
-        <FileDiff
-          v-if="expanded.has(i)"
-          :path="path"
-          :commit-id="details.id ?? null"
-          :comparison="comparison"
-          :index="i"
-          :file="file.path"
-        />
       </div>
     </template>
   </div>
@@ -195,6 +326,7 @@ function splitPath(path) {
 
 <style scoped>
 .details {
+  position: relative;
   flex: 1;
   overflow-y: auto;
 }
@@ -305,8 +437,17 @@ dd.mono {
   color: var(--accent);
 }
 
+.files {
+  position: relative;
+}
+
 .file {
   border-bottom: 1px solid var(--border);
+}
+
+/* Holding in the diff's margin, so it counts in the file's measured height. */
+.file-body {
+  display: flow-root;
 }
 
 .file-header {
