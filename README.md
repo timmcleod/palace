@@ -7,7 +7,9 @@
 
 <p align="center">
   <strong>Run your agent. Review its work. Ship it.</strong><br>
-  Your agent writes the code. Palace shows you every line it changed, so you decide what gets committed. For Linux and macOS.<br>
+  Your agent writes the code. Palace shows you every line it changed. You decide what gets shipped.
+  <br>
+  For Linux and macOS.<br>
   <a href="https://timmcleod.github.io/palace/"><strong>Website</strong></a> ·
   <a href="https://github.com/timmcleod/palace/releases/latest"><strong>Download</strong></a> ·
   <a href="LICENSE">MIT license</a>
