@@ -486,17 +486,18 @@ async function notify(path, tab, record) {
   if (!isMac && (await invoke("notify_tab", { title: text.title, body: plain(body), path, key: tab.key }).then(() => true, () => false))) return;
   // Listening first: only a notification sent while something listens reports a click.
   await listenForClicks();
-  sendNotification({ title: text.title, body: plain(body), extra: { path, key: tab.key } });
+  sendNotification({ title: text.title, body: plain(body), extra: { window: getCurrentWebviewWindow().label, path, key: tab.key } });
 }
 
 // Clicking one of this window's notifications brings its tab forward, as clicking a
-// notice does: the window comes forward, with the repository and the tab showing.
+// notice does: the window comes forward, with the repository and the tab showing. Every
+// window listens, and tabs are numbered in each window, so one answers only its own.
 let listening = null;
 function listenForClicks() {
   listening ??= onAction((performed) => {
-    const { path, key } = performed?.notification?.extra ?? {};
-    if (typeof path !== "string" || typeof key !== "number") return;
+    const { window: from, path, key } = performed?.notification?.extra ?? {};
     const label = getCurrentWebviewWindow().label;
+    if (from !== label || typeof path !== "string" || typeof key !== "number") return;
     invoke("show_terminal_tab", { label, path, key }).catch(() => {});
   }).catch(() => null);
   return listening;
