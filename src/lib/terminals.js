@@ -328,6 +328,7 @@ export function removeTab(path, tab) {
   group.tabs.splice(index, 1);
   if (group.active === tab.key) group.active = (group.tabs[index] ?? group.tabs[index - 1])?.key ?? null;
   if (tab.id != null) invoke("terminal_close", { id: tab.id }).catch(() => {});
+  withdrawNotifications(tab);
   tab.session.term.dispose();
   tab.session.el.remove();
 }
@@ -442,6 +443,12 @@ export function markSeen() {
 function markTabSeen(tab) {
   if (!tab.unseen) return;
   tab.unseen = false;
+  withdrawNotifications(tab);
+}
+
+// On Linux, takes the tab's notifications off the desktop's list (see notify.rs), as
+// when it's been looked at or closed.
+function withdrawNotifications(tab) {
   if (!isMac) invoke("withdraw_notifications", { key: tab.key }).catch(() => {});
 }
 window.addEventListener("focus", markSeen);

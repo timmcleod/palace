@@ -145,7 +145,7 @@ pub fn show_first(app: &AppHandle) {
 }
 
 /// Lets go of everything a closed window had: its terminals, the watch on its
-/// repository, its history and network work, and its edits.
+/// repository, its history and network work, its edits, and its notifications.
 pub fn forget(app: &AppHandle, window: &str) {
     app.state::<Windows>().0.lock().unwrap().remove(window);
     crate::terminal::close_window(window);
@@ -153,4 +153,5 @@ pub fn forget(app: &AppHandle, window: &str) {
     app.state::<crate::history::HistoryState>().forget(window);
     app.state::<crate::cli::Runnings>().forget(window);
     crate::quit::forget(window);
+    crate::notify::forget(window);
 }

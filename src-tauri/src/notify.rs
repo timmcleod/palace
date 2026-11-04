@@ -10,8 +10,11 @@
 /// `window`; clicking it brings that tab forward. `body` is markup, escaped already.
 #[tauri::command]
 pub async fn notify_tab(app: tauri::AppHandle, window: tauri::WebviewWindow, title: String, body: String, path: String, key: u32) -> Result<(), String> {
+    // Off the async runtime's threads: the D-Bus calls wait for the server's answer.
     #[cfg(target_os = "linux")]
-    return linux::notify(app, window.label().to_string(), title, body, path, key);
+    return tauri::async_runtime::spawn_blocking(move || linux::notify(app, window.label().to_string(), title, body, path, key))
+        .await
+        .map_err(|e| format!("Couldn't show a notification: {e}"))?;
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (app, window, title, body, path, key);
@@ -24,9 +27,23 @@ pub async fn notify_tab(app: tauri::AppHandle, window: tauri::WebviewWindow, tit
 #[tauri::command]
 pub async fn withdraw_notifications(window: tauri::WebviewWindow, key: u32) {
     #[cfg(target_os = "linux")]
-    linux::withdraw(window.label(), key);
+    {
+        let label = window.label().to_string();
+        let _ = tauri::async_runtime::spawn_blocking(move || linux::withdraw(&label, Some(key))).await;
+    }
     #[cfg(not(target_os = "linux"))]
     let _ = (window, key);
+}
+
+/// Withdraws every notification shown from a window, as it closes.
+pub fn forget(window: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let window = window.to_string();
+        std::thread::spawn(move || linux::withdraw(&window, None));
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = window;
 }
 
 #[cfg(target_os = "linux")]
@@ -85,12 +102,14 @@ mod linux {
         Ok(())
     }
 
-    pub fn withdraw(window: &str, key: u32) {
+    /// Withdraws the notifications from the tab `key` in `window`, or from all its tabs.
+    pub fn withdraw(window: &str, key: Option<u32>) {
         let Some(Some(server)) = SERVER_CONNECTION.get() else { return };
+        let from = |s: &Shown| s.window == window && key.is_none_or(|key| s.key == key);
         let ids: Vec<u32> = {
             let mut shown = server.shown.lock().unwrap();
-            let ids = shown.iter().filter(|(_, s)| s.window == window && s.key == key).map(|(id, _)| *id).collect();
-            shown.retain(|_, s| !(s.window == window && s.key == key));
+            let ids = shown.iter().filter(|(_, s)| from(s)).map(|(id, _)| *id).collect();
+            shown.retain(|_, s| !from(s));
             ids
         };
         for id in ids {
