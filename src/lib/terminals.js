@@ -6,7 +6,9 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { isMac } from "./platform.js";
+import { OSC, SUPPORTED_REPLY, applyReport, describe, dropRunning, parseReport, summarize } from "./programStatus.js";
 
 // The terminals in the panel below the history, by repository: each tab is the user's
 // shell, started in the repository's folder (see terminal.rs). They keep running
@@ -22,11 +24,11 @@ export const tabLabel = (tab) => tab.title || (tab.kind === "agent" ? tab.agent 
 /** The tabs with these terminal ids, each as { label, repository }. */
 export function describeTerminals(ids) {
   return Object.entries(terminals).flatMap(([path, group]) =>
-    group.tabs
-      .filter((tab) => ids.includes(tab.id))
-      .map((tab) => ({ label: tabLabel(tab), repository: path.split(/[\\/]/).filter(Boolean).pop() ?? path })),
+    group.tabs.filter((tab) => ids.includes(tab.id)).map((tab) => ({ label: tabLabel(tab), repository: folderName(path) })),
   );
 }
+
+const folderName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 export function tabsFor(path) {
   terminals[path] ??= { tabs: [], active: null };
@@ -142,11 +144,36 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
   const el = document.createElement("div");
   el.className = "terminal-host";
 
-  // An agent tab is called after its agent until its program names it.
-  const tab = reactive({ key: nextKey++, kind, agent: kind === "agent" ? agentName(command ?? "") : null, title: "", id: null });
+  // An agent tab is called after its agent until its program names it. `status` is
+  // what its program last said it's doing (see Status below), and `unseen`, that it's
+  // finished or needs you since you last looked.
+  const tab = reactive({
+    key: nextKey++,
+    kind,
+    agent: kind === "agent" ? agentName(command ?? "") : null,
+    title: "",
+    id: null,
+    status: null,
+    unseen: false,
+  });
   // `front` is the program in front in it, as last checked (see checkFront).
-  tab.session = markRaw({ term, fit, el, command, input, folder, started: false, typed: [], front: null, checkAt: 0 });
+  tab.session = markRaw({
+    term,
+    fit,
+    el,
+    command,
+    input,
+    folder,
+    started: false,
+    typed: [],
+    front: null,
+    checkAt: 0,
+    records: new Map(),
+    reply: null,
+    notifiedAt: 0,
+  });
   term.onTitleChange((title) => (tab.title = title));
+  term.parser.registerOscHandler(OSC, (body) => onStatus(path, tab, body));
   term.onData((data) => type(tab, data));
   term.onResize(({ cols, rows }) => tab.id && invoke("terminal_resize", { id: tab.id, cols, rows }).catch(() => {}));
   term.attachCustomKeyEventHandler((event) => onKey(tab, event));
@@ -256,6 +283,7 @@ function checkFront(tab) {
     invoke("terminal_foreground", { id: tab.id })
       .then((name) => (session.front = name))
       .catch(() => {});
+    endedRunning(tab);
   }, 500);
 }
 
@@ -276,6 +304,13 @@ function agentInFront(tab) {
 }
 
 function type(tab, data) {
+  // An answer to a program asking about status reports goes ahead of what's typed next,
+  // in the same write, so it arrives first (see onStatus).
+  const { reply } = tab.session;
+  if (reply) {
+    tab.session.reply = null;
+    data = reply + data;
+  }
   if (tab.id == null) tab.session.typed.push(data);
   else invoke("terminal_write", { id: tab.id, data }).catch(() => {});
 }
@@ -312,6 +347,8 @@ export async function paste(tab) {
 // program in the terminal.
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
+  // Typing in it is looking at it.
+  tab.unseen = false;
   // Where an agent Palace knows is running, Shift+Enter starts a new line in its prompt
   // instead of sending it, typing what that agent takes for one (see AGENTS). Elsewhere
   // it's Enter, as other programs expect.
@@ -351,3 +388,92 @@ function onKey(tab, event) {
   }
   return true;
 }
+
+// --- Status -----------------------------------------------------------------------
+
+// A program says what it's doing with the Program Status Protocol, as Claude Code does
+// (see programStatus.js). It asks first whether the terminal understands, then asks the
+// terminal to identify itself, and takes that answer arriving first to mean no: the
+// answer here is sent with that one, ahead of it, or on its own if none follows.
+function onStatus(path, tab, body) {
+  const report = parseReport(body);
+  if (report === "query") {
+    tab.session.reply = SUPPORTED_REPLY;
+    setTimeout(() => tab.session.reply && type(tab, ""));
+  } else if (report) {
+    applyReport(tab.session.records, report);
+    updateStatus(path, tab);
+  }
+  return true;
+}
+
+// The states that call for the user, and so, if they're looking elsewhere, a mark on
+// the tab and a notification.
+const CALLS = new Set(["done", "blocked", "error"]);
+
+function updateStatus(path, tab) {
+  const record = summarize(tab.session.records);
+  const before = tab.status;
+  tab.status = statusOf(record);
+  // Working again, it's been answered, or set going again, so seen. Gone idle, the
+  // result's still there to look at, or the question to answer.
+  if (record?.state === "working") tab.unseen = false;
+  if (!record || !CALLS.has(record.state)) return;
+  if (before?.state === record.state && before?.kind === tab.status.kind) return;
+  if (watched(tab)) return;
+  tab.unseen = true;
+  notify(path, tab, record);
+}
+
+// Whether the tab is in front of the user: shown, in the window they're using.
+const watched = (tab) => document.hasFocus() && tab.session.el.isConnected && tab.session.el.clientHeight > 0;
+
+/** Marks the tabs being looked at as seen, as when the window or the tab is shown. */
+export function markSeen() {
+  for (const group of Object.values(terminals)) {
+    for (const tab of group.tabs) if (tab.unseen && watched(tab)) tab.unseen = false;
+  }
+}
+window.addEventListener("focus", markSeen);
+
+// A program that's ended can't still be working or waiting, whatever it last said:
+// once only the shell's left, those records go.
+function endedRunning(tab) {
+  const { records } = tab.session;
+  if (![...records.values()].some((r) => r.state === "working" || r.state === "blocked")) return;
+  isBusy(tab).then((busy) => {
+    if (busy || tab.id == null) return;
+    dropRunning(records);
+    tab.status = statusOf(summarize(records));
+  });
+}
+
+// What the tab shows of a record.
+const statusOf = (record) => record && { state: record.state, kind: record.kind ?? null, msg: record.msg ?? null };
+
+// Asked for once, the first time there's something to say.
+let allowed = null;
+
+async function notify(path, tab, record) {
+  const now = Date.now();
+  // A program can change its state as fast as it writes: one notification a few seconds.
+  if (now - tab.session.notifiedAt < 4000) return;
+  tab.session.notifiedAt = now;
+  const agent = tab.agent ?? agentOfProgram(record.app?.replace(/-code$/, ""));
+  const text = describe(record, agent, folderName(path));
+  if (!text) return;
+  const body = text.body || tab.title;
+  // In a Palace window, which may be another, it's a notice there that can bring the tab
+  // forward. macOS wouldn't show the system's while Palace is in front, anyway.
+  const notice = { path, key: tab.key, state: record.state, title: text.title, body };
+  if (await invoke("show_notice", { notice }).catch(() => false)) return;
+  allowed ??= isPermissionGranted()
+    .then((granted) => granted || requestPermission().then((answer) => answer === "granted"))
+    .catch(() => false);
+  if (await allowed) sendNotification({ title: text.title, body: plain(body) });
+}
+
+// What the program said is shown as it is. On Linux, notification servers read the
+// body as markup, so a program could otherwise bold or link it: its <, > and & are
+// escaped there. macOS shows the text as given.
+const plain = (text) => (isMac ? text : text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));

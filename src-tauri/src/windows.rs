@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, State, WebviewWindow, WebviewWindowBuilder};
 
 /// The repository open in each window, by window.
 #[derive(Default)]
@@ -51,6 +51,42 @@ pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_
     let _ = other.show();
     let _ = other.set_focus();
     true
+}
+
+/// Shows `notice`, that a terminal in `window` finished or needs the user, in the Palace
+/// window the user is in, which may be `window` itself, and says whether there was one.
+/// There isn't when another app is in front: then the system's notification says it.
+#[tauri::command]
+pub fn show_notice(app: AppHandle, window: WebviewWindow, notice: serde_json::Value) -> bool {
+    let focused = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
+    let Some(focused) = focused else { return false };
+    let notice = Notice { window: window.label().to_string(), notice };
+    app.emit_to(EventTarget::webview_window(focused.label()), "notice", notice).is_ok()
+}
+
+#[derive(Serialize, Clone)]
+struct Notice {
+    /// The window whose terminal it's about.
+    window: String,
+    #[serde(flatten)]
+    notice: serde_json::Value,
+}
+
+/// Brings the window labeled `label` forward and has it show the terminal tab `key`
+/// of the repository at `path`, as when its notice is clicked in another window.
+#[tauri::command]
+pub fn show_terminal_tab(app: AppHandle, label: String, path: String, key: u32) -> bool {
+    let Some(window) = app.get_webview_window(&label) else { return false };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    app.emit_to(EventTarget::webview_window(&label), "show-terminal-tab", TerminalTab { path, key }).is_ok()
+}
+
+#[derive(Serialize, Clone)]
+struct TerminalTab {
+    path: String,
+    key: u32,
 }
 
 /// Opens a new window, a little below and to the right of `window`, with no repository

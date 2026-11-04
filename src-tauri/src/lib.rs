@@ -40,6 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(history::HistoryState::default())
         .manage(cli::Runnings::default())
         .manage(store::Store::default())
@@ -125,6 +126,8 @@ pub fn run() {
             windows::window_start,
             windows::set_window_repo,
             windows::show_window_with,
+            windows::show_notice,
+            windows::show_terminal_tab,
             windows::new_window,
             quit::set_unsaved_edits,
             cli::install_git_tools,

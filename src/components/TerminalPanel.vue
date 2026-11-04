@@ -12,6 +12,7 @@ import {
   DEFAULT_AGENT_COMMAND,
   fitTab,
   isBusy,
+  markSeen,
   openTerminal,
   paste,
   programOf,
@@ -22,6 +23,7 @@ import {
   tabsFor,
 } from "../lib/terminals.js";
 import { setDragImage } from "../lib/dragImage.js";
+import Spinner from "./Spinner.vue";
 
 // The panel below the history and details: the repository's terminals, in tabs. An
 // agent tab runs the command set for the repository: Claude Code unless it says
@@ -32,7 +34,7 @@ const props = defineProps({
   // Its height in pixels, which dragging its top edge changes.
   height: { type: Number, required: true },
 });
-const emit = defineEmits(["update:height", "resized", "hide"]);
+const emit = defineEmits(["update:height", "resized", "hide", "unseen"]);
 
 const group = computed(() => tabsFor(props.path));
 const active = computed(() => group.value.tabs.find((tab) => tab.key === group.value.active) ?? null);
@@ -52,15 +54,38 @@ async function show() {
   await startTab(props.path, tab);
   fitTab(tab);
   tab.session.term.focus();
+  markSeen();
 }
 watch(active, show);
 onMounted(show);
+
+// What a tab's program last said it's doing, as its tooltip says, after its name.
+function statusText(status) {
+  if (!status) return "";
+  if (status.state === "blocked") {
+    const why = { permission: "Needs your permission", question: "Has a question", auth: "Needs you to sign in" };
+    return why[status.kind] ?? "Waiting on you";
+  }
+  return { working: "Working", done: "Finished", error: "Stopped with an error" }[status.state] ?? "";
+}
+
+// Whether a tab here has finished or needs you, unseen, for the button that shows the panel.
+watch(
+  () => group.value.tabs.some((tab) => tab.unseen),
+  (unseen) => emit("unseen", unseen),
+  { immediate: true },
+);
 
 // Fits the terminal to the panel as it's resized, once a frame at most.
 let frame = 0;
 const observer = new ResizeObserver(() => {
   cancelAnimationFrame(frame);
-  frame = requestAnimationFrame(() => active.value && fitTab(active.value));
+  frame = requestAnimationFrame(() => {
+    if (!active.value) return;
+    fitTab(active.value);
+    // Shown again, after the panel was hidden, say.
+    markSeen();
+  });
 });
 onMounted(() => observer.observe(body.value));
 onBeforeUnmount(() => observer.disconnect());
@@ -314,7 +339,7 @@ function startResize(event) {
           :key="tab.key"
           class="tab"
           :class="[{ active: tab.key === group.active }, dropClass(index)]"
-          :title="label(tab)"
+          :title="[label(tab), statusText(tab.status)].filter(Boolean).join(': ')"
           draggable="true"
           @dragstart="onTabDragStart($event, tab)"
           @dragend="onTabDragEnd"
@@ -322,9 +347,11 @@ function startResize(event) {
           @auxclick.middle="closeTab(tab)"
           @contextmenu.prevent="tabMenu($event, tab)"
         >
-          <Sparkle v-if="tab.kind === 'agent'" :size="13" :stroke-width="1.75" />
+          <Spinner v-if="tab.status?.state === 'working'" :size="13" />
+          <Sparkle v-else-if="tab.kind === 'agent'" :size="13" :stroke-width="1.75" />
           <SquareTerminal v-else :size="13" :stroke-width="1.75" />
           <span class="tab-label">{{ label(tab) }}</span>
+          <span v-if="tab.unseen" class="tab-mark" :class="tab.status?.state" />
           <button class="tab-close" title="Close" @click.stop="closeTab(tab)"><X :size="12" /></button>
         </div>
       </div>
@@ -455,6 +482,19 @@ function startResize(event) {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A tab whose program finished or needs you since you last looked at it. */
+.tab-mark {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tab-mark.error {
+  background: var(--danger);
 }
 
 .tab-close {
