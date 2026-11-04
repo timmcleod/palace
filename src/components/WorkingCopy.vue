@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleCheck, Undo2, X } from "lucide-vue-next";
 import { CANCELED, confirmDiscard } from "../lib/confirm.js";
@@ -178,8 +178,51 @@ function onListKeydown(event) {
     anchor = file.path;
   }
   emit("select", file);
-  nextTick(() => listEl.value?.children[next]?.scrollIntoView({ block: "nearest" }));
+  nextTick(() => scrollToRow(next));
 }
+
+// --- Drawing only the rows in view -------------------------------------------------
+// A working copy can have tens of thousands of changes, as when a branch without the
+// app's .gitignore is checked out over node_modules: drawing a row for each froze the
+// window. Only the rows in view, and a few either side, are drawn, over a spacer as
+// tall as the whole list.
+
+const ROW_HEIGHT = 30;
+const OVERSCAN = 10;
+const scrollTop = ref(0);
+const viewHeight = ref(0);
+
+const shown = computed(() => {
+  const list = files.value ?? [];
+  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN);
+  const end = Math.min(list.length, Math.ceil((scrollTop.value + viewHeight.value) / ROW_HEIGHT) + OVERSCAN);
+  return { top: start * ROW_HEIGHT, rows: list.slice(start, end) };
+});
+
+function onListScroll() {
+  scrollTop.value = listEl.value.scrollTop;
+}
+
+// Scrolls just far enough to show row `index`.
+function scrollToRow(index) {
+  const el = listEl.value;
+  if (!el) return;
+  const top = index * ROW_HEIGHT;
+  if (top < el.scrollTop) el.scrollTop = top;
+  else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
+}
+
+// The list goes away while there are no changes, so it's measured again when it's back.
+const sizes = new ResizeObserver(() => {
+  if (!listEl.value) return;
+  viewHeight.value = listEl.value.clientHeight;
+  scrollTop.value = listEl.value.scrollTop;
+});
+watch(listEl, (el, old) => {
+  if (old) sizes.unobserve(old);
+  if (el) sizes.observe(el);
+});
+onBeforeUnmount(() => sizes.disconnect());
 
 const label = (list) => (list.length === 1 ? `“${list[0].path.split("/").at(-1)}”` : `${list.length} Files`);
 
@@ -375,37 +418,41 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
       <p>No local changes.</p>
     </div>
 
-    <div v-else ref="listEl" class="files" tabindex="0" @keydown="onListKeydown">
-      <div
-        v-for="file in files"
-        :key="file.path"
-        class="file"
-        :class="{ selected: chosen.has(file.path), current: file.path === selectedPath && chosen.size > 1 }"
-        @click="onRowClick(file, $event)"
-        @contextmenu.prevent="onRowMenu(file, $event)"
-      >
-        <input
-          type="checkbox"
-          :checked="fullyStaged(file)"
-          :indeterminate="!!(file.staged && file.unstaged)"
-          :disabled="busy"
-          :title="fullyStaged(file) ? 'Unstage' : 'Stage'"
-          @click.stop.prevent="toggle(file)"
-        />
-        <span class="badge" :class="statusOf(file)" :title="statusOf(file)">{{ STATUS_LETTER[statusOf(file)] }}</span>
-        <FileIcon :name="file.path" :size="15" />
-        <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
-          <span v-if="file.old_path" class="dim">{{ file.old_path }} → </span>
-          <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
-        </span>
-        <button
-          class="icon-button small discard"
-          title="Discard Changes…"
-          :disabled="busy"
-          @click.stop="discard([file])"
-        >
-          <Undo2 :size="14" />
-        </button>
+    <div v-else ref="listEl" class="files" tabindex="0" @keydown="onListKeydown" @scroll="onListScroll">
+      <div class="files-spacer" :style="{ height: `${(files?.length ?? 0) * ROW_HEIGHT}px` }">
+        <div class="files-shown" :style="{ transform: `translateY(${shown.top}px)` }">
+          <div
+            v-for="file in shown.rows"
+            :key="file.path"
+            class="file"
+            :class="{ selected: chosen.has(file.path), current: file.path === selectedPath && chosen.size > 1 }"
+            @click="onRowClick(file, $event)"
+            @contextmenu.prevent="onRowMenu(file, $event)"
+          >
+            <input
+              type="checkbox"
+              :checked="fullyStaged(file)"
+              :indeterminate="!!(file.staged && file.unstaged)"
+              :disabled="busy"
+              :title="fullyStaged(file) ? 'Unstage' : 'Stage'"
+              @click.stop.prevent="toggle(file)"
+            />
+            <span class="badge" :class="statusOf(file)" :title="statusOf(file)">{{ STATUS_LETTER[statusOf(file)] }}</span>
+            <FileIcon :name="file.path" :size="15" />
+            <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
+              <span v-if="file.old_path" class="dim">{{ file.old_path }} → </span>
+              <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
+            </span>
+            <button
+              class="icon-button small discard"
+              title="Discard Changes…"
+              :disabled="busy"
+              @click.stop="discard([file])"
+            >
+              <Undo2 :size="14" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -522,6 +569,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   overflow-y: auto;
   padding: 0 8px;
   outline: none;
+}
+
+.files-spacer {
+  position: relative;
 }
 
 .file {
