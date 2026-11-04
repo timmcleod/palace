@@ -74,11 +74,31 @@ const pathsOf = (file) => [file.path, file.old_path].filter(Boolean);
 
 const fullyStaged = (file) => file.staged && !file.unstaged;
 
-function toggle(file) {
-  if (fullyStaged(file)) {
-    run("unstage_files", { files: pathsOf(file) });
+// From a row's checkbox, `event` is its click.
+function toggle(file, event) {
+  // The boxes stay enabled while git works, so they don't all flicker gray with each
+  // click: one clicked meanwhile does nothing.
+  if (busy.value) {
+    event?.preventDefault();
+    return;
+  }
+  const staging = !fullyStaged(file);
+  // The box changes at once, as clicked: reading the status again after staging can
+  // take a moment in a working copy with many changes, and that reading puts it right
+  // if this was wrong. A conflicted file's box waits for it, as what staging it does
+  // depends on the conflict.
+  if (file.conflicted) {
+    event?.preventDefault();
   } else {
+    const shown = staging
+      ? { staged: file.staged ?? (file.unstaged === "untracked" ? "added" : file.unstaged), unstaged: null }
+      : { staged: null, unstaged: file.staged === "added" ? "untracked" : file.staged };
+    files.value = files.value.map((f) => (f === file ? { ...f, ...shown } : f));
+  }
+  if (staging) {
     run("stage_files", { files: [file.path] });
+  } else {
+    run("unstage_files", { files: pathsOf(file) });
   }
 }
 
@@ -433,9 +453,8 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
               type="checkbox"
               :checked="fullyStaged(file)"
               :indeterminate="!!(file.staged && file.unstaged)"
-              :disabled="busy"
               :title="fullyStaged(file) ? 'Unstage' : 'Stage'"
-              @click.stop.prevent="toggle(file)"
+              @click.stop="toggle(file, $event)"
             />
             <span class="badge" :class="statusOf(file)" :title="statusOf(file)">{{ STATUS_LETTER[statusOf(file)] }}</span>
             <FileIcon :name="file.path" :size="15" />
