@@ -286,7 +286,7 @@ fn unstage(path: &str, files: &[String]) -> Result<(), String> {
     let mut entries = Vec::new();
     for file in files {
         let entry = head.as_ref().and_then(|tree| tree.get_path(Path::new(file)).ok()).filter(|e| e.kind() != Some(git2::ObjectType::Tree));
-        let (mode, id) = entry.map_or((0, git2::Oid::zero()), |e| (e.filemode(), e.id()));
+        let (mode, id) = entry.map_or((0, git2::Oid::ZERO_SHA1), |e| (e.filemode(), e.id()));
         entries.extend_from_slice(format!("{mode:o} {id}\t{file}\0").as_bytes());
     }
     git_input(path, &["update-index", "-z", "--index-info"], Some(&entries))?;
