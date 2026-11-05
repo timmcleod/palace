@@ -1170,8 +1170,33 @@ function sidebarMenu(row, event) {
 // Double-clicking a branch checks it out.
 function sidebarActivate(row) {
   const [kind, name] = splitKey(row.key);
-  if (kind === "branch" && name !== overview.value.head.branch) actions.checkout("branch", name);
-  if (kind === "remote-branch") actions.checkout("remote-branch", name);
+  if (kind === "branch" && name !== overview.value.head.branch) switchTo(row.key, "branch", name);
+  if (kind === "remote-branch") switchTo(row.key, "remote-branch", name);
+}
+
+// The sidebar row of a branch being checked out by double-clicking it: switching takes
+// a moment in a large repository, so the row shows it at once, as current, with a
+// spinner, until the sidebar shows the new HEAD (or the checkout fails).
+const switching = ref(null);
+async function switchTo(key, kind, name) {
+  if (switching.value || remoteBusy.value) return;
+  switching.value = key;
+  const error = await actions.checkout(kind, name);
+  if (error) {
+    switching.value = null;
+    return;
+  }
+  // Once the refresh after it brings the new HEAD in; if that never comes, soon anyway.
+  const stop = watch(
+    () => overview.value?.head?.branch,
+    () => done(),
+  );
+  const timer = setTimeout(() => done(), 10000);
+  function done() {
+    stop();
+    clearTimeout(timer);
+    if (switching.value === key) switching.value = null;
+  }
 }
 
 // Live refresh: the backend watches the open repository and reports changes made
@@ -1799,6 +1824,7 @@ function startResize(event, pane, min, max) {
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"
+      :switching="switching"
       @activate="sidebarActivate"
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
       @merge-into-head="(name) => actions.merge(name)"

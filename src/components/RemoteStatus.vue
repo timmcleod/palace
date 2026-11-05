@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
-import { CircleAlert, CircleCheck, LoaderCircle, TriangleAlert, X } from "lucide-vue-next";
+import { CircleAlert, CircleCheck, TriangleAlert, X } from "lucide-vue-next";
+import Spinner from "./Spinner.vue";
 
 // A card in the corner of the window showing a git operation: its live progress while
 // running (for network operations), then the outcome.
@@ -20,7 +21,7 @@ const percent = computed(() => {
 <template>
   <div class="remote-status" :class="operation.state" role="status">
     <div class="heading">
-      <LoaderCircle v-if="operation.state === 'running'" :size="16" class="spinning" />
+      <Spinner v-if="operation.state === 'running'" :size="15" class="spinning" />
       <CircleCheck v-else-if="operation.state === 'done'" :size="16" class="icon-done" />
       <TriangleAlert v-else-if="operation.state === 'conflict'" :size="16" class="icon-conflict" />
       <CircleAlert v-else :size="16" class="icon-failed" />
@@ -147,12 +148,5 @@ const percent = computed(() => {
 
 .spinning {
   color: var(--accent);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

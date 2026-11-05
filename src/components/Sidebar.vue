@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { buildTree, flattenTree } from "../lib/tree.js";
+import Spinner from "./Spinner.vue";
 import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
@@ -38,6 +39,9 @@ const props = defineProps({
   issues: { type: Object, default: null },
   // { count } of open pull requests, for the Pull Requests row; null hides it.
   pulls: { type: Object, default: null },
+  // The row of a branch being checked out, shown as current, with a spinner, until
+  // the switch is done.
+  switching: { type: String, default: null },
 });
 const emit = defineEmits([
   "update:selected",
@@ -498,7 +502,7 @@ function onRowClick(row, event) {
             class="row"
             :class="[dropClass(row), {
               selected: row.key === selected || compared.includes(row.key),
-              current: row.current,
+              current: switching ? row.key === switching : row.current,
               divider: row.divider,
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
@@ -523,7 +527,8 @@ function onRowClick(row, event) {
               <component :is="row.icon ?? Folder" class="row-icon" :size="17" :stroke-width="1.5" />
               <span class="row-label">{{ row.label }}</span>
 
-              <span v-if="row.head || row.ahead || row.behind" class="pill">
+              <Spinner v-if="row.key === switching" :size="13" class="switching" />
+              <span v-else-if="row.head || row.ahead || row.behind" class="pill">
                 <span v-if="row.head">HEAD</span>
                 <span v-if="row.head && (row.ahead || row.behind)" class="pill-divider" />
                 <span v-if="row.ahead" class="pill-count" :title="`${row.ahead} ahead of upstream`">
@@ -810,6 +815,11 @@ function onRowClick(row, event) {
 .row-icon {
   flex-shrink: 0;
   color: var(--icon);
+}
+
+.switching {
+  margin-right: 4px;
+  color: var(--accent);
 }
 
 .row.current .row-icon {
