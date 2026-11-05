@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { homeDir } from "@tauri-apps/api/path";
 import { agentOfProgram } from "./agents.js";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
@@ -585,16 +584,12 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   const worktrees = () => overview.value?.worktrees ?? [];
   const worktreeOf = (branch) => overview.value?.branches.find((b) => b.name === branch)?.worktree ?? null;
   const folderName = (path) => path.replace(/\/+$/, "").split("/").at(-1);
-  // A path in the home folder as ~/…, shorter to show.
-  const tildify = (path, home) => (home && path.startsWith(`${home.replace(/\/+$/, "")}/`) ? `~${path.slice(home.replace(/\/+$/, "").length)}` : path);
-
-  // Where a new worktree goes unless the user says otherwise: beside the repository's
-  // own folder, named after it and the branch, as "palace-feature-login".
-  function worktreeFolder(branch) {
-    const main = worktrees().find((w) => w.main)?.path ?? overview.value.path;
-    const parent = main.slice(0, main.lastIndexOf("/"));
-    return `${parent}/${folderName(main)}-${branch.replace(/[/\\\s]+/g, "-")}`;
-  }
+  // A new worktree's folder is named after the repository and the branch, as
+  // "palace-feature-login", and goes beside the repository's own unless another place
+  // is chosen.
+  const mainFolder = () => worktrees().find((w) => w.main)?.path ?? overview.value.path;
+  const worktreeName = (branch) => `${folderName(mainFolder())}-${branch.replace(/[/\\\s]+/g, "-")}`;
+  const besideRepository = () => mainFolder().slice(0, mainFolder().lastIndexOf("/"));
 
   // A worktree with `branch` checked out: a local branch, or for `remote`, a remote one
   // as a local branch tracking it. With no branch, it's a new one, named in the dialog
@@ -605,36 +600,24 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     if (remote && overview.value.branches.some((b) => b.name === local)) return newWorktree({ branch: local });
     const creating = !branch;
     const from = start ?? current() ?? "HEAD";
-    const home = await homeDir().catch(() => null);
+    const where = creating ? "a folder named after the branch" : `“${worktreeName(local)}”`;
     const values = await openForm({
       title: "New Worktree",
       message: creating
-        ? `A new working copy of the repository, beside this one, with a new branch starting at ${from} checked out in it.`
+        ? `A new working copy of the repository, in ${where} in the location below, with a new branch starting at ${from} checked out in it.`
         : remote
-          ? `A new working copy of the repository, beside this one, with “${local}” checked out in it, tracking ${branch}.`
-          : `A new working copy of the repository, beside this one, with “${branch}” checked out in it.`,
+          ? `A new working copy of the repository, in ${where} in the location below, with “${local}” checked out in it, tracking ${branch}.`
+          : `A new working copy of the repository, in ${where} in the location below, with “${branch}” checked out in it.`,
       fields: [
         creating && { key: "name", label: "Branch name", type: "text", placeholder: "feature/my-change" },
-        {
-          key: "folder",
-          label: "Folder",
-          type: "folder",
-          optional: creating,
-          value: creating ? "" : worktreeFolder(local),
-          // Left empty, it's beside the repository's, named after the branch typed.
-          placeholder: creating ? (typed) => tildify(worktreeFolder(typed.name?.trim() || "branch"), home) : undefined,
-          hint: "A new folder, or an empty one.",
-          chooseTitle: "Add the Worktree In",
-          // As with cloning, a folder picked holds the worktree in a new folder of its name.
-          choose: (folder, typed) => `${folder}/${folderName(worktreeFolder(creating ? typed.name?.trim() || "branch" : local))}`,
-        },
+        { key: "location", label: "Location", type: "folder", value: besideRepository(), chooseTitle: "Choose Where the Worktree Goes" },
         { key: "open", label: "Open it", type: "checkbox", value: true },
       ].filter(Boolean),
       confirmLabel: "Add Worktree",
     });
     if (!values) return;
     const name = creating ? values.name.trim() : local;
-    const folder = values.folder.trim() || worktreeFolder(name);
+    const folder = `${values.location.replace(/\/+$/, "")}/${worktreeName(name)}`;
     const error = await run(["Adding worktree…", "Added worktree", "Couldn't add the worktree"], "add_worktree", {
       folder,
       branch: creating ? from : branch,
@@ -647,8 +630,8 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   async function removeWorktree(worktree) {
     const name = folderName(worktree.path);
     const changed = !worktree.prunable && (await invoke("worktree_has_changes", { worktree: worktree.path }).catch(() => false));
-    // Open in another window, that window closes once it's removed, its terminals
-    // stopped: left open, they'd go on in a folder that's gone.
+    // Open in another window, that window closes, its terminals stopped: left open,
+    // they'd go on in a folder that's gone.
     const showing = await invoke("window_showing", { path: worktree.path }).catch(() => null);
     const ok = await confirm(
       [
@@ -663,12 +646,13 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       changed ? "Remove and Lose Changes" : showing?.programs.length ? "Remove and Stop" : "Remove",
     );
     if (!ok) return;
-    const error = await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
+    // Closed first, so what its terminals run is stopped before the folder's deleted,
+    // rather than writing into it as it goes.
+    if (showing) await invoke("close_windows", { labels: showing.windows }).catch(() => {});
+    await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
       worktree: worktree.path,
       force: changed || worktree.locked,
     });
-    // Not removed, as with another operation running or git refusing, it stays open.
-    if (!error && showing) invoke("close_windows", { labels: showing.windows }).catch(() => {});
   }
 
   // What closing the other window a worktree's open in loses: what its terminals are

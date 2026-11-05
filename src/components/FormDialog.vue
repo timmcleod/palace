@@ -17,7 +17,7 @@ const cancelButton = ref(null);
 
 // Whether anything typed would be lost by closing.
 const typed = () =>
-  props.dialog.fields.some((f) => ["text", "textarea", "folder", undefined].includes(f.type) && values[f.key] !== initial[f.key]);
+  props.dialog.fields.some((f) => ["text", "textarea", undefined].includes(f.type) && values[f.key] !== initial[f.key]);
 
 // Canceling keeps what was typed for next time; a click outside, easily a slip,
 // doesn't close it then.
@@ -32,16 +32,10 @@ function cancel({ outside = false } = {}) {
 const ready = () =>
   props.dialog.fields.every((f) => f.type === "checkbox" || f.optional || String(values[f.key]).trim() !== "");
 
-// A placeholder can follow what's typed in the other fields, as a default that's used
-// when the field is left empty.
-const placeholder = (field) => (typeof field.placeholder === "function" ? field.placeholder(values) : field.placeholder);
-
-// A folder field's Choose… picks a folder; its `choose(folder, values)` can make the
-// field's value of it, a new folder inside it, say.
+// A folder field shows the folder chosen, which only its Choose… changes.
 async function chooseFolder(field) {
-  const folder = await open({ directory: true, multiple: false, title: field.chooseTitle ?? field.label }).catch(() => null);
-  if (!folder) return;
-  values[field.key] = field.choose ? field.choose(folder, values) : folder;
+  const folder = await open({ directory: true, multiple: false, title: field.chooseTitle ?? field.label, defaultPath: values[field.key] || undefined }).catch(() => null);
+  if (folder) values[field.key] = folder;
 }
 
 function submit() {
@@ -52,7 +46,7 @@ function submit() {
 
 onMounted(async () => {
   await nextTick();
-  const first = form.value?.querySelector("input:not([type=checkbox]), select, textarea");
+  const first = form.value?.querySelector("input:not([type=checkbox]):not([readonly]), select, textarea");
   first?.focus();
   // A one-line value is selected, ready to replace; a message is edited in place.
   if (first?.tagName === "INPUT") first.select();
@@ -82,7 +76,7 @@ onMounted(async () => {
           </select>
           <textarea v-else-if="field.type === 'textarea'" v-model="values[field.key]" rows="8" spellcheck="true" />
           <div v-else-if="field.type === 'folder'" class="folder">
-            <input v-model="values[field.key]" type="text" spellcheck="false" autocomplete="off" :placeholder="placeholder(field)" />
+            <input :value="values[field.key]" type="text" readonly tabindex="-1" :title="values[field.key]" @click="chooseFolder(field)" />
             <button type="button" class="secondary-button" @click.prevent="chooseFolder(field)">Choose…</button>
           </div>
           <input
@@ -91,7 +85,7 @@ onMounted(async () => {
             :type="field.type === 'password' ? 'password' : 'text'"
             spellcheck="false"
             autocomplete="off"
-            :placeholder="placeholder(field)"
+            :placeholder="field.placeholder"
           />
           <span v-if="field.hint" class="hint">{{ field.hint }}</span>
         </label>
@@ -172,6 +166,8 @@ h2 {
 .folder input {
   flex: 1;
   min-width: 0;
+  color: var(--text-secondary);
+  cursor: default;
 }
 
 .folder .secondary-button {
