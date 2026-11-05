@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Archive,
   ArrowDown,
@@ -231,8 +232,25 @@ const canDrag = (row) => canMerge(row) || canMove(row);
 
 // Whether the dragged branch is over the Branches header, to create a branch from it.
 const overBranches = ref(false);
-// Whether Alt is held, which makes a merge a rebase.
+// Whether Alt is held, which makes a merge a rebase. On macOS, with the mouse button
+// down, the page's events say it isn't, and pressing it isn't heard, so Palace asks its
+// own process (keys.rs), as the pointer moves and every so often while it's still.
 const altHeld = ref(false);
+let askingAlt = false;
+let altPoll = 0;
+
+function updateAlt(event) {
+  if (!isMac) {
+    if (event) altHeld.value = event.altKey;
+    return;
+  }
+  if (askingAlt) return;
+  askingAlt = true;
+  invoke("alt_held")
+    .then((held) => dragRow.value && (altHeld.value = held))
+    .catch(() => {})
+    .finally(() => (askingAlt = false));
+}
 const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? dragRow.value.key.slice(dragRow.value.key.indexOf(":") + 1) : null);
 
 const rowsByKey = computed(() => new Map(sections.value.flatMap((s) => s.rows.map((row) => [row.key, row]))));
@@ -276,6 +294,7 @@ function startDrag() {
   dragImage.append(row.divider ? row.label || "Divider" : row.label);
   document.body.append(dragImage);
   document.body.classList.add("dragging-row");
+  if (isMac) altPoll = setInterval(updateAlt, 100);
   window.getSelection()?.removeAllRanges();
 }
 
@@ -286,7 +305,7 @@ function onPointerMove(event) {
     startDrag();
   }
   event.preventDefault();
-  altHeld.value = event.altKey;
+  updateAlt(event);
   pointer = { x: event.clientX, y: event.clientY };
   // Held 14px into its left end, at its middle. With the pointer out of the window, it
   // stays at the window's edge nearest it, as the page can't draw beyond the window.
@@ -344,7 +363,7 @@ function onPointerUp(event) {
   const creates = overBranches.value;
   const name = dragging.value;
   const branch = draggedBranch();
-  const rebase = altHeld.value || event.altKey;
+  const rebase = altHeld.value || (!isMac && event.altKey);
   endDrag();
   if (!row) return;
   // The click that follows the release isn't one.
@@ -375,6 +394,8 @@ function endDrag() {
   dropAt.value = null;
   overBranches.value = false;
   altHeld.value = false;
+  clearInterval(altPoll);
+  altPoll = 0;
   window.removeEventListener("pointermove", onPointerMove, true);
   window.removeEventListener("pointerup", onPointerUp, true);
   window.removeEventListener("pointercancel", endDrag, true);

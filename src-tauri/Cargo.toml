@@ -49,6 +49,8 @@ zbus = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# Whether Option is held, during a drag in the sidebar (see keys.rs). The version Tauri uses.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"] }
 # Not used directly: turns on the UNUserNotificationCenter backend of the notify-rust
 # the notification plugin uses. Its default, NSUserNotification, deprecated since
 # macOS 11, never reports a click, so a notification couldn't bring its tab forward.
