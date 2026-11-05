@@ -72,6 +72,7 @@ import {
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
 import { useUndo } from "./lib/undo.js";
+import { useStatusCard } from "./lib/statusCard.js";
 import { useNavigation } from "./lib/navigation.js";
 import { splitKey } from "./lib/sidebarKeys.js";
 import {
@@ -343,20 +344,20 @@ async function onPullMerged({ number, base, head, headRepo, headSha, branchDelet
       });
     }
   }
-  clearTimeout(dismissTimer);
-  const op = reactive({
-    title: `Merged pull request #${number}`,
-    state: "done",
-    message: [
-      branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
-      unpushed && `Your local “${local.name}” has commits that weren't in the pull request, so it's been kept.`,
-    ]
-      .filter(Boolean)
-      .join(" "),
-    actions: offers,
-  });
-  remoteOp.value = op;
-  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 15_000);
+  showStatus(
+    {
+      title: `Merged pull request #${number}`,
+      state: "done",
+      message: [
+        branchDeleted ? `Merged into ${base}, and deleted ${head} on GitHub.` : `Merged into ${base}.`,
+        unpushed && `Your local “${local.name}” has commits that weren't in the pull request, so it's been kept.`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      actions: offers,
+    },
+    { dismissAfter: 15_000 },
+  );
 }
 
 // Checks out a pull request: from the remote its branch is on, or, from a fork no
@@ -653,9 +654,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 // --- Running git operations ------------------------------------------------------
 
-// The operation shown in the status card: { command, title, line, state, message }.
-const remoteOp = ref(null);
-let dismissTimer;
+// The status card; see statusCard.js. remoteBusy is whether an operation is running,
+// which most others wait for.
+const {
+  card: remoteOp,
+  busy: remoteBusy,
+  show: showStatus,
+  dismissLater: dismissStatusLater,
+  dismiss: dismissStatus,
+} = useStatusCard();
 
 // Only network operations report progress and can be canceled.
 const NETWORK = new Set([
@@ -673,7 +680,6 @@ const NETWORK = new Set([
 ]);
 
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
-const remoteBusy = computed(() => remoteOp.value?.state === "running");
 
 /**
  * Runs a backend command against the open repository, showing it in the status card
@@ -687,9 +693,7 @@ const remoteBusy = computed(() => remoteOp.value?.state === "running");
 async function runGit([running, done, failed], command, args = {}, { quietError, path, undo: undoLabel } = {}) {
   if (remoteBusy.value) return "Another operation is still running.";
   if (!overview.value && !path) return "No repository is open.";
-  clearTimeout(dismissTimer);
-  const op = reactive({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
-  remoteOp.value = op;
+  const op = showStatus({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
 
   try {
     await stopBackgroundFetch();
@@ -717,16 +721,14 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
       fetchedAt[overview.value.path] = Date.now();
     }
     // Successes get out of the way; failures stay until dismissed.
-    dismissTimer = setTimeout(() => {
-      if (remoteOp.value === op) remoteOp.value = null;
-    }, 5000);
+    dismissStatusLater(op, 5000);
     return null;
   } catch (e) {
     const message = String(e);
     if (message === CANCELED) {
-      remoteOp.value = null;
+      dismissStatus();
     } else if (quietError?.(message)) {
-      remoteOp.value = null;
+      dismissStatus();
     } else if (isError(message, CONFLICT)) {
       // The operation is under way and waiting on the user, not failed.
       op.state = "conflict";
@@ -850,20 +852,18 @@ async function undoableWithNotice(step, work) {
   const before = newest();
   const result = await undoable(step, work);
   if (newest() !== before && !remoteBusy.value) {
-    clearTimeout(dismissTimer);
-    const op = reactive({
-      command: "undoable",
-      title: DONE[step.label] ?? `${step.label}: done`,
-      line: "",
-      state: "done",
-      message: "",
-      cancellable: false,
-      actions: [{ label: "Undo", run: undo }],
-    });
-    remoteOp.value = op;
-    dismissTimer = setTimeout(() => {
-      if (remoteOp.value === op) remoteOp.value = null;
-    }, UNDO_OFFERED_FOR);
+    showStatus(
+      {
+        command: "undoable",
+        title: DONE[step.label] ?? `${step.label}: done`,
+        line: "",
+        state: "done",
+        message: "",
+        cancellable: false,
+        actions: [{ label: "Undo", run: undo }],
+      },
+      { dismissAfter: UNDO_OFFERED_FOR },
+    );
   }
   return result;
 }
@@ -912,15 +912,15 @@ function pushForPullRequest(plan) {
 function onPullRequestClosed(pull) {
   pullRequestDialog.value = null;
   if (!pull) return;
-  clearTimeout(dismissTimer);
-  const op = reactive({
-    title: `Created pull request #${pull.number}`,
-    state: "done",
-    message: pull.title,
-    actions: [{ label: "Open on GitHub", run: () => openUrl(pull.html_url) }],
-  });
-  remoteOp.value = op;
-  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 10_000);
+  showStatus(
+    {
+      title: `Created pull request #${pull.number}`,
+      state: "done",
+      message: pull.title,
+      actions: [{ label: "Open on GitHub", run: () => openUrl(pull.html_url) }],
+    },
+    { dismissAfter: 10_000 },
+  );
 }
 
 // After a branch is pushed, the status card offers to create a pull request for it,
@@ -939,8 +939,7 @@ async function offerPullRequest(op, branch) {
     : { label: "Create Pull Request…", run: () => createPullRequest(branch) };
   op.actions = [...(op.actions ?? []), offer];
   // Long enough to be noticed.
-  clearTimeout(dismissTimer);
-  dismissTimer = setTimeout(() => remoteOp.value === op && (remoteOp.value = null), 10_000);
+  dismissStatusLater(op, 10_000);
 }
 
 const actions = useGitActions({
@@ -1324,8 +1323,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       return;
     }
     if (keepOnError && overview.value) {
-      clearTimeout(dismissTimer);
-      remoteOp.value = reactive({
+      showStatus({
         title: "Couldn't open the repository",
         state: "failed",
         message: `${path}\n${e}`,
@@ -1495,7 +1493,7 @@ onMounted(checkGit);
 // replaced by whatever's changed meanwhile.
 onMounted(() => {
   if (!storeProblem) return;
-  const op = reactive({
+  const op = showStatus({
     title: "Couldn't read your saved settings",
     state: "failed",
     message:
@@ -1509,7 +1507,7 @@ onMounted(() => {
         run: async () => {
           try {
             await setStoreAside();
-            remoteOp.value = null;
+            dismissStatus();
           } catch (e) {
             op.message = String(e);
           }
@@ -1517,7 +1515,6 @@ onMounted(() => {
       },
     ],
   });
-  remoteOp.value = op;
 });
 
 const subtitle = computed(() => {
@@ -2187,8 +2184,8 @@ function startResize(event, pane, min, max) {
     v-if="remoteOp"
     :operation="remoteOp"
     @cancel="invoke('cancel_remote')"
-    @dismiss="remoteOp = null"
-    @action="(action) => { remoteOp = null; action.run(); }"
+    @dismiss="dismissStatus()"
+    @action="(action) => { dismissStatus(); action.run(); }"
   />
 </template>
 
