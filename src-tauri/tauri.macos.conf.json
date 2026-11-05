@@ -10,12 +10,7 @@
         "minHeight": 560,
         "dragDropEnabled": false,
         "visible": false,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 18,
-          "y": 18
-        }
+        "tabbingIdentifier": "palace"
       }
     ]
   },
