@@ -71,6 +71,7 @@ import {
   writeJson,
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
+import { useUndo } from "./lib/undo.js";
 import {
   askConfirm,
   cloneDialog,
@@ -774,7 +775,7 @@ const remoteBusy = computed(() => remoteOp.value?.state === "running");
  * titles: [while running, on success, on failure]. options.quietError(message)
  * returning true hides that failure, for callers that handle it themselves.
  * options.path runs it somewhere other than the open repository, or with none open.
- * Commands in UNDOABLE can be undone afterwards; options.undo names the step.
+ * Commands undo.js knows can be undone afterwards; options.undo names the step.
  */
 async function runGit([running, done, failed], command, args = {}, { quietError, path, undo: undoLabel } = {}) {
   if (remoteBusy.value) return "Another operation is still running.";
@@ -786,15 +787,11 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
   try {
     await stopBackgroundFetch();
     const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
-    // Continuing or skipping to the end of what stopped makes the whole of it undoable.
-    const resumed =
-      !path && command === "control_operation" && args.action !== "abort" && stopped?.path === overview.value.path ? stopped : null;
-    if (command === "control_operation" && !resumed) stopped = null;
-    const label = !path && (resumed?.step.label ?? undoLabel ?? UNDOABLE[command]?.(args));
-    const mode = resumed?.step.mode ?? (command === "reset" && args.keepChanges ? "mixed" : "keep");
-    const undone = undoStack.value.at(-1);
-    const message = await (label ? undoable({ label, mode, cover: COVER[command]?.(args), resumed }, work) : work());
-    if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
+    // Only what's done in the open repository can be undone.
+    const step = path ? null : stepFor(command, args, undoLabel);
+    const newestBefore = newest();
+    const message = await (step ? undoable(step, work) : work());
+    if (newest() !== newestBefore) op.actions = [{ label: "Undo", run: undo }];
     // Done, but changes set aside for it conflicted when put back.
     if (isError(message, CONFLICT)) {
       op.state = "conflict";
@@ -922,99 +919,18 @@ const fetchTitle = computed(() => {
 
 // --- Undo and redo -----------------------------------------------------------------
 
-// Operations that can be undone, and what Undo calls them, from their arguments.
-// Committing and discarding are undoable too, from the working copy. Network
-// operations other than pull can't be: what they changed is on the remote.
-const named = (label) => () => label;
-const UNDOABLE = {
-  checkout: named("Checkout"),
-  checkout_pull: named("Checkout"),
-  create_branch: named("New Branch"),
-  delete_branch: named("Delete Branch"),
-  delete_merged_branch: named("Delete Branch"),
-  rename_branch: named("Rename Branch"),
-  merge: named("Merge"),
-  rebase: named("Rebase"),
-  rebase_interactive: named("Rebase"),
-  cherry_pick: named("Cherry-pick"),
-  revert: named("Revert"),
-  reset: named("Reset"),
-  reset_branch: named("Reset"),
-  pull: named("Pull"),
-  create_tag: named("New Tag"),
-  delete_tag: named("Delete Tag"),
-  stash_save: named("Stash"),
-  stash_apply: ({ pop }) => (pop ? "Pop Stash" : "Apply Stash"),
-  stash_drop: named("Drop Stash"),
-};
-// The files an operation can change in the working copy, which undo keeps copies of
-// (see take_snapshot).
-const COVER = {
-  stash_save: ({ files }) => (files ? { files } : { changed: true }),
-  stash_apply: ({ index }) => ({ stash: index }),
-  // Keeping changes unstages them, and what was staged of a file edited since is lost.
-  reset: ({ keepChanges }) => (keepChanges ? { changed: true } : undefined),
-};
-const MAX_UNDO = 50;
-
-// The open repository's steps, oldest first: { label, mode, before, after, message },
-// where before and after are take_snapshot's snapshots and mode is restore_snapshot's.
-const undoStack = ref([]);
-const redoStack = ref([]);
-// Other repositories' steps, kept for when they're open again: path → [undo, redo].
-const otherStacks = new Map();
-
-// A step that stopped for conflicts, to undo as a whole once it's continued to the
-// end: { path, step, before }.
-let stopped = null;
-
-/**
- * Runs `work`, and if it changed any branch, tag or stash, or the files `step.cover`
- * names, remembers how to undo it. `step` is { label, mode, cover } and, for a
- * commit, its message. cover is take_snapshot's: { files, changed, stash }.
- * step.resumed is a stopped step this finishes.
- */
-async function undoable({ cover, resumed, ...step }, work) {
-  await stopBackgroundFetch();
-  const path = overview.value.path;
-  stopped = null;
-  let reason = "";
-  const snapshot = (cover) =>
-    invoke("take_snapshot", { path, cover }).catch((e) => {
-      reason = String(e);
-      return null;
-    });
-  // Without a snapshot, it isn't undoable. Changes to files would then be lost for
-  // good, though the confirmation said they could be undone, so it asks again.
-  const before = resumed?.before ?? (await snapshot(cover ?? null));
-  if (!before && cover) {
-    const ok = await askConfirm({
-      title: `${step.label} Without Undo?`,
-      message: `Palace couldn't keep a copy of the changes to undo this with: ${reason}\n\nGo ahead anyway? It can't be undone.`,
-      confirmLabel: step.label,
-      danger: true,
-    });
-    if (!ok) throw CANCELED;
-  }
-  let result;
-  try {
-    result = await work();
-  } catch (e) {
-    if (before && isError(e, CONFLICT)) stopped = { path, step: resumed?.step ?? step, before };
-    throw e;
-  }
-  const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
-  // A rebase that stopped again leaves HEAD detached, and is still to be finished.
-  if (resumed && before.head_branch && !after?.head_branch) {
-    stopped = resumed;
-    return result;
-  }
-  if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
-    undoStack.value = [...undoStack.value.slice(1 - MAX_UNDO), { ...step, before, after }];
-    redoStack.value = [];
-  }
-  return result;
-}
+// See undo.js. Undo and redo run through runGit, and the notice for what just
+// finished offers them.
+const { newest, stepFor, undoable, undo, redo, switchRepository } = useUndo({
+  overview,
+  run: runGit,
+  busy: () => remoteBusy.value,
+  draft,
+  settle: stopBackgroundFetch,
+  offer: (label, run) => {
+    if (remoteOp.value?.state === "done") remoteOp.value.actions = [{ label, run }];
+  },
+});
 
 // What the Working Copy and diffs do runs through undoable directly, so it's followed by
 // the notice the toolbar's operations get (see runGit), offering to undo it. Undo and
@@ -1024,9 +940,9 @@ const DONE = { Discard: "Discarded", Commit: "Committed", Amend: "Amended", Stas
 const UNDO_OFFERED_FOR = 8000;
 
 async function undoableWithNotice(step, work) {
-  const before = undoStack.value.at(-1);
+  const before = newest();
   const result = await undoable(step, work);
-  if (undoStack.value.at(-1) !== before && !remoteBusy.value) {
+  if (newest() !== before && !remoteBusy.value) {
     clearTimeout(dismissTimer);
     const op = reactive({
       command: "undoable",
@@ -1043,39 +959,6 @@ async function undoableWithNotice(step, work) {
     }, UNDO_OFFERED_FOR);
   }
   return result;
-}
-
-const undo = () => replay(undoStack, redoStack, true);
-const redo = () => replay(redoStack, undoStack, false);
-
-// Undoes the newest step on `stack`, or redoes it, moving it to the other stack.
-async function replay(stack, other, undoing) {
-  const step = stack.value.at(-1);
-  if (!step || remoteBusy.value) return;
-  const [verb, did] = undoing ? ["undo", "Undid"] : ["redo", "Redid"];
-  const error = await runGit(
-    [undoing ? "Undoing…" : "Redoing…", `${did} “${step.label}”`, `Couldn't ${verb} “${step.label}”`],
-    "restore_snapshot",
-    undoing ? { from: step.after, to: step.before, mode: step.mode } : { from: step.before, to: step.after, mode: step.mode },
-  );
-  if (error) {
-    // Something else has moved what it changed, so it can never be replayed.
-    if (error.includes("changed since") || error.includes("moved since")) stack.value = stack.value.slice(0, -1);
-    return;
-  }
-  stack.value = stack.value.slice(0, -1);
-  other.value = [...other.value, step];
-  // An undone commit's message comes back, ready to commit again, and goes away
-  // when the commit is redone.
-  if (step.message) {
-    const [subject, ...rest] = step.message.split("\n");
-    const body = rest.join("\n").trim();
-    if (undoing && !draft.subject && !draft.body) Object.assign(draft, { subject, body });
-    if (!undoing && draft.subject === subject && draft.body === body) Object.assign(draft, { subject: "", body: "" });
-  }
-  if (remoteOp.value?.state === "done") {
-    remoteOp.value.actions = [{ label: undoing ? "Redo" : "Undo", run: undoing ? redo : undo }];
-  }
 }
 
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
@@ -1515,9 +1398,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
       otherDrafts.delete(data.path);
-      if (overview.value) otherStacks.set(overview.value.path, [undoStack.value, redoStack.value]);
-      [undoStack.value, redoStack.value] = otherStacks.get(data.path) ?? [[], []];
-      otherStacks.delete(data.path);
+      switchRepository(overview.value?.path, data.path);
     }
     overview.value = data;
     folderGone.value = false;
