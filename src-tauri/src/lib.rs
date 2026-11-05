@@ -9,7 +9,6 @@ mod git;
 mod github;
 mod history;
 mod issues;
-mod keys;
 mod notify;
 mod open;
 mod pulls;
@@ -130,7 +129,6 @@ pub fn run() {
             windows::show_window_with,
             windows::show_notice,
             windows::show_terminal_tab,
-            keys::alt_held,
             notify::notify_tab,
             notify::withdraw_notifications,
             windows::new_window,

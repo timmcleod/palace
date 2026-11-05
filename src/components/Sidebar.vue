@@ -1,6 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import {
   Archive,
   ArrowDown,
@@ -213,6 +212,10 @@ function toggleSection(id) {
 // while filtering. On the HEAD branch, the middle of the row merges and its edges
 // move. Dragging a branch, local or remote, onto the Branches header creates a branch
 // starting there.
+//
+// It's done with pointer events rather than the web view's drag and drop: during one
+// of those, the page doesn't hear keys pressed (GNOME on Wayland and macOS keep them
+// while they run the drag), so it couldn't tell Alt was held.
 
 // The name of the branch being dragged, if it can be merged; the row being dragged;
 // and where it would land: { key, merge } or { key, after }.
@@ -228,64 +231,163 @@ const canDrag = (row) => canMerge(row) || canMove(row);
 
 // Whether the dragged branch is over the Branches header, to create a branch from it.
 const overBranches = ref(false);
+// Whether Alt is held, which makes a merge a rebase.
+const altHeld = ref(false);
 const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? dragRow.value.key.slice(dragRow.value.key.indexOf(":") + 1) : null);
 
-function onHeaderDragOver(section, event) {
-  if (section.id !== "branches" || !draggedBranch()) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-  overBranches.value = true;
-}
+const rowsByKey = computed(() => new Map(sections.value.flatMap((s) => s.rows.map((row) => [row.key, row]))));
+const scroller = ref(null);
 
-function onHeaderDragLeave(event) {
-  if (!event.currentTarget.contains(event.relatedTarget)) overBranches.value = false;
-}
+// How far the pointer moves, pressed, before it's a drag rather than a click.
+const DRAG_DISTANCE = 4;
 
-function onHeaderDrop(section, event) {
-  const name = section.id === "branches" ? draggedBranch() : null;
-  if (!name) return;
-  event.preventDefault();
-  onDragEnd();
-  emit("new-branch-from", name);
-}
-
-// What follows the pointer: the row's icon and name, rather than the web view's
-// snapshot of the whole row, and beside it what dropping would do, "Create Branch" or
-// "Merge". The web view's drag image is fixed when the drag starts, so it's hidden, and
-// this is drawn on the page instead, moved with the pointer.
+// What follows the pointer: the row's icon and name, and beside it what dropping
+// would do: "Create Branch", "Merge" or "Rebase".
 let dragImage = null;
 let dragAction = null;
-const NO_IMAGE = Object.assign(new Image(), { src: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" });
+// The press that may become a drag: { row, element, x, y }.
+let pressed = null;
+let pointer = null;
+let scrolling = 0;
 
-function followPointer(event) {
-  if (!dragImage) return;
-  // Held as the web view held it: 14px into its left end, at its middle.
-  dragImage.style.transform = `translate(${event.clientX - 14}px, ${event.clientY - dragImage.offsetHeight / 2}px)`;
-  dragImage.style.visibility = "visible";
-  checkAlt(event);
+function onPointerDown(row, event) {
+  if (event.button !== 0 || !canDrag(row) || commandKey(event) || event.shiftKey) return;
+  pressed = { row, element: event.currentTarget, x: event.clientX, y: event.clientY };
+  window.addEventListener("pointermove", onPointerMove, true);
+  window.addEventListener("pointerup", onPointerUp, true);
+  window.addEventListener("pointercancel", endDrag, true);
+  window.addEventListener("keydown", onDragKey, true);
+  window.addEventListener("keyup", onDragKey, true);
+  window.addEventListener("blur", endDrag);
 }
 
-// Out of the window, it's not shown until the pointer's back.
-function leaveWindow(event) {
-  if (dragImage && !event.relatedTarget) dragImage.style.visibility = "hidden";
+function startDrag() {
+  const { row, element } = pressed;
+  dragRow.value = row;
+  dragging.value = canMerge(row) && !row.head ? row.key.slice(row.key.indexOf(":") + 1) : null;
+  dragImage = document.createElement("div");
+  dragImage.className = "drag-image following";
+  dragAction = document.createElement("span");
+  dragAction.className = "drag-action";
+  dragAction.hidden = true;
+  dragImage.append(dragAction);
+  const icon = element.querySelector(".row-icon")?.cloneNode(true);
+  if (icon) dragImage.append(icon);
+  dragImage.append(row.divider ? row.label || "Divider" : row.label);
+  document.body.append(dragImage);
+  document.body.classList.add("dragging-row");
+  window.getSelection()?.removeAllRanges();
 }
 
-// Whether Alt is held, which makes a merge a rebase. A drag event's altKey says on Linux;
-// on macOS it's always false (see keys.rs), so Palace asks, as the pointer moves.
-const altHeld = ref(false);
-let asking = false;
-function checkAlt(event) {
-  if (event.altKey) {
-    altHeld.value = true;
-    return;
+function onPointerMove(event) {
+  if (!pressed) return;
+  if (!dragRow.value) {
+    if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < DRAG_DISTANCE) return;
+    startDrag();
   }
-  if (asking) return;
-  asking = true;
-  invoke("alt_held")
-    .then((held) => (altHeld.value = held))
-    .catch(() => {})
-    .finally(() => (asking = false));
+  event.preventDefault();
+  altHeld.value = event.altKey;
+  pointer = { x: event.clientX, y: event.clientY };
+  // Held 14px into its left end, at its middle. With the pointer out of the window, it
+  // stays at the window's edge nearest it, as the page can't draw beyond the window.
+  const { offsetWidth: width, offsetHeight: height } = dragImage;
+  const x = Math.min(Math.max(pointer.x - 14, 0), innerWidth - width);
+  const y = Math.min(Math.max(pointer.y - height / 2, 0), innerHeight - height);
+  dragImage.style.transform = `translate(${x}px, ${y}px)`;
+  dragImage.style.visibility = "visible";
+  aim();
+  if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
 }
+
+// What's under the pointer, for where a drop would land.
+function aim() {
+  const target = pointer && document.elementFromPoint(pointer.x, pointer.y);
+  const header = target?.closest?.(".section-header");
+  overBranches.value = !!(header && header.dataset.section === "branches" && draggedBranch());
+  const element = target?.closest?.("[data-row]");
+  const row = element && rowsByKey.value.get(element.dataset.row);
+  dropAt.value = row ? landing(row, element.getBoundingClientRect(), pointer.y) : null;
+}
+
+// Near the top or bottom of the list, it scrolls, faster the nearer the edge.
+function autoScroll() {
+  scrolling = 0;
+  const el = scroller.value;
+  if (!dragRow.value || !el || !pointer) return;
+  const rect = el.getBoundingClientRect();
+  const EDGE = 28;
+  const step = pointer.y < rect.top + EDGE ? -(rect.top + EDGE - pointer.y) : pointer.y > rect.bottom - EDGE ? pointer.y - (rect.bottom - EDGE) : 0;
+  if (!step || pointer.x < rect.left || pointer.x > rect.right) return;
+  const before = el.scrollTop;
+  el.scrollTop += Math.sign(step) * Math.min(EDGE, Math.abs(step)) / 2;
+  if (el.scrollTop === before) return;
+  aim();
+  scrolling = requestAnimationFrame(autoScroll);
+}
+
+function onDragKey(event) {
+  if (!dragRow.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    endDrag();
+  } else if (event.key === "Alt") {
+    event.preventDefault();
+    event.stopPropagation();
+    altHeld.value = event.type === "keydown";
+  }
+}
+
+function onPointerUp(event) {
+  const row = dragRow.value;
+  const at = dropAt.value;
+  const creates = overBranches.value;
+  const name = dragging.value;
+  const branch = draggedBranch();
+  const rebase = altHeld.value || event.altKey;
+  endDrag();
+  if (!row) return;
+  // The click that follows the release isn't one.
+  window.addEventListener("click", swallowClick, true);
+  setTimeout(() => window.removeEventListener("click", swallowClick, true));
+  if (creates) {
+    emit("new-branch-from", branch);
+  } else if (at?.merge) {
+    emit(rebase ? "rebase-head-onto" : "merge-into-head", name);
+  } else if (at) {
+    const siblings = branchRows.value.filter((r) => r.parent === row.parent).map((r) => r.key);
+    moveKey(props.overview.path, row.key, at.key, at.after, siblings);
+  }
+}
+
+function swallowClick(event) {
+  event.stopPropagation();
+  window.removeEventListener("click", swallowClick, true);
+}
+
+function endDrag() {
+  pressed = null;
+  pointer = null;
+  cancelAnimationFrame(scrolling);
+  scrolling = 0;
+  dragging.value = null;
+  dragRow.value = null;
+  dropAt.value = null;
+  overBranches.value = false;
+  altHeld.value = false;
+  window.removeEventListener("pointermove", onPointerMove, true);
+  window.removeEventListener("pointerup", onPointerUp, true);
+  window.removeEventListener("pointercancel", endDrag, true);
+  window.removeEventListener("keydown", onDragKey, true);
+  window.removeEventListener("keyup", onDragKey, true);
+  window.removeEventListener("blur", endDrag);
+  document.body.classList.remove("dragging-row");
+  dragImage?.remove();
+  dragImage = null;
+  dragAction = null;
+}
+
+onBeforeUnmount(endDrag);
 
 watch([overBranches, dropAt, altHeld], ([creates, at, alt]) => {
   if (!dragAction) return;
@@ -294,47 +396,11 @@ watch([overBranches, dropAt, altHeld], ([creates, at, alt]) => {
   dragAction.hidden = !action;
 });
 
-function onDragStart(row, event) {
-  dragRow.value = row;
-  dragging.value = canMerge(row) && !row.head ? row.key.slice(row.key.indexOf(":") + 1) : null;
-  event.dataTransfer.setData("text/plain", row.key);
-  event.dataTransfer.effectAllowed = "copyMove";
-
-  dragImage = document.createElement("div");
-  dragImage.className = "drag-image following";
-  dragAction = document.createElement("span");
-  dragAction.className = "drag-action";
-  dragAction.hidden = true;
-  dragImage.append(dragAction);
-  const icon = event.currentTarget.querySelector(".row-icon")?.cloneNode(true);
-  if (icon) dragImage.append(icon);
-  dragImage.append(row.divider ? row.label || "Divider" : row.label);
-  document.body.append(dragImage);
-  event.dataTransfer.setDragImage(NO_IMAGE, 0, 0);
-  document.addEventListener("dragover", followPointer);
-  document.addEventListener("dragleave", leaveWindow);
-  followPointer(event);
-}
-
-function onDragEnd() {
-  dragging.value = null;
-  dragRow.value = null;
-  dropAt.value = null;
-  overBranches.value = false;
-  altHeld.value = false;
-  document.removeEventListener("dragover", followPointer);
-  document.removeEventListener("dragleave", leaveWindow);
-  dragImage?.remove();
-  dragImage = null;
-  dragAction = null;
-}
-
 // Where a drop on `row` would land, from how far down the row the pointer is.
-function landing(row, event) {
+function landing(row, rect, pointerY) {
   const dragged = dragRow.value;
   if (!dragged) return null;
-  const rect = event.currentTarget.getBoundingClientRect();
-  const y = (event.clientY - rect.top) / rect.height;
+  const y = (pointerY - rect.top) / rect.height;
   // Not while a merge or rebase is waiting.
   const merges = row.head && dragging.value && !props.overview.operation;
   const moves =
@@ -343,34 +409,6 @@ function landing(row, event) {
   // Below an open folder's row are its own rows, so a row can't land straight after it.
   if (moves) return { key: row.key, after: y >= 0.5 && !(row.folder && row.open) };
   return null;
-}
-
-function onDragOver(row, event) {
-  const at = landing(row, event);
-  if (!at) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = at.merge ? "copy" : "move";
-  dropAt.value = at;
-}
-
-function onDragLeave(row, event) {
-  if (dropAt.value?.key === row.key && !event.currentTarget.contains(event.relatedTarget)) dropAt.value = null;
-}
-
-function onDrop(row, event) {
-  const at = landing(row, event);
-  if (!at) return;
-  event.preventDefault();
-  const name = dragging.value;
-  const dragged = dragRow.value;
-  const rebase = altHeld.value || event.altKey;
-  onDragEnd();
-  if (at.merge) {
-    emit(rebase ? "rebase-head-onto" : "merge-into-head", name);
-    return;
-  }
-  const siblings = branchRows.value.filter((r) => r.parent === dragged.parent).map((r) => r.key);
-  moveKey(props.overview.path, dragged.key, row.key, at.after, siblings);
 }
 
 const dropClass = (row) => {
@@ -419,16 +457,14 @@ function onRowClick(row, event) {
       </button>
     </header>
 
-    <nav class="sidebar-scroll">
+    <nav ref="scroller" class="sidebar-scroll">
       <section v-for="section in sections" :key="section.id" class="section">
         <button
           class="section-header"
           :class="{ 'drop-target': section.id === 'branches' && overBranches }"
           @click="toggleSection(section.id)"
           @contextmenu.prevent="emit('section-menu', section.id, $event)"
-          @dragover="onHeaderDragOver(section, $event)"
-          @dragleave="onHeaderDragLeave"
-          @drop="onHeaderDrop(section, $event)"
+          :data-section="section.id"
         >
           <span>{{ section.title }}</span>
           <span class="section-toggle">{{ collapsedSections.has(section.id) ? "Show" : "Hide" }}</span>
@@ -446,12 +482,8 @@ function onRowClick(row, event) {
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
             :title="row.head && dragging ? `Merge ${dragging} into ${row.label}, or with ${altKey} held, rebase ${row.label} onto it` : row.title"
-            :draggable="canDrag(row)"
-            @dragstart="onDragStart(row, $event)"
-            @dragend="onDragEnd"
-            @dragover="onDragOver(row, $event)"
-            @dragleave="onDragLeave(row, $event)"
-            @drop="onDrop(row, $event)"
+            :data-row="row.key"
+            @pointerdown="onPointerDown(row, $event)"
             @click="onRowClick(row, $event)"
             @dblclick="emit('activate', row)"
             @contextmenu.prevent="
@@ -624,6 +656,12 @@ function onRowClick(row, event) {
 
 /* The drag image drawn on the page (see "What follows the pointer"), with what
    dropping would do on its left. */
+:global(body.dragging-row),
+:global(body.dragging-row *) {
+  cursor: default !important;
+  user-select: none;
+}
+
 :global(.drag-image.following) {
   top: 0;
   left: 0;

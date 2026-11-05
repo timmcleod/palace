@@ -3104,7 +3104,6 @@ dependencies = [
  "libc",
  "notify",
  "notify-rust",
- "objc2-app-kit",
  "portable-pty",
  "serde",
  "serde_json",
