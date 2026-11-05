@@ -1,14 +1,15 @@
 <script setup>
-import { computed, nextTick, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleCheck, Undo2, X } from "lucide-vue-next";
+import { ChevronRight, CircleCheck, Folder, SlidersHorizontal, Undo2, X } from "lucide-vue-next";
 import { CANCELED, confirmDiscard } from "../lib/confirm.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
-import { commandKey, fileManager, shortcut } from "../lib/platform.js";
+import { commandKey, fileManager, isMac, shortcut } from "../lib/platform.js";
 import { useIssueSuggestions } from "../lib/issueSuggestions.js";
 import IssueSuggestions from "./IssueSuggestions.vue";
 import FileIcon from "./FileIcon.vue";
 import { useWindowed } from "../lib/windowed.js";
+import { readJson, writeJson } from "../lib/storage.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -153,7 +154,7 @@ watch(
 );
 
 function onRowClick(file, event) {
-  const list = files.value;
+  const list = shownOrder.value;
   if (event.shiftKey && anchor) {
     const from = list.findIndex((f) => f.path === anchor);
     const to = list.indexOf(file);
@@ -183,18 +184,19 @@ function onRowClick(file, event) {
 const listEl = ref(null);
 
 function onListKeydown(event) {
-  const list = files.value ?? [];
-  if ((event.ctrlKey || event.metaKey) && event.key === "a" && list.length) {
+  const all = files.value ?? [];
+  if ((event.ctrlKey || event.metaKey) && event.key === "a" && all.length) {
     event.preventDefault();
-    chosen.value = new Set(list.map((f) => f.path));
+    chosen.value = new Set(all.map((f) => f.path));
     return;
   }
   // Space stages the selected files, or unstages them, rather than scrolling.
   if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
     event.preventDefault();
-    toggleFiles(list.filter((f) => chosen.value.has(f.path)));
+    toggleFiles(all.filter((f) => chosen.value.has(f.path)));
     return;
   }
+  const list = shownOrder.value;
   if ((event.key !== "ArrowDown" && event.key !== "ArrowUp") || !list.length) return;
   event.preventDefault();
 
@@ -212,7 +214,97 @@ function onListKeydown(event) {
     anchor = file.path;
   }
   emit("select", file);
-  nextTick(() => scrollToRow(next));
+  nextTick(() => scrollToRow(rows.value.findIndex((row) => row.file === file)));
+}
+
+// --- As a list or a tree ----------------------------------------------------------
+// The changed files are listed by their paths, or as a tree of their folders, chosen
+// with the button above them and kept for next time. A folder's box stages or unstages
+// every file in it; its row opens and closes it.
+
+const TREE_KEY = "palace.workingCopyTree";
+const asTree = ref(readJson(TREE_KEY, false) === true);
+watch(asTree, (on) => writeJson(TREE_KEY, on));
+
+// Folders closed in the tree, by path.
+const closed = reactive(new Set());
+
+function viewMenu(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  openMenu({ clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} }, [
+    { label: "View as Tree", checked: asTree.value, action: () => (asTree.value = true) },
+    { label: "View as List", checked: !asTree.value, action: () => (asTree.value = false) },
+  ]);
+}
+
+// What the list draws: { key, file, depth } for a file, and in the tree,
+// { key, folder, name, depth, files } for a folder, `files` being all those in it.
+const rows = computed(() => {
+  const list = files.value ?? [];
+  if (!asTree.value) return list.map((file) => ({ key: file.path, file, depth: 0 }));
+  const root = { folders: new Map(), files: [] };
+  for (const file of list) {
+    // A repository inside this one is listed as a folder, "nested/": it's a row of its own.
+    const parts = file.path.replace(/\/$/, "").split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.folders.has(part)) node.folders.set(part, { folders: new Map(), files: [], all: [] });
+      node = node.folders.get(part);
+      node.all.push(file);
+    }
+    node.files.push(file);
+  }
+  const out = [];
+  const walk = (node, path, depth) => {
+    for (const { name, folder, node: child } of subfolders(node, path)) {
+      out.push({ key: `folder:${folder}`, folder, name, depth, files: child.all, node: child });
+      if (!closed.has(folder)) walk(child, folder, depth + 1);
+    }
+    for (const file of node.files) out.push({ key: file.path, file, depth });
+  };
+  walk(root, "", 0);
+  return out;
+});
+
+// A tree node's folders, in order, as { name, folder (its path), node }. A folder
+// holding just one folder shares its row, as "public/build/assets".
+function subfolders(node, path) {
+  const folders = [...node.folders].sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return folders.map(([name, child]) => {
+    while (!child.files.length && child.folders.size === 1) {
+      const [[inner, grandchild]] = child.folders;
+      name = `${name}/${inner}`;
+      child = grandchild;
+    }
+    return { name, folder: `${path}${name}/`, node: child };
+  });
+}
+
+// The paths of every folder in a node, however deep.
+function folderPaths(node, path) {
+  return subfolders(node, path).flatMap(({ folder, node: child }) => [folder, ...folderPaths(child, folder)]);
+}
+
+// The files in the order they're drawn, for ↑, ↓ and Shift+click.
+const shownOrder = computed(() => rows.value.filter((row) => row.file).map((row) => row.file));
+
+// Alt-clicking (Option-clicking on a Mac) opens or closes the folders in it too. On a
+// Mac the click may not say Option is held, so Palace is asked (keys.rs).
+async function toggleFolder(row, event) {
+  const opening = closed.has(row.folder);
+  const all = event.altKey || (isMac && (await invoke("alt_held").catch(() => false)));
+  for (const folder of [row.folder, ...(all ? folderPaths(row.node, row.folder) : [])]) {
+    opening ? closed.delete(folder) : closed.add(folder);
+  }
+}
+
+// A folder's box: checked with every file in it staged, part-checked with some.
+const folderStaged = (row) => row.files.every(fullyStaged);
+const folderPartly = (row) => !folderStaged(row) && row.files.some((f) => f.staged);
+
+function onFolderMenu(row, event) {
+  chosen.value = new Set(row.files.map((f) => f.path));
+  onRowMenu(row.files[0], event, row);
 }
 
 // --- Drawing only the rows in view -------------------------------------------------
@@ -221,19 +313,20 @@ function onListKeydown(event) {
 // window. Only the rows in view, and a few either side, are drawn, over a spacer as
 // tall as the whole list.
 
-const { spacer: filesSpacer, rows: shownFiles, top: shownTop, height: filesHeight, scrollToRow } = useWindowed(listEl, files, 30);
+const { spacer: filesSpacer, rows: shownFiles, top: shownTop, height: filesHeight, scrollToRow } = useWindowed(listEl, rows, 30);
 
 const label = (list) => (list.length === 1 ? `“${list[0].path.split("/").at(-1)}”` : `${list.length} Files`);
 
-function onRowMenu(file, event) {
+// From a folder's row, `folder` is that row, and the menu is for the files in it.
+function onRowMenu(file, event, folder = null) {
   // Right-clicking outside the selection selects just that file, as a file manager does.
-  if (!chosen.value.has(file.path)) {
+  if (!folder && !chosen.value.has(file.path)) {
     chosen.value = new Set([file.path]);
     anchor = file.path;
     emit("select", file);
   }
-  const list = files.value.filter((f) => chosen.value.has(f.path));
-  const what = label(list);
+  const list = folder ? folder.files : files.value.filter((f) => chosen.value.has(f.path));
+  const what = folder ? `“${folder.name}”` : label(list);
   const unstaged = list.filter((f) => f.unstaged);
   const staged = list.filter((f) => f.staged);
   openMenu(event, [
@@ -248,24 +341,24 @@ function onRowMenu(file, event) {
     },
     { label: `Discard ${what}…`, action: () => discard(list), disabled: busy.value, danger: true },
     { separator: true },
-    list.length === 1 && {
+    !folder && list.length === 1 && {
       label: "Open in Editor",
       action: () => emit("open-file", file.path),
       // A deleted file has nothing on disk to open.
       disabled: file.unstaged === "deleted" || file.staged === "deleted",
     },
-    list.length === 1 && {
+    !folder && list.length === 1 && {
       label: "Open in Default App",
       action: () => invoke("open_in_editor", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Open the File", String(e))),
       disabled: file.unstaged === "deleted" || file.staged === "deleted",
     },
-    list.length === 1 && {
+    (folder || list.length === 1) && {
       label: `Show in ${fileManager}`,
-      action: () => invoke("show_in_folder", { path: props.path, file: file.path }).catch((e) => tell("Couldn't Show the File", String(e))),
+      action: () => invoke("show_in_folder", { path: props.path, file: folder ? folder.folder.slice(0, -1) : file.path }).catch((e) => tell("Couldn't Show the File", String(e))),
     },
     {
-      label: list.length === 1 ? "Copy Path" : "Copy Paths",
-      action: () => navigator.clipboard.writeText(list.map((f) => f.path).join("\n")),
+      label: folder || list.length === 1 ? "Copy Path" : "Copy Paths",
+      action: () => navigator.clipboard.writeText(folder ? folder.folder.slice(0, -1) : list.map((f) => f.path).join("\n")),
     },
   ]);
 }
@@ -388,8 +481,9 @@ const STATUS_LETTER = {
 // What the badge shows: a conflict first, then the unstaged change, then the staged one.
 const statusOf = (file) => (file.conflicted ? "conflicted" : (file.unstaged ?? file.staged));
 
+// A repository inside this one, "nested/", is named with its slash.
 function splitPath(path) {
-  const slash = path.lastIndexOf("/");
+  const slash = path.lastIndexOf("/", path.length - 2);
   return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) };
 }
 
@@ -399,7 +493,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 <template>
   <div class="working-copy">
     <div v-if="files?.length" class="list-bar">
-      <span>{{ plural(files.length, "changed file") }}</span>
+      <span class="bar-count">
+        <button class="icon-button small" title="View Options" @click="viewMenu"><SlidersHorizontal :size="14" /></button>
+        {{ plural(files.length, "changed file") }}
+      </span>
       <span class="bar-actions">
         <button class="link-button" :disabled="busy || !unstagedFiles.length" @click="stageAll">Stage All</button>
         <button class="link-button" :disabled="busy || !stagedFiles.length" @click="unstageAll">Unstage All</button>
@@ -420,36 +517,65 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
     <div v-else ref="listEl" class="files" tabindex="0" @keydown="onListKeydown">
       <div ref="filesSpacer" class="files-spacer" :style="{ height: `${filesHeight}px` }">
         <div :style="{ transform: `translateY(${shownTop}px)` }">
-          <div
-            v-for="file in shownFiles"
-            :key="file.path"
-            class="file"
-            :class="{ selected: chosen.has(file.path), current: file.path === selectedPath && chosen.size > 1 }"
-            @click="onRowClick(file, $event)"
-            @contextmenu.prevent="onRowMenu(file, $event)"
-          >
-            <input
-              type="checkbox"
-              :checked="fullyStaged(file)"
-              :indeterminate="!!(file.staged && file.unstaged)"
-              :title="fullyStaged(file) ? 'Unstage' : 'Stage'"
-              @click.stop="toggle(file, $event)"
-            />
-            <span class="badge" :class="statusOf(file)" :title="statusOf(file)">{{ STATUS_LETTER[statusOf(file)] }}</span>
-            <FileIcon :name="file.path" :size="15" />
-            <span class="file-path" :title="file.old_path ? `${file.old_path} → ${file.path}` : file.path">
-              <span v-if="file.old_path" class="dim">{{ file.old_path }} → </span>
-              <span class="dim">{{ splitPath(file.path).dir }}</span>{{ splitPath(file.path).name }}
-            </span>
-            <button
-              class="icon-button small discard"
-              title="Discard Changes…"
-              :disabled="busy"
-              @click.stop="discard([file])"
+          <template v-for="row in shownFiles" :key="row.key">
+            <div
+              v-if="row.folder"
+              class="file folder-row"
+              @click="toggleFolder(row, $event)"
+              @contextmenu.prevent="onFolderMenu(row, $event)"
             >
-              <Undo2 :size="14" />
-            </button>
-          </div>
+              <input
+                type="checkbox"
+                :checked="folderStaged(row)"
+                :indeterminate="folderPartly(row)"
+                :title="folderStaged(row) ? 'Unstage' : 'Stage'"
+                @click.stop="busy ? $event.preventDefault() : toggleFiles(row.files)"
+              />
+              <span class="badge-space" />
+              <span class="indent" :style="{ width: `${row.depth * 16}px` }" />
+              <ChevronRight :size="14" class="chevron" :class="{ open: !closed.has(row.folder) }" />
+              <Folder :size="15" class="folder-icon" />
+              <span class="file-path" :title="row.folder">{{ row.name }}</span>
+              <button
+                class="icon-button small discard"
+                title="Discard Changes…"
+                :disabled="busy"
+                @click.stop="discard(row.files)"
+              >
+                <Undo2 :size="14" />
+              </button>
+            </div>
+            <div
+              v-else
+              class="file"
+              :class="{ selected: chosen.has(row.file.path), current: row.file.path === selectedPath && chosen.size > 1 }"
+              @click="onRowClick(row.file, $event)"
+              @contextmenu.prevent="onRowMenu(row.file, $event)"
+            >
+              <input
+                type="checkbox"
+                :checked="fullyStaged(row.file)"
+                :indeterminate="!!(row.file.staged && row.file.unstaged)"
+                :title="fullyStaged(row.file) ? 'Unstage' : 'Stage'"
+                @click.stop="toggle(row.file, $event)"
+              />
+              <span class="badge" :class="statusOf(row.file)" :title="statusOf(row.file)">{{ STATUS_LETTER[statusOf(row.file)] }}</span>
+              <span v-if="asTree" class="indent" :style="{ width: `${row.depth * 16 + 22}px` }" />
+              <FileIcon :name="row.file.path" :size="15" />
+              <span class="file-path" :title="row.file.old_path ? `${row.file.old_path} → ${row.file.path}` : row.file.path">
+                <span v-if="row.file.old_path" class="dim">{{ row.file.old_path }} → </span>
+                <span v-if="!asTree" class="dim">{{ splitPath(row.file.path).dir }}</span>{{ splitPath(row.file.path).name }}
+              </span>
+              <button
+                class="icon-button small discard"
+                title="Discard Changes…"
+                :disabled="busy"
+                @click.stop="discard([row.file])"
+              >
+                <Undo2 :size="14" />
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -523,6 +649,38 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   padding: 8px 16px;
   font-size: 12.5px;
   color: var(--text-secondary);
+}
+
+.bar-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+}
+
+.indent {
+  flex-shrink: 0;
+  margin-right: -8px;
+}
+
+.badge-space {
+  flex-shrink: 0;
+  width: 17px;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.12s ease;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+.folder-icon {
+  flex-shrink: 0;
+  color: var(--icon);
 }
 
 .bar-actions {
