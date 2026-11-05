@@ -1,5 +1,6 @@
 <script setup>
 import { nextTick, onMounted, reactive, ref } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import { closeForm } from "../lib/overlays.js";
 import { focusDialog, submitOnEnter } from "../lib/dialogKeys.js";
 import { draftFor, dropDraft, keepDraft } from "../lib/drafts.js";
@@ -16,7 +17,7 @@ const cancelButton = ref(null);
 
 // Whether anything typed would be lost by closing.
 const typed = () =>
-  props.dialog.fields.some((f) => ["text", "textarea", undefined].includes(f.type) && values[f.key] !== initial[f.key]);
+  props.dialog.fields.some((f) => ["text", "textarea", "folder", undefined].includes(f.type) && values[f.key] !== initial[f.key]);
 
 // Canceling keeps what was typed for next time; a click outside, easily a slip,
 // doesn't close it then.
@@ -30,6 +31,18 @@ function cancel({ outside = false } = {}) {
 // Text fields must be filled in unless marked optional; selects need a choice.
 const ready = () =>
   props.dialog.fields.every((f) => f.type === "checkbox" || f.optional || String(values[f.key]).trim() !== "");
+
+// A placeholder can follow what's typed in the other fields, as a default that's used
+// when the field is left empty.
+const placeholder = (field) => (typeof field.placeholder === "function" ? field.placeholder(values) : field.placeholder);
+
+// A folder field's Choose… picks a folder; its `choose(folder, values)` can make the
+// field's value of it, a new folder inside it, say.
+async function chooseFolder(field) {
+  const folder = await open({ directory: true, multiple: false, title: field.chooseTitle ?? field.label }).catch(() => null);
+  if (!folder) return;
+  values[field.key] = field.choose ? field.choose(folder, values) : folder;
+}
 
 function submit() {
   if (!ready()) return;
@@ -68,14 +81,19 @@ onMounted(async () => {
             </option>
           </select>
           <textarea v-else-if="field.type === 'textarea'" v-model="values[field.key]" rows="8" spellcheck="true" />
+          <div v-else-if="field.type === 'folder'" class="folder">
+            <input v-model="values[field.key]" type="text" spellcheck="false" autocomplete="off" :placeholder="placeholder(field)" />
+            <button type="button" class="secondary-button" @click.prevent="chooseFolder(field)">Choose…</button>
+          </div>
           <input
             v-else
             v-model="values[field.key]"
             :type="field.type === 'password' ? 'password' : 'text'"
             spellcheck="false"
             autocomplete="off"
-            :placeholder="field.placeholder"
+            :placeholder="placeholder(field)"
           />
+          <span v-if="field.hint" class="hint">{{ field.hint }}</span>
         </label>
       </template>
 
@@ -144,6 +162,26 @@ h2 {
   font: inherit;
   font-size: 14px;
   color: var(--text-primary);
+}
+
+.folder {
+  display: flex;
+  gap: 8px;
+}
+
+.folder input {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder .secondary-button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .field input:focus,

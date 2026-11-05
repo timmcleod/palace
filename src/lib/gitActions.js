@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
@@ -583,6 +584,8 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   const worktrees = () => overview.value?.worktrees ?? [];
   const worktreeOf = (branch) => overview.value?.branches.find((b) => b.name === branch)?.worktree ?? null;
   const folderName = (path) => path.replace(/\/+$/, "").split("/").at(-1);
+  // A path in the home folder as ~/…, shorter to show.
+  const tildify = (path, home) => (home && path.startsWith(`${home.replace(/\/+$/, "")}/`) ? `~${path.slice(home.replace(/\/+$/, "").length)}` : path);
 
   // Where a new worktree goes unless the user says otherwise: beside the repository's
   // own folder, named after it and the branch, as "palace-feature-login".
@@ -601,6 +604,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     if (remote && overview.value.branches.some((b) => b.name === local)) return newWorktree({ branch: local });
     const creating = !branch;
     const from = start ?? current() ?? "HEAD";
+    const home = await homeDir().catch(() => null);
     const values = await openForm({
       title: "New Worktree",
       message: creating
@@ -613,10 +617,15 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
         {
           key: "folder",
           label: "Folder",
-          type: "text",
+          type: "folder",
           optional: creating,
           value: creating ? "" : worktreeFolder(local),
-          placeholder: creating ? `Beside this one, named after the branch` : undefined,
+          // Left empty, it's beside the repository's, named after the branch typed.
+          placeholder: creating ? (typed) => tildify(worktreeFolder(typed.name?.trim() || "branch"), home) : undefined,
+          hint: "A new folder, or an empty one.",
+          chooseTitle: "Add the Worktree In",
+          // As with cloning, a folder picked holds the worktree in a new folder of its name.
+          choose: (folder, typed) => `${folder}/${folderName(worktreeFolder(creating ? typed.name?.trim() || "branch" : local))}`,
         },
         { key: "open", label: "Open it", type: "checkbox", value: true },
       ].filter(Boolean),
