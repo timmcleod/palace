@@ -270,8 +270,12 @@ fn head_tree(repo: &Repository) -> Result<Option<Tree<'_>>, git2::Error> {
 // endings, LFS) apply as they do for `git add`.
 
 fn stage(path: &str, files: &[String]) -> Result<(), String> {
-    // --add takes new files, and --remove stages deletions, as `add -A` does.
-    git_input(path, &["update-index", "--add", "--remove", "-z", "--stdin"], Some(&nul_separated(files))).map(drop)
+    // --add takes new files, and --remove stages deletions, as `add -A` does. The status
+    // lists a repository inside this one, untracked, as a folder, "nested/", which
+    // update-index would skip without a word: named without the slash, it's staged as
+    // the repository's commit, as `git add` does.
+    let files: Vec<String> = files.iter().map(|file| file.strip_suffix('/').unwrap_or(file).to_string()).collect();
+    git_input(path, &["update-index", "--add", "--remove", "-z", "--stdin"], Some(&nul_separated(&files))).map(drop)
 }
 
 fn unstage(path: &str, files: &[String]) -> Result<(), String> {
@@ -731,6 +735,21 @@ mod tests {
             let index = repo.index().unwrap();
             assert_eq!(index.get_path(Path::new("dir/run.sh"), 0).unwrap().mode, 0o100755);
         }
+    }
+
+    #[test]
+    fn staging_a_repository_inside_this_one_listed_as_a_folder() {
+        let t = TempRepo::new("stage-nested");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let nested = Path::new(t.path()).join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        crate::cli::git_in(&nested, &["init", "-q"]).unwrap();
+        crate::cli::git_in(&nested, &["-c", "user.name=T", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "N"]).unwrap();
+
+        stage(t.path(), &["nested/".to_string()]).unwrap();
+        let repo = Repository::open(t.path()).unwrap();
+        let index = repo.index().unwrap();
+        assert_eq!(index.get_path(Path::new("nested"), 0).unwrap().mode, 0o160000);
     }
 
     #[test]

@@ -7,7 +7,7 @@ const showBlame = ref(false);
 </script>
 
 <script setup>
-import { computed, reactive, shallowRef, watch } from "vue";
+import { computed, nextTick, reactive, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { formatSize } from "../lib/format.js";
 import { highlightText } from "../lib/highlight.js";
@@ -85,6 +85,8 @@ async function revealFile(file) {
     const dir = parts.slice(0, i).join("/");
     if (!expanded.has(dir)) await toggle(dir);
   }
+  // Once the list is drawn as long as it's become, or it can't scroll that far.
+  await nextTick();
   scrollToRow(rows.value.findIndex((row) => row.path === file));
   await openFile(file);
 }

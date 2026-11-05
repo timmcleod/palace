@@ -134,8 +134,7 @@ pub(crate) fn changed_files(diff: &Diff) -> Result<(Vec<ChangedFile>, bool), git
     let mut files = Vec::new();
     for (index, delta) in diff.deltas().enumerate() {
         let (mut additions, mut deletions, mut binary) = (0, 0, delta.flags().is_binary());
-        if !counted {
-        } else if let Some(patch) = Patch::from_diff(diff, index)? {
+        if counted && let Some(patch) = Patch::from_diff(diff, index)? {
             (_, additions, deletions) = patch.line_stats()?;
             // Binary detection needs the file contents, which loading the patch reads.
             binary |= patch.delta().flags().is_binary();
