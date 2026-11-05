@@ -1236,7 +1236,6 @@ watch(
 // Recent repositories opened in other windows join the list here too.
 onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
 
-/** Opens a new window, to open another repository in, side by side with this one. */
 // Opens the worktree at `path` in a window of its own (a tab of this one on a Mac), or
 // brings forward the window it's open in.
 async function openWorktree(path) {
@@ -1246,6 +1245,7 @@ async function openWorktree(path) {
   );
 }
 
+/** Opens a new window, to open another repository in, side by side with this one. */
 const newWindow = () =>
   invoke("new_window", { dark: document.documentElement.dataset.theme === "dark" }).catch((e) =>
     tell("Couldn't Open a Window", String(e)),
