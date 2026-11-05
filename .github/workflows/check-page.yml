@@ -1,0 +1,41 @@
+# Builds the page on every push and pull request that changes it, so an import that no
+# longer resolves shows up when it's made rather than when a release is tagged.
+
+name: Check page
+
+on:
+  push:
+    branches: ["**"]
+    paths: &paths
+      - "src/**"
+      - "public/**"
+      - "scripts/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - ".github/workflows/check-page.yml"
+  pull_request:
+    paths: *paths
+
+# A newer push to the same branch makes an older run's result moot.
+concurrency:
+  group: check-page-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the page
+        run: npm run build
