@@ -87,6 +87,7 @@ import {
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { CANCELED } from "./lib/confirm.js";
+import { CONFLICT, NOT_A_REPOSITORY, errorDetail, isError } from "./lib/errors.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
@@ -795,10 +796,10 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     const message = await (label ? undoable({ label, mode, cover: COVER[command]?.(args), resumed }, work) : work());
     if (undoStack.value.at(-1) !== undone) op.actions = [{ label: "Undo", run: undo }];
     // Done, but changes set aside for it conflicted when put back.
-    if (message.startsWith("CONFLICT: ")) {
+    if (isError(message, CONFLICT)) {
       op.state = "conflict";
       op.title = `${done}, with conflicts`;
-      op.message = message.slice("CONFLICT: ".length);
+      op.message = errorDetail(message, CONFLICT);
       selected.value = "workspace:working-copy";
       return null;
     }
@@ -822,11 +823,11 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
       remoteOp.value = null;
     } else if (quietError?.(message)) {
       remoteOp.value = null;
-    } else if (message.startsWith("CONFLICT: ")) {
+    } else if (isError(message, CONFLICT)) {
       // The operation is under way and waiting on the user, not failed.
       op.state = "conflict";
       op.title = "Stopped for conflicts";
-      op.message = message.slice("CONFLICT: ".length);
+      op.message = errorDetail(message, CONFLICT);
       selected.value = "workspace:working-copy";
     } else {
       op.state = "failed";
@@ -999,7 +1000,7 @@ async function undoable({ cover, resumed, ...step }, work) {
   try {
     result = await work();
   } catch (e) {
-    if (before && String(e).startsWith("CONFLICT: ")) stopped = { path, step: resumed?.step ?? step, before };
+    if (before && isError(e, CONFLICT)) stopped = { path, step: resumed?.step ?? step, before };
     throw e;
   }
   const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
@@ -1533,7 +1534,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       }
       return;
     }
-    if (String(e).startsWith(NOT_A_REPOSITORY)) {
+    if (isError(e, NOT_A_REPOSITORY)) {
       offerToCreateRepository(path, { keepOnError });
       return;
     }
@@ -1555,9 +1556,6 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
     if (seq === loadSeq) loading.value = false;
   }
 }
-
-// Starts what repo_overview says about a folder that isn't in a repository.
-const NOT_A_REPOSITORY = "NOT_A_REPOSITORY: ";
 
 // A folder chosen to open that isn't a repository can become one, then open.
 async function offerToCreateRepository(path, options) {

@@ -22,6 +22,7 @@ import { addComment, commentsOn, deleteComment, editComment } from "../lib/revie
 import { agentCommand, agentName } from "../lib/agents.js";
 import ReviewComment from "./ReviewComment.vue";
 import Spinner from "./Spinner.vue";
+import { CHANGED_ON_DISK, isError } from "../lib/errors.js";
 
 // A file from the working copy, to read and edit. Edits that aren't saved stay with
 // their file (see editing.js) while you look at another, and the file is checked
@@ -270,8 +271,6 @@ async function keepMine() {
   }
 }
 
-const CHANGED_ON_DISK = "CHANGED_ON_DISK: ";
-
 // Saves the file open now, as with Ctrl+S (⌘S).
 function save() {
   if (!current || !view || (!dirty.value && !changedOnDisk.value)) return;
@@ -340,7 +339,7 @@ async function writeNow(target, doc, auto) {
   } catch (e) {
     const message = String(e);
     // Noted only on the file still open; coming back to another, it's checked again.
-    if (message.startsWith(CHANGED_ON_DISK)) {
+    if (isError(message, CHANGED_ON_DISK)) {
       if (current === target) changedOnDisk.value = true;
     } else if (!auto) {
       tell("Couldn't Save the File", message);

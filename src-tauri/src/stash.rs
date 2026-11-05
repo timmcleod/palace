@@ -1,6 +1,7 @@
 //! Stashes: setting the working copy's changes aside and bringing them back.
 
 use crate::cli::git;
+use crate::errors::CONFLICT;
 
 /// Stashes all staged and unstaged changes, and untracked files too when asked. With
 /// `files`, only those files are stashed (untracked ones included) and every other
@@ -48,7 +49,7 @@ pub async fn stash_apply(path: String, index: usize, pop: bool) -> Result<String
     git(&path, &["stash", if pop { "pop" } else { "apply" }, &stash], None).map_err(|e| {
         if e.contains("CONFLICT") {
             let kept = if pop { " The stash was kept." } else { "" };
-            format!("CONFLICT: The stash conflicted with your changes. Resolve the conflicts in the working copy.{kept}")
+            format!("{CONFLICT}The stash conflicted with your changes. Resolve the conflicts in the working copy.{kept}")
         } else {
             e
         }
@@ -70,7 +71,7 @@ pub(crate) fn unless_left_behind(path: &str, before: Option<String>, done: Strin
         return done;
     }
     format!(
-        "CONFLICT: {done} Your uncommitted changes conflicted when put back, so they're also kept in the stash list. \
+        "{CONFLICT}{done} Your uncommitted changes conflicted when put back, so they're also kept in the stash list. \
          Resolve the marked files in the working copy, then delete that stash."
     )
 }

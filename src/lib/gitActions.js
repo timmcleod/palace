@@ -5,6 +5,7 @@ import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
 import { undoHint } from "./confirm.js";
 import { keepDraft } from "./drafts.js";
+import { CONFLICT, PULL_REWRITTEN, errorDetail, isError } from "./errors.js";
 import { githubAccount } from "./github.js";
 import { githubRepoOf } from "./githubRemote.js";
 import {
@@ -50,10 +51,10 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   async function checkoutPull(remote, number, branch) {
     if (!(await leaveDetached())) return "Canceled.";
     const titles = ["Checking out…", `Checked out #${number}`, "Checkout failed"];
-    const rewritten = (e) => e.startsWith("PULL_REWRITTEN: ");
+    const rewritten = (e) => isError(e, PULL_REWRITTEN);
     const error = await run(titles, "checkout_pull", { remote, number, branch }, { quietError: rewritten });
     if (!error || !rewritten(error)) return error;
-    const count = error.slice("PULL_REWRITTEN: ".length);
+    const count = errorDetail(error, PULL_REWRITTEN);
     const yours =
       count === "?"
         ? `pr-${number} may have commits of your own on it`
@@ -426,7 +427,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     ];
     const error = await run(["Squashing…", "Squashed", "Couldn't squash"], "rebase_interactive", { base: plan.base, steps }, { undo: "Squash" });
     // The message written is offered again next time, unless it's in the commit now.
-    if (error && !error.startsWith("CONFLICT: ")) keepDraft(draft, values);
+    if (error && !isError(error, CONFLICT)) keepDraft(draft, values);
   }
 
   // Gives a commit on the current branch a new message. The commits after it are
@@ -461,7 +462,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     const error = await run(["Editing message…", "Edited message", "Couldn't edit the message"], "rebase_interactive", { base: plan.base, steps }, {
       undo: "Edit Message",
     });
-    if (error && !error.startsWith("CONFLICT: ")) keepDraft(draft, values);
+    if (error && !isError(error, CONFLICT)) keepDraft(draft, values);
   }
 
   // Moves a commit to just above (newer than) or below (older than) another.

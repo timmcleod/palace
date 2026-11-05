@@ -2,6 +2,7 @@
 //! repository is in the middle of. Every change runs the git CLI.
 
 use crate::cli::git;
+use crate::errors::CONFLICT;
 use git2::{Repository, RepositoryState};
 
 /// The multi-step operation the repository is in the middle of, if any: "merge",
@@ -220,7 +221,7 @@ fn squash_around_staged(path: &str, branch: &str) -> Result<String, String> {
         Ok(output) => output,
         Err(e) => {
             let error = squash_conflict_or(path, branch, e);
-            if error.starts_with("CONFLICT: ") {
+            if error.starts_with(CONFLICT) {
                 return Err(format!("{error} {kept}"));
             }
             // Nothing changed: put them straight back.
@@ -265,8 +266,8 @@ fn squash_conflict_or(path: &str, branch: &str, error: String) -> String {
         .unwrap_or(0);
     match conflicts {
         0 => error,
-        1 => format!("CONFLICT: Squashing {branch} conflicted in 1 file. Resolve it in the working copy, then commit."),
-        n => format!("CONFLICT: Squashing {branch} conflicted in {n} files. Resolve them in the working copy, then commit."),
+        1 => format!("{CONFLICT}Squashing {branch} conflicted in 1 file. Resolve it in the working copy, then commit."),
+        n => format!("{CONFLICT}Squashing {branch} conflicted in {n} files. Resolve them in the working copy, then commit."),
     }
 }
 
@@ -378,7 +379,7 @@ pub(crate) fn stopped_or(path: &str, error: String) -> String {
     }
     let files = if conflicts == 1 { "1 file".to_string() } else { format!("{conflicts} files") };
     format!(
-        "CONFLICT: The {operation} stopped because {files} conflicted. Resolve them in the working copy, then continue the {operation}, or abort it."
+        "{CONFLICT}The {operation} stopped because {files} conflicted. Resolve them in the working copy, then continue the {operation}, or abort it."
     )
 }
 

@@ -4,6 +4,7 @@ mod cli;
 mod commit;
 mod compare;
 mod config;
+mod errors;
 mod files;
 mod git;
 mod github;

@@ -2,6 +2,7 @@
 //! user's SSH agent and credential helpers, and stream git's progress to the window.
 
 use crate::cli::{Running, Runnings, git_with_progress, git_with_progress_in};
+use crate::errors::PULL_REWRITTEN;
 use std::path::{Path, PathBuf};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
@@ -102,10 +103,6 @@ pub async fn checkout_pull(
     })
     .await
 }
-
-/// Starts the refusal to replace pr-N's own commits with a rewritten pull request: then
-/// how many of them there are, or "?" when Palace can't tell which are the user's.
-const PULL_REWRITTEN: &str = "PULL_REWRITTEN: ";
 
 fn checkout_pull_from(
     path: &str,

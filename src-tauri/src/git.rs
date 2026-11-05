@@ -1,3 +1,4 @@
+use crate::errors::NOT_A_REPOSITORY;
 use git2::{BranchType, ErrorClass, ErrorCode, Repository, Sort};
 use serde::Serialize;
 use std::path::Path;
@@ -69,10 +70,6 @@ pub struct Submodule {
     name: String,
     path: String,
 }
-
-/// Starts the refusal for a folder that isn't in a repository, so Palace can offer to
-/// create one there.
-const NOT_A_REPOSITORY: &str = "NOT_A_REPOSITORY: ";
 
 #[tauri::command]
 pub async fn repo_overview(path: String) -> Result<RepoOverview, String> {

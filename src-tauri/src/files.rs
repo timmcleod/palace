@@ -3,6 +3,7 @@
 //! copy, never into .git, and never over changes made since the file was read.
 
 use crate::commit::{IMAGE_TYPES, MAX_IMAGE};
+use crate::errors::CHANGED_ON_DISK;
 use base64::Engine;
 use git2::Repository;
 use serde::Serialize;
@@ -15,10 +16,6 @@ use std::time::UNIX_EPOCH;
 /// editor over megabytes of text is slow, and such files are rarely edited by hand.
 const MAX_EDITABLE: u64 = 2 * 1024 * 1024;
 const MAX_SHOWN: u64 = 10 * 1024 * 1024;
-
-/// Starts the refusal to save over a file that changed on disk since it was read, so
-/// the page can offer to reload it instead.
-const CHANGED_ON_DISK: &str = "CHANGED_ON_DISK: ";
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct FileEntry {
