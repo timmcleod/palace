@@ -54,6 +54,64 @@ pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_
     true
 }
 
+/// Another window with the folder at `path` open, as a worktree about to be removed,
+/// and what closing it would lose.
+#[derive(Serialize)]
+pub struct Showing {
+    /// The windows, by label, to close with `close_windows`.
+    windows: Vec<String>,
+    /// The programs running in its terminals, by name, or None for one it can't tell.
+    programs: Vec<Option<String>>,
+    /// Its files with edits not saved.
+    edits: Vec<String>,
+}
+
+/// The labels of the windows other than `window` with the folder at `path` open.
+fn others_showing(windows: &Windows, window: &WebviewWindow, path: &str) -> Vec<String> {
+    let path = same_folder(path);
+    windows.0.lock().unwrap().iter().filter(|(label, open)| *label != window.label() && same_folder(open) == path).map(|(label, _)| label.clone()).collect()
+}
+
+/// A folder as its real path, through any symbolic links, so the same folder compares
+/// equal however it was reached; or once it's gone, as given, without a trailing slash.
+fn same_folder(path: &str) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| std::path::Path::new(path).components().collect())
+}
+
+/// Whether another window has the folder at `path` open, and if so, what closing it
+/// would lose.
+#[tauri::command]
+pub fn window_showing(window: WebviewWindow, windows: State<'_, Windows>, path: String) -> Option<Showing> {
+    let labels = others_showing(&windows, &window, &path);
+    if labels.is_empty() {
+        return None;
+    }
+    Some(Showing {
+        windows: labels.clone(),
+        programs: labels.iter().flat_map(|label| crate::terminal::busy_programs(label)).collect(),
+        edits: labels.iter().flat_map(|label| crate::quit::unsaved_in(label)).collect(),
+    })
+}
+
+/// Closes the windows labeled `labels`, other than `window`, without asking: the user
+/// has been asked already, as about removing the worktree they show (see
+/// window_showing). Their terminals are hung up.
+#[tauri::command]
+pub fn close_windows(app: AppHandle, window: WebviewWindow, labels: Vec<String>) {
+    for label in labels.iter().filter(|label| **label != window.label()) {
+        if let Some(other) = app.get_webview_window(label) {
+            let _ = other.destroy();
+        }
+    }
+}
+
+/// Whether the folder at `path` is still there, for a window whose repository can't be
+/// read any more: it may have been removed, as a worktree, or moved.
+#[tauri::command]
+pub fn folder_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
+}
+
 /// Shows `notice`, that a terminal in `window` finished or needs the user, in the Palace
 /// window the user is in, which may be `window` itself, and says whether there was one.
 /// There isn't when another app is in front: then the system's notification says it.

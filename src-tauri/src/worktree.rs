@@ -164,7 +164,8 @@ mod tests {
         assert_eq!(list[0].branch.as_deref(), Some(main.as_str()));
         assert!(!list[1].main && !list[1].current && !list[1].locked);
         assert_eq!(list[1].branch.as_deref(), Some("feature"));
-        assert_eq!(list[1].path, show(&tidy(&folder)));
+        // git notes its real path: on macOS, the temporary folder is reached through a link.
+        assert_eq!(list[1].path, show(&tidy(&folder.canonicalize().unwrap())));
 
         // Seen from the worktree, it's the current one, and the main one is still first.
         let inside = Repository::open(&folder).unwrap();

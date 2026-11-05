@@ -89,6 +89,11 @@ pub fn set_unsaved_edits(window: WebviewWindow, files: Vec<String>) {
     UNSAVED.lock().unwrap().insert(window.label().to_string(), files);
 }
 
+/// The files with edits not saved in `window`, each described as “name” in repository.
+pub fn unsaved_in(window: &str) -> Vec<String> {
+    UNSAVED.lock().unwrap().get(window).cloned().unwrap_or_default()
+}
+
 /// Forgets the edits of a window that's closed.
 pub fn forget(window: &str) {
     UNSAVED.lock().unwrap().remove(window);

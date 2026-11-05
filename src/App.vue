@@ -45,6 +45,7 @@ import PullDialog from "./components/PullDialog.vue";
 import ResetDialog from "./components/ResetDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
+import FolderGoneBanner from "./components/FolderGoneBanner.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
 import NewPullRequestDialog from "./components/NewPullRequestDialog.vue";
 import SettingsView from "./components/SettingsView.vue";
@@ -1472,6 +1473,10 @@ async function clearReview() {
 
 // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
 let loadSeq = 0;
+// The open repository's folder, once it's gone: removed as a worktree, or moved or
+// deleted. The window goes on showing it as it was, saying so, until it's closed.
+const folderGone = ref(false);
+const isWorktree = computed(() => !!overview.value?.worktrees?.some((w) => w.current && !w.main));
 
 /**
  * Opens the repository at `path`. `quiet` refreshes the open one in the background.
@@ -1514,13 +1519,20 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       otherStacks.delete(data.path);
     }
     overview.value = data;
+    folderGone.value = false;
     error.value = "";
     rememberRepository(data);
     recents.value = recentRepositories();
   } catch (e) {
     if (seq !== loadSeq) return;
-    // A failed background refresh keeps showing the last good state.
-    if (quiet) return;
+    // A failed background refresh keeps showing the last good state, saying so when
+    // that's because the folder is gone.
+    if (quiet) {
+      if (path === overview.value?.path && !(await invoke("folder_exists", { path }).catch(() => true))) {
+        if (seq === loadSeq) folderGone.value = true;
+      }
+      return;
+    }
     if (String(e).startsWith(NOT_A_REPOSITORY)) {
       offerToCreateRepository(path, { keepOnError });
       return;
@@ -1969,6 +1981,13 @@ function startResize(event, pane, min, max) {
         </button>
       </div>
 
+      <FolderGoneBanner
+        v-if="folderGone"
+        :name="overview.name"
+        :path="overview.path"
+        :worktree="isWorktree"
+        @close="thisWindow.close()"
+      />
       <OperationBanner
         v-if="overview.operation"
         :operation="overview.operation"

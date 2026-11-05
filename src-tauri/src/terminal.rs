@@ -321,6 +321,18 @@ pub fn busy_terminals() -> Vec<Busy> {
         .collect()
 }
 
+/// The programs running in `window`'s terminals, by name, as "vim" or "claude", or None
+/// where it can't tell.
+pub fn busy_programs(window: &str) -> Vec<Option<String>> {
+    TERMINALS
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|t| t.window == window && is_busy(t))
+        .map(|t| t.master.process_group_leader().and_then(program_name))
+        .collect()
+}
+
 /// Hangs up the terminal, which ends its shell and what the shell started.
 #[tauri::command]
 pub async fn terminal_close(id: u32) {

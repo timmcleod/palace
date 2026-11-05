@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { agentOfProgram } from "./agents.js";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
@@ -646,18 +647,41 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   async function removeWorktree(worktree) {
     const name = folderName(worktree.path);
     const changed = !worktree.prunable && (await invoke("worktree_has_changes", { worktree: worktree.path }).catch(() => false));
+    // Open in another window, that window closes once it's removed, its terminals
+    // stopped: left open, they'd go on in a folder that's gone.
+    const showing = await invoke("window_showing", { path: worktree.path }).catch(() => null);
     const ok = await confirm(
-      changed
-        ? `“${name}” has changes that haven't been committed. Removing the worktree deletes its folder, ${worktree.path}, and those changes with it.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}`
-        : `This deletes its folder, ${worktree.path}.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}${worktree.locked ? " It's locked, so it's kept from being removed by mistake." : ""}`,
+      [
+        changed
+          ? `“${name}” has changes that haven't been committed. Removing the worktree deletes its folder, ${worktree.path}, and those changes with it.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}`
+          : `This deletes its folder, ${worktree.path}.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}${worktree.locked ? " It's locked, so it's kept from being removed by mistake." : ""}`,
+        showing && openElsewhere(showing),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       `Remove the Worktree “${name}”?`,
-      changed ? "Remove and Lose Changes" : "Remove",
+      changed ? "Remove and Lose Changes" : showing?.programs.length ? "Remove and Stop" : "Remove",
     );
     if (!ok) return;
-    await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
+    const error = await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
       worktree: worktree.path,
       force: changed || worktree.locked,
     });
+    // Not removed, as with another operation running or git refusing, it stays open.
+    if (!error && showing) invoke("close_windows", { labels: showing.windows }).catch(() => {});
+  }
+
+  // What closing the other window a worktree's open in loses: what its terminals are
+  // running, and edits not saved.
+  function openElsewhere({ programs, edits }) {
+    const lines = ["It's open in another window, which closes."];
+    if (programs.length) {
+      const names = programs.map((program) => (program ? (agentOfProgram(program) ?? `“${program}”`) : "a program"));
+      const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+      lines.push(`${list} ${names.length === 1 ? "is" : "are"} still running in ${names.length === 1 ? "a terminal" : "terminals"} there, and ${names.length === 1 ? "is" : "are"} stopped.`);
+    }
+    if (edits.length) lines.push(`Edits to ${edits.join(", ")} aren't saved, and are lost.`);
+    return lines.join(" ");
   }
 
   function lockWorktree(worktree, lock) {
