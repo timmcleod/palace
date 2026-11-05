@@ -217,17 +217,6 @@ const placed = computed(() => {
   return { at, unplaced, draft: draft.value ? keyOf(draft.value.lines) : null };
 });
 
-// A sent comment whose lines have changed has been acted on: there's nothing left to
-// check, so it goes. Not while the diff is too large to show, and so to place them in.
-watch(
-  () => placed.value.unplaced,
-  (unplaced) => {
-    if (props.diff.truncated || props.diff.binary || !props.diff.hunks) return;
-    for (const comment of unplaced) if (comment.sent) deleteComment(props.repo, comment.id);
-  },
-  { immediate: true },
-);
-
 const NONE = [];
 const commentsAt = (h, l) => (l == null ? NONE : (placed.value.at.get(`${h}:${l}`) ?? NONE));
 const draftAt = (h, l) => l != null && placed.value.draft === `${h}:${l}`;

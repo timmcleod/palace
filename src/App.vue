@@ -58,7 +58,7 @@ import UpdateNotice from "./components/UpdateNotice.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import ReviewTray from "./components/ReviewTray.vue";
-import { clearComments, clearSent, markSent, reviewMessage, unsentComments } from "./lib/review.js";
+import { clearComments, commentsIn, deleteComments, reviewMessage } from "./lib/review.js";
 import {
   forgetRepository,
   onSavedElsewhere,
@@ -1368,16 +1368,17 @@ async function showTerminalTab({ path, key }) {
   terminalPanel.value?.focus();
 }
 
-// Sends the repository's review comments not sent yet to its agent: into the prompt of
-// its agent tab, or a new one, for the user to add to and send.
+// Sends the repository's review comments to its agent: into the prompt of its agent
+// tab, or a new one, for the user to add to and send. They're in the prompt then, all
+// of them, so they go from here.
 const sendingReview = ref(false);
 async function sendReview() {
   const path = overview.value?.path;
-  const comments = path ? unsentComments(path) : [];
+  const comments = path ? [...commentsIn(path)] : [];
   if (!comments.length || sendingReview.value) return;
   sendingReview.value = true;
   try {
-    if (await pasteToAgent(reviewMessage(comments))) markSent(path, comments.map((c) => c.id));
+    if (await pasteToAgent(reviewMessage(comments))) deleteComments(path, comments.map((c) => c.id));
   } finally {
     sendingReview.value = false;
   }
@@ -1400,19 +1401,10 @@ async function pasteToAgent(text) {
   return true;
 }
 
-// A commit, made here or by the agent, or moving to another, ends the round of review:
-// the comments sent in it go.
-watch(
-  () => [overview.value?.path, overview.value?.head?.short_id],
-  ([path, id], [oldPath, oldId] = []) => {
-    if (path && path === oldPath && id && oldId && id !== oldId) clearSent(path);
-  },
-);
-
 async function clearReview() {
   const path = overview.value?.path;
   if (!path) return;
-  const unsent = unsentComments(path).length;
+  const unsent = commentsIn(path).length;
   if (unsent) {
     const ok = await askConfirm({
       title: "Clear the Comments?",

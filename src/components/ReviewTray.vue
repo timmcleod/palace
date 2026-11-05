@@ -13,8 +13,7 @@ const props = defineProps({
 const emit = defineEmits(["send", "clear"]);
 
 const comments = computed(() => reviews[props.path] ?? []);
-const unsent = computed(() => comments.value.filter((c) => !c.sent));
-const files = computed(() => new Set(unsent.value.map((c) => c.file)).size);
+const files = computed(() => new Set(comments.value.map((c) => c.file)).size);
 const agent = computed(() => agentName(agentCommand(props.path)));
 
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -23,12 +22,10 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 <template>
   <div v-if="comments.length" class="review-tray">
     <MessageSquare :size="14" class="icon" />
-    <span v-if="unsent.length" class="summary">{{ plural(unsent.length, "comment", "comments") }} on {{ plural(files, "file", "files") }}</span>
-    <span v-else class="summary dim">{{ plural(comments.length, "comment", "comments") }} sent</span>
+    <span class="summary">{{ plural(comments.length, "comment", "comments") }} on {{ plural(files, "file", "files") }}</span>
     <span class="spacer" />
     <button class="secondary-button" :disabled="sending" @click="emit('clear')">Clear</button>
     <button
-      v-if="unsent.length"
       class="primary-button send"
       :disabled="sending"
       :title="`Put the comments in ${agent}'s prompt, for you to add to and send`"
@@ -53,10 +50,6 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
 .icon {
   color: var(--accent);
-}
-
-.dim {
-  color: var(--text-tertiary);
 }
 
 .spacer {

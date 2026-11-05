@@ -400,19 +400,18 @@ function placeNotes() {
   for (const comment of comments.value) {
     const first = findLines(view.state, comment.lines);
     if (first == null) {
-      if (comment.sent) deleteComment(props.path, comment.id);
-      else missing.push(comment);
+      missing.push(comment);
       continue;
     }
     const data = { comment };
-    notes.push({ key: `c${comment.id}`, version: `${comment.body}|${comment.sent}`, line: first + comment.lines.length - 1, data });
+    notes.push({ key: `c${comment.id}`, version: comment.body, line: first + comment.lines.length - 1, data });
   }
   if (draft.value) notes.push({ key: "draft", version: draft.value.key, line: draft.value.last, data: { draft: draft.value } });
   lost.value = missing;
   cm.setReviewNotes(view, notes);
 }
 
-watch(() => comments.value.map((c) => `${c.id}|${c.body}|${c.sent}`).join(","), placeNotes);
+watch(() => comments.value.map((c) => `${c.id}|${c.body}`).join(","), placeNotes);
 watch(draft, placeNotes);
 
 // What the editor shows under the lines: a comment, or the box for writing one.

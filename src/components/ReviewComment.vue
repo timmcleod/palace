@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onMounted, ref } from "vue";
-import { Check, Pencil, Trash2 } from "lucide-vue-next";
+import { Pencil, Trash2 } from "lucide-vue-next";
 import { linesLabel } from "../lib/review.js";
 import { isMac } from "../lib/platform.js";
 
@@ -54,7 +54,7 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
 </script>
 
 <template>
-  <div class="review-comment" :class="{ sent: comment?.sent && !editing }">
+  <div class="review-comment">
     <div v-if="quote && comment" class="quote mono">
       <div v-for="(line, i) in comment.lines.slice(0, 6)" :key="i" :class="line.kind === '+' ? 'added' : line.kind === '-' ? 'removed' : ''">{{
         `${SIGN[line.kind] ?? " "} ${line.text}`
@@ -80,7 +80,6 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
     <template v-else>
       <div class="header">
         <span class="label">{{ linesLabel(comment.lines) }}</span>
-        <span v-if="comment.sent" class="sent-mark"><Check :size="12" /> Sent</span>
         <span class="spacer" />
         <button class="icon-button small" title="Edit" @click="edit"><Pencil :size="13" /></button>
         <button class="icon-button small" title="Delete" @click="emit('delete')"><Trash2 :size="13" /></button>
@@ -110,11 +109,6 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
   color: var(--text-primary);
 }
 
-.review-comment.sent {
-  border-left-color: var(--border);
-  opacity: 0.65;
-}
-
 .header {
   display: flex;
   align-items: center;
@@ -129,14 +123,6 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
 
 .review-comment > .label {
   margin-bottom: 5px;
-}
-
-.sent-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11.5px;
-  color: var(--text-secondary);
 }
 
 .spacer {

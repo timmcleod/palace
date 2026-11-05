@@ -2,10 +2,10 @@ import { reactive } from "vue";
 import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
 
 // Review comments: notes on lines of a diff, kept for each repository until they're
-// sent to its agent (see sendToAgent) and done with. Once sent, a comment goes when
-// its lines change, as the agent acts on it, or when HEAD moves to another commit.
+// sent to its agent (see sendToAgent), which puts them all in its prompt, and so done
+// with them here.
 //
-// Each is { id, file, where, lines, body, sent }: `where` is the diff it's on
+// Each is { id, file, where, lines, body }: `where` is the diff it's on
 // ("unstaged", "staged", "commit:<id>" or "compare:<base>..<head>"), and `lines` the
 // lines it's on, as the diff had them ({ kind, old, new, text }), which place it again
 // as the diff changes.
@@ -13,12 +13,21 @@ import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
 const KEY = "palace.reviewComments";
 
 // Repository path -> its comments, oldest first.
-export const reviews = reactive(readJson(KEY, {}));
+export const reviews = reactive(withoutSent(readJson(KEY, {})));
+
+// Comments were once kept, marked sent, after they'd gone to the agent; those are done.
+function withoutSent(all) {
+  for (const [path, comments] of Object.entries(all ?? {})) {
+    all[path] = comments.filter((c) => !c.sent);
+    if (!all[path].length) delete all[path];
+  }
+  return all ?? {};
+}
 
 onSavedElsewhere((key, value) => {
   if (key !== KEY) return;
   for (const path of Object.keys(reviews)) delete reviews[path];
-  Object.assign(reviews, value ?? {});
+  Object.assign(reviews, withoutSent(value));
 });
 
 function save() {
@@ -33,8 +42,8 @@ const newId = () => crypto.randomUUID();
 /** The comments on `file` in the diff `where`. */
 export const commentsOn = (path, file, where) => (reviews[path] ?? []).filter((c) => c.file === file && c.where === where);
 
-/** The repository's comments not sent yet. */
-export const unsentComments = (path) => (reviews[path] ?? []).filter((c) => !c.sent);
+/** The repository's comments. */
+export const commentsIn = (path) => reviews[path] ?? [];
 
 export function addComment(path, { file, where, lines, body }) {
   (reviews[path] ??= []).push({
@@ -43,40 +52,29 @@ export function addComment(path, { file, where, lines, body }) {
     where,
     lines: lines.map(({ kind, old, new: added, text }) => ({ kind, old: old ?? null, new: added ?? null, text })),
     body,
-    sent: false,
   });
   save();
 }
 
-/** Changes a comment's text; changed, it's to be sent again. */
 export function editComment(path, id, body) {
   const comment = reviews[path]?.find((c) => c.id === id);
   if (!comment) return;
   comment.body = body;
-  comment.sent = false;
   save();
 }
 
 export function deleteComment(path, id) {
+  deleteComments(path, [id]);
+}
+
+export function deleteComments(path, ids) {
   if (!reviews[path]) return;
-  reviews[path] = reviews[path].filter((c) => c.id !== id);
+  reviews[path] = reviews[path].filter((c) => !ids.includes(c.id));
   save();
 }
 
 export function clearComments(path) {
   delete reviews[path];
-  save();
-}
-
-/** Drops the comments already sent, as once a commit ends the round of review. */
-export function clearSent(path) {
-  if (!reviews[path]?.some((c) => c.sent)) return;
-  reviews[path] = reviews[path].filter((c) => !c.sent);
-  save();
-}
-
-export function markSent(path, ids) {
-  for (const comment of reviews[path] ?? []) if (ids.includes(comment.id)) comment.sent = true;
   save();
 }
 
