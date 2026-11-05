@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
+import { fileManager } from "./platform.js";
 import { undoHint } from "./confirm.js";
 import { keepDraft } from "./drafts.js";
 import { githubAccount } from "./github.js";
@@ -25,8 +26,9 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // error reporting, resolving to the error message or null; `overview` is the
 // repository overview ref. `pullRequest` is { available(), create(branch) }, for
 // branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
-// shown, when it isn't the current one.
-export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null }) {
+// shown, when it isn't the current one. `openWorktree(path)` opens a worktree in a
+// window of its own, or brings forward the one it's open in.
+export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null, openWorktree = () => {} }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -574,14 +576,119 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     await run([`${verb}…`, "Done", `Couldn't ${action} the ${operation}`], "control_operation", { action });
   }
 
+  // --- Worktrees -------------------------------------------------------------------
+  // More working copies of the repository, each with its own branch checked out (see
+  // worktree.rs). Each opens in a window of its own.
+
+  const worktrees = () => overview.value?.worktrees ?? [];
+  const worktreeOf = (branch) => overview.value?.branches.find((b) => b.name === branch)?.worktree ?? null;
+  const folderName = (path) => path.replace(/\/+$/, "").split("/").at(-1);
+
+  // Where a new worktree goes unless the user says otherwise: beside the repository's
+  // own folder, named after it and the branch, as "palace-feature-login".
+  function worktreeFolder(branch) {
+    const main = worktrees().find((w) => w.main)?.path ?? overview.value.path;
+    const parent = main.slice(0, main.lastIndexOf("/"));
+    return `${parent}/${folderName(main)}-${branch.replace(/[/\\\s]+/g, "-")}`;
+  }
+
+  // A worktree with `branch` checked out: a local branch, or for `remote`, a remote one
+  // as a local branch tracking it. With no branch, it's a new one, named in the dialog
+  // and started at the current branch, or at `start`.
+  async function newWorktree({ branch = null, remote = false, start = null } = {}) {
+    // A remote branch with a local branch of its name already uses that.
+    const local = remote ? branch.slice(branch.indexOf("/") + 1) : branch;
+    if (remote && overview.value.branches.some((b) => b.name === local)) return newWorktree({ branch: local });
+    const creating = !branch;
+    const from = start ?? current() ?? "HEAD";
+    const values = await openForm({
+      title: "New Worktree",
+      message: creating
+        ? `A new working copy of the repository, beside this one, with a new branch starting at ${from} checked out in it.`
+        : remote
+          ? `A new working copy of the repository, beside this one, with “${local}” checked out in it, tracking ${branch}.`
+          : `A new working copy of the repository, beside this one, with “${branch}” checked out in it.`,
+      fields: [
+        creating && { key: "name", label: "Branch name", type: "text", placeholder: "feature/my-change" },
+        {
+          key: "folder",
+          label: "Folder",
+          type: "text",
+          optional: creating,
+          value: creating ? "" : worktreeFolder(local),
+          placeholder: creating ? `Beside this one, named after the branch` : undefined,
+        },
+        { key: "open", label: "Open it", type: "checkbox", value: true },
+      ].filter(Boolean),
+      confirmLabel: "Add Worktree",
+    });
+    if (!values) return;
+    const name = creating ? values.name.trim() : local;
+    const folder = values.folder.trim() || worktreeFolder(name);
+    const error = await run(["Adding worktree…", "Added worktree", "Couldn't add the worktree"], "add_worktree", {
+      folder,
+      branch: creating ? from : branch,
+      create: creating ? name : null,
+      remote,
+    });
+    if (!error && values.open) openWorktree(folder);
+  }
+
+  async function removeWorktree(worktree) {
+    const name = folderName(worktree.path);
+    const changed = !worktree.prunable && (await invoke("worktree_has_changes", { worktree: worktree.path }).catch(() => false));
+    const ok = await confirm(
+      changed
+        ? `“${name}” has changes that haven't been committed. Removing the worktree deletes its folder, ${worktree.path}, and those changes with it.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}`
+        : `This deletes its folder, ${worktree.path}.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}${worktree.locked ? " It's locked, so it's kept from being removed by mistake." : ""}`,
+      `Remove the Worktree “${name}”?`,
+      changed ? "Remove and Lose Changes" : "Remove",
+    );
+    if (!ok) return;
+    await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
+      worktree: worktree.path,
+      force: changed || worktree.locked,
+    });
+  }
+
+  function lockWorktree(worktree, lock) {
+    const titles = lock ? ["Locking…", "Locked worktree", "Couldn't lock the worktree"] : ["Unlocking…", "Unlocked worktree", "Couldn't unlock the worktree"];
+    return run(titles, "lock_worktree", { worktree: worktree.path, lock });
+  }
+
+  function pruneWorktrees() {
+    return run(["Pruning…", "Pruned worktrees", "Couldn't prune the worktrees"], "prune_worktrees");
+  }
+
+  function worktreeMenu(path) {
+    const worktree = worktrees().find((w) => w.path === path);
+    if (!worktree) return null;
+    return [
+      { label: worktree.current ? "Open (Showing)" : "Open", action: () => openWorktree(path), disabled: worktree.current || worktree.prunable },
+      { label: `Show in ${fileManager}`, action: () => invoke("open_folder", { path }).catch((e) => tell("Couldn't Open the Folder", String(e))), disabled: worktree.prunable },
+      { label: "Copy Path", action: () => navigator.clipboard.writeText(path) },
+      !worktree.main && { separator: true },
+      !worktree.main && { label: worktree.locked ? "Unlock" : "Lock", action: () => lockWorktree(worktree, !worktree.locked) },
+      worktree.prunable && { label: "Prune Worktrees", action: pruneWorktrees },
+      !worktree.main && { separator: true },
+      // Its own folder can't be deleted from under the window showing it.
+      !worktree.main && { label: "Remove…", action: () => removeWorktree(worktree), disabled: worktree.current, danger: true },
+    ];
+  }
+
   // --- Context menus ---------------------------------------------------------------
 
   function branchMenu(name) {
     const head = current();
     const isCurrent = name === head;
     const upstream = overview.value.branches.find((b) => b.name === name)?.upstream;
+    const elsewhere = worktreeOf(name);
     return [
-      { label: "Check Out", action: () => checkout("branch", name), disabled: isCurrent },
+      // Checked out in another worktree, it can't be here too: that worktree opens.
+      elsewhere
+        ? { label: `Open Worktree “${folderName(elsewhere)}”`, action: () => openWorktree(elsewhere) }
+        : { label: "Check Out", action: () => checkout("branch", name), disabled: isCurrent },
+      !elsewhere && !isCurrent && { label: "New Worktree…", action: () => newWorktree({ branch: name }) },
       !upstream && { label: `Publish “${name}”…`, action: () => publishBranch(name), disabled: !overview.value.remotes.length },
       pullRequest?.available() && { label: "Create Pull Request…", action: () => pullRequest.create(name) },
       { separator: true },
@@ -603,7 +710,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       isCurrent && headBranchInfo()?.upstream && { separator: true },
       isCurrent && headBranchInfo()?.upstream && { label: "Force Push…", action: forcePush, danger: true },
       { separator: true },
-      { label: "Delete…", action: () => deleteBranch(name), disabled: isCurrent, danger: true },
+      { label: "Delete…", action: () => deleteBranch(name), disabled: isCurrent || !!elsewhere, danger: true },
     ];
   }
 
@@ -611,6 +718,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     const head = current();
     return [
       { label: "Check Out as Local Branch", action: () => checkout("remote-branch", name) },
+      { label: "New Worktree…", action: () => newWorktree({ branch: name, remote: true }) },
       { separator: true },
       { label: `Merge “${name}” into “${head}”…`, action: () => merge(name), disabled: !head || midOperation() },
       { label: `Rebase “${head}” onto “${name}”…`, action: () => rebase(name), disabled: !head || midOperation() },
@@ -797,6 +905,12 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       ];
     }
     if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];
+    if (section === "worktrees") {
+      return [
+        { label: "New Worktree…", action: () => newWorktree() },
+        worktrees().some((w) => w.prunable) && { label: "Prune Worktrees", action: pruneWorktrees },
+      ];
+    }
     return null;
   }
 
@@ -804,12 +918,15 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     return [
       { label: "Create New Branch…", action: () => newBranch() },
       { label: "Create New Tag…", action: () => createTag() },
+      { label: "New Worktree…", action: () => newWorktree() },
       { separator: true },
       { label: "Add Remote Repository…", action: addRemote },
     ];
   }
 
   return {
+    worktreeMenu,
+    newWorktree,
     checkout,
     checkoutPull,
     deleteMergedBranch,

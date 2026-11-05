@@ -1160,6 +1160,7 @@ const actions = useGitActions({
     const r = historyRef.value;
     return r?.kind === "branch" && r.name !== overview.value?.head.branch ? r.name : null;
   },
+  openWorktree,
 });
 
 // Context menus for sidebar rows, keyed the same way the sidebar keys them.
@@ -1171,6 +1172,7 @@ function sidebarMenu(row, event) {
     "remote-branch": () => actions.remoteBranchMenu(name),
     tag: () => actions.tagMenu(name),
     stash: () => actions.stashMenu(Number(name)),
+    worktree: () => actions.worktreeMenu(name),
     // A remote's own row, not a folder of its branches ("origin/feature/").
     remote: () => {
       const remote = name.replace(/\/$/, "");
@@ -1180,9 +1182,13 @@ function sidebarMenu(row, event) {
   if (items) openMenu(event, items);
 }
 
-// Double-clicking a branch checks it out.
+// Double-clicking a branch checks it out, or if it's checked out in another worktree,
+// opens that. Double-clicking a worktree opens it.
 function sidebarActivate(row) {
   const [kind, name] = splitKey(row.key);
+  const elsewhere = kind === "branch" && overview.value.branches.find((b) => b.name === name)?.worktree;
+  if (elsewhere) return openWorktree(elsewhere);
+  if (kind === "worktree") return name !== overview.value.path && openWorktree(name);
   if (kind === "branch" && name !== overview.value.head.branch) switchTo(row.key, "branch", name);
   if (kind === "remote-branch") switchTo(row.key, "remote-branch", name);
 }
@@ -1231,6 +1237,15 @@ watch(
 onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
 
 /** Opens a new window, to open another repository in, side by side with this one. */
+// Opens the worktree at `path` in a window of its own, or
+// brings forward the window it's open in.
+async function openWorktree(path) {
+  if (await invoke("show_window_with", { path }).catch(() => false)) return;
+  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path }).catch((e) =>
+    tell("Couldn't Open the Worktree", String(e)),
+  );
+}
+
 const newWindow = () =>
   invoke("new_window", { dark: document.documentElement.dataset.theme === "dark" }).catch((e) =>
     tell("Couldn't Open a Window", String(e)),

@@ -90,13 +90,18 @@ pub(crate) struct TerminalTab {
     pub key: u32,
 }
 
-/// Opens a new window, a little below and to the right of `window`, with no repository
-/// open yet. `dark` is the theme Palace is showing, which the window takes from the
-/// start: otherwise it shows white until its page has loaded and turned it dark.
+/// Opens a new window, a little below and to the right of `window`, with the repository
+/// at `path` open, as for a worktree, or with none open yet. `dark` is the theme Palace
+/// is showing, which the window takes from the start: otherwise it shows white until
+/// its page has loaded and turned it dark.
 #[tauri::command]
-pub async fn new_window(app: AppHandle, window: WebviewWindow, dark: bool) -> Result<(), String> {
+pub async fn new_window(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, dark: bool, path: Option<String>) -> Result<(), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    // What its page opens as it starts (see window_start).
+    if let Some(path) = path {
+        windows.0.lock().unwrap().insert(config.label.clone(), path);
+    }
     let mut builder = WebviewWindowBuilder::from_config(&app, &config).map_err(|e| format!("Couldn't open a window: {e}"))?;
     if let (Ok(position), Ok(scale)) = (window.outer_position(), window.scale_factor()) {
         let position = position.to_logical::<f64>(scale);

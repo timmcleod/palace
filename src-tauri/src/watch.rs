@@ -47,6 +47,9 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
     let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
     let gitdir = repo.path().to_path_buf();
+    // In a worktree added with `git worktree add`, .git holds only its own HEAD and
+    // index: its branches are the main repository's, in the .git they share.
+    let common = repo.commondir().to_path_buf();
 
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
     let watcher = notify::recommended_watcher(move |event| {
@@ -62,6 +65,10 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
         // live under refs/.
         let _ = w.watch(&gitdir, RecursiveMode::NonRecursive);
         let _ = w.watch(&gitdir.join("refs"), RecursiveMode::Recursive);
+        if common != gitdir {
+            let _ = w.watch(&common, RecursiveMode::NonRecursive);
+            let _ = w.watch(&common.join("refs"), RecursiveMode::Recursive);
+        }
     }
 
     // The thread holds only a weak reference, so dropping the watcher ends it.
@@ -89,7 +96,7 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
                     continue;
                 }
                 for p in &event.paths {
-                    if !relevant(&repo, &workdir, &gitdir, p) {
+                    if !relevant(&repo, &workdir, &gitdir, &common, p) {
                         continue;
                     }
                     changed = true;
@@ -130,13 +137,18 @@ fn watch_tree(watcher: &mut RecommendedWatcher, repo: &Repository, workdir: &Pat
 }
 
 /// Whether a change at `path` could alter what Palace shows.
-fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, path: &Path) -> bool {
+fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, path: &Path) -> bool {
+    let first = |inside: &Path| inside.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    let lock = path.extension().is_some_and(|e| e == "lock");
     if let Ok(inside_git) = path.strip_prefix(gitdir) {
         // Objects and reflogs change alongside refs, which are watched anyway; lock
         // files come and go during every git command.
-        let first = inside_git.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
-        let lock = path.extension().is_some_and(|e| e == "lock");
-        return !lock && !matches!(first.as_deref(), Some("objects" | "logs"));
+        return !lock && !matches!(first(inside_git).as_deref(), Some("objects" | "logs"));
+    }
+    // From a worktree, of the .git it shares only the branches and tags matter, and
+    // the list of worktrees.
+    if let Ok(inside_common) = path.strip_prefix(common) {
+        return !lock && matches!(first(inside_common).as_deref(), Some("refs" | "packed-refs" | "worktrees"));
     }
     path.starts_with(workdir) && !ignored(repo, workdir, path, path.is_dir())
 }
@@ -216,6 +228,27 @@ mod tests {
 
         t.write(&[("app/Models/User.php", Some("<?php\n"))]);
         assert!(reported(&rx), "a file inside the new folder");
+    }
+
+    #[test]
+    fn in_a_worktree_commits_to_the_branches_it_shares_are_reported() {
+        let t = TempRepo::new("watch-worktree");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let folder = t.dir.with_file_name(format!("{}-wt", t.dir.file_name().unwrap().to_string_lossy()));
+        let _ = std::fs::remove_dir_all(&folder);
+        git(t.path(), &["worktree", "add", "-q", "-b", "feature", &folder.to_string_lossy()], None).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let _watcher = start(&folder.to_string_lossy(), move || {
+            let _ = tx.send(());
+        })
+        .unwrap();
+        settle(&rx);
+
+        // A commit in the main working copy moves a branch the worktree lists.
+        t.write(&[("a.txt", Some("edited\n"))]);
+        git(t.path(), &["commit", "-qam", "Edit"], None).unwrap();
+        assert!(reported(&rx), "committing in the main working copy");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

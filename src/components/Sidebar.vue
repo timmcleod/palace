@@ -11,10 +11,12 @@ import {
   GitPullRequest,
   Cloud,
   Folder,
+  FolderGit2,
   FolderOpen,
   FolderTree,
   GitBranch,
   ListFilter,
+  Lock,
   Package,
   Plus,
   Github,
@@ -129,7 +131,11 @@ const branchRows = computed(() =>
         head: b.is_head,
         ahead: b.ahead,
         behind: b.behind,
-        title: b.upstream ? `${b.name} → ${b.upstream}` : b.name,
+        // Checked out in another worktree: double-clicking it opens that.
+        elsewhere: b.worktree,
+        title: [b.upstream ? `${b.name} → ${b.upstream}` : b.name, b.worktree && `Checked out in the worktree at ${b.worktree}`]
+          .filter(Boolean)
+          .join("\n"),
       }),
     },
   ),
@@ -194,10 +200,31 @@ const submoduleRows = computed(() =>
     .map((s) => ({ key: `submodule:${s.path}`, label: s.name, icon: Package, depth: 0, title: s.path })),
 );
 
+// The repository's worktrees, its own first: each named for its folder, beside the
+// branch checked out in it.
+const worktreeRows = computed(() =>
+  (props.overview.worktrees ?? [])
+    .filter((w) => matches(w.path) || (w.branch && matches(w.branch)))
+    .map((w) => ({
+      key: `worktree:${w.path}`,
+      label: w.path.split("/").at(-1),
+      detail: w.prunable ? "folder gone" : (w.branch ?? "detached"),
+      icon: FolderGit2,
+      depth: 0,
+      current: w.current,
+      locked: w.locked,
+      gone: w.prunable,
+      title: [w.path, w.main && "The repository's own working copy", w.locked && "Locked", w.prunable && "Its folder is gone: Prune Worktrees forgets it"]
+        .filter(Boolean)
+        .join("\n"),
+    })),
+);
+
 const sections = computed(() =>
   [
     { id: "workspace", title: "Workspace", rows: workspaceRows.value },
     { id: "branches", title: "Branches", rows: branchRows.value },
+    { id: "worktrees", title: "Worktrees", rows: worktreeRows.value, optional: true },
     { id: "tags", title: "Tags", rows: tagRows.value },
     { id: "remotes", title: "Remotes", rows: remoteRows.value },
     { id: "stashes", title: "Stashes", rows: stashRows.value, optional: true },
@@ -503,6 +530,7 @@ function onRowClick(row, event) {
             :class="[dropClass(row), {
               selected: row.key === selected || compared.includes(row.key),
               current: switching ? row.key === switching : row.current,
+              gone: row.gone,
               divider: row.divider,
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
@@ -526,6 +554,9 @@ function onRowClick(row, event) {
               </span>
               <component :is="row.icon ?? Folder" class="row-icon" :size="17" :stroke-width="1.5" />
               <span class="row-label">{{ row.label }}</span>
+              <span v-if="row.detail" class="row-detail">{{ row.detail }}</span>
+              <Lock v-if="row.locked" :size="12" class="row-mark" />
+              <FolderGit2 v-if="row.elsewhere" :size="13" class="row-mark" />
 
               <Spinner v-if="row.key === switching" :size="13" class="switching" />
               <span v-else-if="row.head || row.ahead || row.behind" class="pill">
@@ -824,6 +855,25 @@ function onRowClick(row, event) {
 
 .row.current .row-icon {
   color: var(--accent);
+}
+
+.row-detail {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.row-mark {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.row.gone .row-label {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
 }
 
 .row-label {

@@ -18,6 +18,8 @@ pub struct RepoOverview {
     tags: Vec<String>,
     stashes: Vec<Stash>,
     submodules: Vec<Submodule>,
+    /// Its worktrees, its own first, or none when it has only that one.
+    worktrees: Vec<crate::worktree::Worktree>,
 }
 
 #[derive(Serialize)]
@@ -35,6 +37,9 @@ pub struct LocalBranch {
     upstream: Option<String>,
     ahead: usize,
     behind: usize,
+    /// The folder of another worktree it's checked out in, which keeps it from being
+    /// checked out here.
+    worktree: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -101,7 +106,11 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
     let changes = status.len();
     let conflicts = status.iter().filter(|f| f.is_conflicted()).count();
     let operation = crate::branch::operation(&repo);
-    let branches = read_local_branches(&repo)?;
+    let worktrees = crate::worktree::read_worktrees(&repo);
+    let mut branches = read_local_branches(&repo)?;
+    for branch in &mut branches {
+        branch.worktree = worktrees.iter().find(|w| !w.current && w.branch.as_ref() == Some(&branch.name)).map(|w| w.path.clone());
+    }
     let remotes = read_remotes(&repo)?;
     let tags = read_tags(&repo)?;
     let submodules = read_submodules(&repo);
@@ -121,6 +130,7 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
         tags,
         stashes,
         submodules,
+        worktrees,
     })
 }
 
@@ -174,6 +184,7 @@ fn read_local_branches(repo: &Repository) -> Result<Vec<LocalBranch>, git2::Erro
             upstream: upstream_name,
             ahead,
             behind,
+            worktree: None,
         });
     }
 

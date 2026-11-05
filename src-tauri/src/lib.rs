@@ -30,6 +30,7 @@ mod windows;
 #[cfg(test)]
 mod test_support;
 mod working;
+mod worktree;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -134,6 +135,11 @@ pub fn run() {
             notify::notify_tab,
             notify::withdraw_notifications,
             windows::new_window,
+            worktree::add_worktree,
+            worktree::remove_worktree,
+            worktree::worktree_has_changes,
+            worktree::lock_worktree,
+            worktree::prune_worktrees,
             quit::set_unsaved_edits,
             cli::install_git_tools,
             files::working_entries,
