@@ -74,6 +74,7 @@ import { useGitActions } from "./lib/gitActions.js";
 import { useUndo } from "./lib/undo.js";
 import { useStatusCard } from "./lib/statusCard.js";
 import { useBackgroundFetch } from "./lib/backgroundFetch.js";
+import { useIssueRepo } from "./lib/issueRepo.js";
 import { useNavigation } from "./lib/navigation.js";
 import { splitKey } from "./lib/sidebarKeys.js";
 import {
@@ -97,10 +98,10 @@ import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
-import { githubAccount, githubAccountChecked } from "./lib/github.js";
+import { githubAccount } from "./lib/github.js";
 import { finishSaving, focusOnOpen, forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
-import { githubRemoteOf, githubRemotes, repoKey } from "./lib/githubRemote.js";
-import { issueError, issuesSeenAt, markIssuesSeen } from "./lib/issues.js";
+import { githubRemoteOf } from "./lib/githubRemote.js";
+import { issueError } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
@@ -125,6 +126,25 @@ const otherDrafts = new Map();
 
 // Set when the history shows only the commits that changed this file.
 const fileFilter = ref(null);
+
+// Whether the history shows only the mainline, each merge standing for the commits it
+// brought in, as `git log --first-parent` does. Remembered for each repository.
+const FIRST_PARENT_KEY = "palace.firstParent";
+const firstParent = ref(false);
+watch(
+  () => overview.value?.path,
+  (path) => (firstParent.value = !!readJson(FIRST_PARENT_KEY, {})[path]),
+  { immediate: true },
+);
+
+function toggleFirstParent() {
+  firstParent.value = !firstParent.value;
+  const saved = readJson(FIRST_PARENT_KEY, {});
+  if (firstParent.value) saved[overview.value.path] = true;
+  else delete saved[overview.value.path];
+  writeJson(FIRST_PARENT_KEY, saved);
+}
+
 // The detail pane shows a commit's changes, or all its files ("tree").
 const detailMode = ref("changeset");
 // The file open in the Browse view, a file for it to open (going Back to it, say), and
@@ -216,68 +236,68 @@ const comparedKeys = computed(() => {
   return [keyOf(c.base), keyOf(c.head)];
 });
 
-// The Issues view, for repositories with a remote on GitHub: whose issues, the chosen
-// issue, the search, and how many are open, for the sidebar.
-//
-// The issues are origin's repository's (or the first GitHub remote's), unless that's
-// a fork: then they're the parent's, where a project's issues usually are. Choosing
-// another in the menu is remembered for the repository.
-const ISSUE_REPOS_KEY = "palace.issueRepos";
-const issueRemotes = computed(() => githubRemotes(overview.value));
-// Issues and Pull Requests are in the sidebar for repositories on GitHub, unless Palace
-// is signed out of GitHub. Until it knows, they stay, rather than flicker as it starts.
-const showsIssues = computed(() => issueRemotes.value.length > 0 && (!!githubAccount.value || !githubAccountChecked.value));
+// The Issues and Pull Requests views: what's chosen and searched for in each. Which
+// repository on GitHub they show, and how many are open, is issueRepo.js's.
+const selectedIssue = shallowRef(null);
+const issueQuery = ref("");
+// The last issue changed in the issue view, for the list to show.
+const updatedIssue = shallowRef(null);
+// The Pull Requests view, alongside: the same repository's pull requests, read the
+// way issues are.
+const selectedPull = shallowRef(null);
+const pullQuery = ref("");
+const updatedPull = shallowRef(null);
+
+const {
+  issueRemotes,
+  showsIssues,
+  issueRepos,
+  issueRepo,
+  issueRepoMenu,
+  hasIssues,
+  hasPulls,
+  openIssues,
+  openPulls,
+  freshIssues,
+  issuesSeenBefore,
+  countStateChange,
+} = useIssueRepo({
+  overview,
+  isIssues,
+  isPulls,
+  // What was chosen in another repository's issues goes with it.
+  onChange: () => {
+    selectedIssue.value = null;
+    selectedPull.value = null;
+  },
+});
+
 // Signing out while looking at them goes back to the history.
 watch(showsIssues, (shown) => {
   if (!shown && overview.value && (isIssues.value || isPulls.value)) selected.value = headHistoryKey(overview.value);
 });
-// The fork's parent as { owner, repo }; null when it isn't a fork, and undefined until
-// GitHub has said.
-const forkParent = ref(undefined);
-// The chosen repository's key ("owner/repo"), or null for the usual one.
-const issueChoice = ref(null);
-
-const issueRepos = computed(() => {
-  const repos = issueRemotes.value;
-  const parent = forkParent.value;
-  if (!parent || repos.some((r) => repoKey(r) === repoKey(parent))) return repos;
-  return [...repos, { ...parent, remotes: [], forkedFrom: repos[0] }];
-});
-
-const issueRepo = computed(() => {
-  const repos = issueRepos.value;
-  const chosen = repos.find((r) => repoKey(r) === issueChoice.value);
-  if (chosen) return chosen;
-  // Waits for the fork check, so a fork's own issues don't show first.
-  if (forkParent.value === undefined && githubAccount.value) return null;
-  return (forkParent.value && repos.find((r) => repoKey(r) === repoKey(forkParent.value))) ?? repos[0] ?? null;
-});
-
-// Which of issues and pull requests the repository has turned on, { issues, pulls },
-// or null until GitHub has said. What's off is left out of the sidebar; until it's
-// known, or if asking fails, both stay, so nothing disappears for a network hiccup.
-const repoFeatures = ref(null);
-const hasIssues = computed(() => repoFeatures.value?.issues !== false);
-const hasPulls = computed(() => repoFeatures.value?.pulls !== false);
 // Turned off while showing, it goes back to the history.
 watch([hasIssues, hasPulls], ([issues, pulls]) => {
   if (overview.value && ((!issues && isIssues.value) || (!pulls && isPulls.value))) selected.value = headHistoryKey(overview.value);
 });
-
-const selectedIssue = shallowRef(null);
-const issueQuery = ref("");
-const openIssues = ref(null);
-// The last issue changed in the issue view, for the list to show.
-const updatedIssue = shallowRef(null);
+// A repository whose GitHub remotes go away leaves the Issues and Pull Requests views.
+watch(
+  () => issueRemotes.value.length,
+  (count) => {
+    if (!count && (isIssues.value || isPulls.value)) selected.value = headHistoryKey(overview.value);
+  },
+);
 
 function onIssueUpdated(issue) {
   // "#123" can open a pull request here, which counts toward the open pull requests.
-  const count = issue.pull_request ? openPulls : openIssues;
-  if (count.value != null && selectedIssue.value?.state !== issue.state) {
-    count.value += issue.state === "open" ? 1 : -1;
-  }
+  countStateChange(issue.pull_request ? "pulls" : "issues", selectedIssue.value?.state, issue.state);
   selectedIssue.value = issue;
   updatedIssue.value = issue;
+}
+
+function onIssueCreated(issue) {
+  countStateChange("issues", undefined, "open");
+  selectedIssue.value = issue;
 }
 
 // From "#123" in a commit message to that issue: in the Issues view, or on GitHub
@@ -299,17 +319,8 @@ async function showIssue(number) {
   }
 }
 
-// The Pull Requests view, alongside: the same repository's pull requests, read the
-// way issues are.
-const selectedPull = shallowRef(null);
-const pullQuery = ref("");
-const openPulls = ref(null);
-const updatedPull = shallowRef(null);
-
 function onPullUpdated(pull) {
-  if (openPulls.value != null && selectedPull.value?.state !== pull.state) {
-    openPulls.value += pull.state === "open" ? 1 : -1;
-  }
+  countStateChange("pulls", selectedPull.value?.state, pull.state);
   selectedPull.value = pull;
   updatedPull.value = pull;
 }
@@ -371,143 +382,6 @@ function checkoutPull({ number, head, headRepo }) {
   const baseRemote = githubRemoteOf(remotes, full);
   if (baseRemote) return actions.checkoutPull(baseRemote.name, number, null);
   tell("Couldn't Check Out the Pull Request", `None of this repository's remotes is ${full ?? "on GitHub"}.`);
-}
-
-function onIssueCreated(issue) {
-  if (openIssues.value != null) openIssues.value++;
-  selectedIssue.value = issue;
-}
-
-// Each repository starts with its remembered choice, and a check for a fork.
-watch(
-  [() => overview.value?.path, () => issueRemotes.value[0] && repoKey(issueRemotes.value[0]), () => githubAccount.value?.login],
-  async ([path, first, login]) => {
-    issueChoice.value = readJson(ISSUE_REPOS_KEY, {})[path] ?? null;
-    forkParent.value = first && login ? undefined : null;
-    if (!first || !login) return;
-    const [owner, repo] = first.split("/");
-    const parent = await invoke("github_fork_parent", { owner, repo }).catch(() => null);
-    if (overview.value?.path !== path) return;
-    const [parentOwner, parentRepo] = parent?.split("/") ?? [];
-    forkParent.value = parent ? { owner: parentOwner, repo: parentRepo } : null;
-  },
-  { immediate: true },
-);
-
-// Whether the history shows only the mainline, each merge standing for the commits it
-// brought in, as `git log --first-parent` does. Remembered for each repository.
-const FIRST_PARENT_KEY = "palace.firstParent";
-const firstParent = ref(false);
-watch(
-  () => overview.value?.path,
-  (path) => (firstParent.value = !!readJson(FIRST_PARENT_KEY, {})[path]),
-  { immediate: true },
-);
-
-function toggleFirstParent() {
-  firstParent.value = !firstParent.value;
-  const saved = readJson(FIRST_PARENT_KEY, {});
-  if (firstParent.value) saved[overview.value.path] = true;
-  else delete saved[overview.value.path];
-  writeJson(FIRST_PARENT_KEY, saved);
-}
-
-function chooseIssueRepo(repo) {
-  issueChoice.value = repoKey(repo);
-  writeJson(ISSUE_REPOS_KEY, { ...readJson(ISSUE_REPOS_KEY, {}), [overview.value.path]: issueChoice.value });
-}
-
-// How many issues are open, and how many of those are new: opened since the Issues
-// view was last looked at. They're checked when the repository opens, then every few
-// minutes in the background, as often as fetching.
-const freshIssues = ref(0);
-// When the issues were last looked at, as of opening the Issues view, so the issues
-// newer than that can be marked new in the list.
-const issuesSeenBefore = ref(null);
-let issuesCheckedAt = 0;
-
-async function checkIssues() {
-  const repo = issueRepo.value;
-  if (!repo || !githubAccount.value) return;
-  issuesCheckedAt = Date.now();
-  const features = await invoke("github_repo_features", { owner: repo.owner, repo: repo.repo }).catch(() => null);
-  const stillThis = () => issueRepo.value && repoKey(issueRepo.value) === repoKey(repo);
-  if (features && stillThis()) repoFeatures.value = features;
-  if (hasIssues.value) await countIssues(repo);
-  if (!hasPulls.value) return;
-  const pulls = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1, pulls: true }).catch(
-    () => null,
-  );
-  if (pulls && stillThis()) openPulls.value = pulls.total;
-}
-
-async function countIssues(repo) {
-  const found = await invoke("github_issues", { owner: repo.owner, repo: repo.repo, filters: "is:open", page: 1 }).catch(
-    () => null,
-  );
-  if (!found || !issueRepo.value || repoKey(issueRepo.value) !== repoKey(repo)) return;
-  openIssues.value = found.total;
-  // The first check sets where "new" starts; until then, nothing is new.
-  const seen = issuesSeenAt(repo);
-  if (!seen) markIssuesSeen(repo);
-  const isNew = (i) => Date.parse(i.created_at) > Date.parse(seen);
-  freshIssues.value = isIssues.value || !seen ? 0 : found.issues.filter(isNew).length;
-}
-
-watch(
-  [() => issueRepo.value?.owner, () => issueRepo.value?.repo, () => githubAccount.value?.login],
-  () => {
-    openIssues.value = null;
-    freshIssues.value = 0;
-    selectedIssue.value = null;
-    openPulls.value = null;
-    selectedPull.value = null;
-    repoFeatures.value = null;
-    checkIssues();
-  },
-  { immediate: true },
-);
-
-// Looking at the Issues view sees them: new ones are marked there until it's left.
-// (By key: the repository object is made afresh on every refresh.)
-const keyToRepo = (key) => key && { owner: key.split("/")[0], repo: key.split("/")[1] };
-watch(
-  [isIssues, () => issueRepo.value && repoKey(issueRepo.value)],
-  ([viewing, key], [wasViewing, previous]) => {
-    if (wasViewing && previous) markIssuesSeen(keyToRepo(previous));
-    if (!viewing || !key) return;
-    issuesSeenBefore.value = issuesSeenAt(keyToRepo(key));
-    markIssuesSeen(keyToRepo(key));
-    freshIssues.value = 0;
-  },
-);
-
-// In the background, as often as fetching, while the Issues view isn't showing them.
-const issuesTimer = setInterval(() => {
-  const due = Date.now() - issuesCheckedAt >= settings.fetchMinutes * 60_000;
-  if (due && settings.fetchInBackground && !isIssues.value && !isPulls.value && navigator.onLine) checkIssues();
-}, 30_000);
-onBeforeUnmount(() => clearInterval(issuesTimer));
-
-// A repository whose GitHub remotes go away leaves the Issues and Pull Requests views.
-watch(
-  () => issueRemotes.value.length,
-  (count) => {
-    if (!count && (isIssues.value || isPulls.value)) selected.value = headHistoryKey(overview.value);
-  },
-);
-
-function issueRepoMenu(event) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  openMenu(
-    { clientX: rect.left, clientY: rect.bottom + 4, preventDefault() {} },
-    issueRepos.value.map((r) => ({
-      label: `${r.owner}/${r.repo}`,
-      detail: r.forkedFrom ? `Forked into ${r.forkedFrom.owner}/${r.forkedFrom.repo}` : r.remotes.join(", "),
-      checked: r === issueRepo.value,
-      action: () => chooseIssueRepo(r),
-    })),
-  );
 }
 
 // The Stashes view: the chosen stash (by index) and the search for one by message.
