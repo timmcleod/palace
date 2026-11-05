@@ -132,6 +132,7 @@ pub fn run() {
             windows::show_notice,
             windows::show_terminal_tab,
             keys::alt_held,
+            notify::can_notify,
             notify::notify_tab,
             notify::withdraw_notifications,
             windows::new_window,

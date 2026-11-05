@@ -6,6 +6,23 @@
 //! desktop went on showing Palace as starting, with a busy cursor, for a few seconds.
 //! macOS goes on using the plugin.
 
+/// Whether Palace can show the system's notifications. On macOS that needs Palace to run
+/// from its app bundle: the notification center throws, and the process aborts, when
+/// asked from a bare executable, as `tauri dev` runs.
+#[tauri::command]
+pub fn can_notify() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // …/Palace.app/Contents/MacOS/palace
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.ancestors().nth(3).map(|app| app.extension().is_some_and(|e| e == "app")))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+
 /// Shows a notification, from the terminal tab `key` of the repository at `path` in
 /// `window`; clicking it brings that tab forward. `body` is markup, escaped already.
 #[tauri::command]

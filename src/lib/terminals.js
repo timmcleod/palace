@@ -584,8 +584,10 @@ async function notify(path, tab, record) {
   // forward. macOS wouldn't show the system's while Palace is in front, anyway.
   const notice = { path, key: tab.key, state: record.state, title: text.title, body };
   if (await invoke("show_notice", { notice }).catch(() => false)) return;
-  allowed ??= isPermissionGranted()
-    .then((granted) => granted || requestPermission().then((answer) => answer === "granted"))
+  // On macOS, not before Palace knows it runs from its app bundle: asked from `tauri dev`,
+  // the notification center brings the process down.
+  allowed ??= invoke("can_notify")
+    .then((can) => can && isPermissionGranted().then((granted) => granted || requestPermission().then((answer) => answer === "granted")))
     .catch(() => false);
   if (!(await allowed)) return;
   // On Linux, Palace sends it itself, to raise the window with the token the desktop
