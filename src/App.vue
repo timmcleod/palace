@@ -72,6 +72,8 @@ import {
 } from "./lib/storage.js";
 import { useGitActions } from "./lib/gitActions.js";
 import { useUndo } from "./lib/undo.js";
+import { useNavigation } from "./lib/navigation.js";
+import { splitKey } from "./lib/sidebarKeys.js";
 import {
   askConfirm,
   cloneDialog,
@@ -559,101 +561,18 @@ function showMatchingCommits(query) {
 }
 
 // --- Back and Forward --------------------------------------------------------------
-// Like a browser: each place is a sidebar item with the commit, stash and file filter
-// chosen there. Choosing something new starts a new place; Back and Forward return to
-// them. Places quickly replaced by others in the same view (arrowing through the
-// history, say) aren't kept, so Back doesn't step through every one.
-
-const MAX_PLACES = 100;
-const QUICK_CHANGE = 800;
-const nav = reactive({ back: [], forward: [] });
-let here = null;
-let hereSince = 0;
-let restoring = false;
-
-const placeHere = () => ({
-  selected: selected.value,
-  commit: selectedCommit.value,
-  stash: selectedStash.value,
-  fileFilter: fileFilter.value,
-  detailMode: detailMode.value,
-  treeFile: treeFile.value,
-  comparison: comparison.value,
-  // The file open in the Files view.
-  file: isFiles.value ? (openFiles[overview.value.path] ?? null) : null,
+// See navigation.js. The Back and Forward buttons are in the toolbar; Alt+arrows, below,
+// and a mouse's back and forward buttons go too.
+const { nav, go, describe, forget: forgetPlaces } = useNavigation({
+  overview,
+  view: { selected, selectedCommit, selectedStash, fileFilter, detailMode, treeFile, treeReveal, comparison },
+  fileShown: () => (isFiles.value && overview.value ? (openFiles[overview.value.path] ?? null) : null),
+  showFile: (file) => (openFiles[overview.value.path] = file),
 });
 
-const samePlace = (a, b) =>
-  a.selected === b.selected &&
-  a.commit?.id === b.commit?.id &&
-  a.stash === b.stash &&
-  a.fileFilter === b.fileFilter &&
-  a.detailMode === b.detailMode &&
-  a.treeFile === b.treeFile &&
-  a.comparison === b.comparison &&
-  a.file === b.file;
+// --- Keyboard shortcuts ------------------------------------------------------------
 
-const openFile = () => (isFiles.value && overview.value ? openFiles[overview.value.path] : null);
-watch([selected, () => selectedCommit.value?.id, selectedStash, fileFilter, detailMode, treeFile, comparison, openFile], () => {
-  if (restoring || !overview.value) return;
-  const place = placeHere();
-  if (here && samePlace(here, place)) return;
-  const quick = here && here.selected === place.selected && Date.now() - hereSince < QUICK_CHANGE;
-  if (here && !quick) {
-    nav.back.push(here);
-    if (nav.back.length > MAX_PLACES) nav.back.shift();
-  }
-  here = place;
-  hereSince = Date.now();
-  nav.forward = [];
-});
-
-async function go(direction) {
-  const [from, to] = direction === "back" ? [nav.back, nav.forward] : [nav.forward, nav.back];
-  const place = from.pop();
-  if (!place) return;
-  if (here) to.push(here);
-  here = place;
-  hereSince = 0;
-  restoring = true;
-  selected.value = place.selected;
-  selectedCommit.value = place.commit;
-  selectedStash.value = place.stash;
-  fileFilter.value = place.fileFilter;
-  detailMode.value = place.detailMode;
-  treeFile.value = place.treeFile;
-  treeReveal.value = place.treeFile;
-  comparison.value = place.comparison;
-  if (place.file) openFiles[overview.value.path] = place.file;
-  // Let the views settle (opening a stash's view picks one, say) before recording again.
-  await nextTick();
-  await nextTick();
-  restoring = false;
-}
-
-// A short description of a place, for the buttons' tooltips.
-function describe(place) {
-  if (!place) return "";
-  const [kind, name] = splitKey(place.selected);
-  const view = {
-    "workspace:working-copy": "Working Copy",
-    "workspace:files": "Files",
-    "workspace:stashes": "Stashes",
-    "workspace:issues": "Issues",
-    "workspace:pulls": "Pull Requests",
-    "workspace:github": "GitHub",
-    "workspace:settings": "Settings",
-    "workspace:history": "History",
-    "workspace:compare": place.comparison && `${place.comparison.head} with ${place.comparison.base}`,
-  }[place.selected] ?? name ?? kind;
-  const detail =
-    place.commit?.short_id ??
-    place.file?.split("/").pop() ??
-    (place.selected === "workspace:stashes" && place.stash != null ? `stash@{${place.stash}}` : "");
-  return [view, detail].filter(Boolean).join(" › ");
-}
-
-function onNavKeydown(event) {
+function onKeydown(event) {
   const key = event.key.toLowerCase();
   // Cmd+N (Ctrl+N) opens a new window. On a Mac, from a terminal too, where Cmd keys
   // are Palace's; Ctrl+N is the shell's on Linux.
@@ -729,20 +648,8 @@ function onNavKeydown(event) {
   go(event.key === "ArrowLeft" ? "back" : "forward");
 }
 
-// Mice with back and forward buttons report them as buttons 3 and 4.
-function onNavMouseup(event) {
-  if (event.button === 3 || event.button === 4) {
-    event.preventDefault();
-    go(event.button === 3 ? "back" : "forward");
-  }
-}
-
-window.addEventListener("keydown", onNavKeydown);
-window.addEventListener("mouseup", onNavMouseup);
-onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onNavKeydown);
-  window.removeEventListener("mouseup", onNavMouseup);
-});
+window.addEventListener("keydown", onKeydown);
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 // --- Running git operations ------------------------------------------------------
 
@@ -1391,10 +1298,7 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
       pullQuery.value = "";
       historySearch.value = "";
       comparison.value = null;
-      // Places belong to a repository.
-      nav.back = [];
-      nav.forward = [];
-      here = null;
+      forgetPlaces();
       if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
       Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
       otherDrafts.delete(data.path);
@@ -1700,11 +1604,6 @@ const breadcrumb = computed(() => {
   const head = o.branches.find((b) => b.is_head);
   return [o.head.branch ?? o.head.short_id ?? "HEAD", head?.upstream].filter(Boolean);
 });
-
-function splitKey(key) {
-  const i = key.indexOf(":");
-  return [key.slice(0, i), key.slice(i + 1)];
-}
 
 function startResize(event, pane, min, max) {
   const startX = event.clientX;
