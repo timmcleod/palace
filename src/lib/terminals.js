@@ -466,6 +466,8 @@ function onKey(tab, event) {
   }
   // Ctrl+' (Cmd+') shows and hides the panel, in App.vue, and isn't typed.
   if ((isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey && event.code === "Quote") return false;
+  // Cmd+T (Ctrl+Shift+T) opens a terminal tab, in App.vue, and isn't typed.
+  if (event.code === "KeyT" && !event.altKey && (isMac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey)) return false;
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {
       event.preventDefault();

@@ -170,6 +170,9 @@ function focus() {
 }
 defineExpose({ focus });
 
+// Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's (see App.vue).
+const NEW_TAB_KEYS = isMac ? shortcut("Ctrl+T") : "Ctrl+Shift+T";
+
 function newTerminal() {
   openTerminal(props.path);
 }
@@ -356,7 +359,7 @@ function startResize(event) {
           <button class="tab-close" title="Close" @click.stop="closeTab(tab)"><X :size="12" /></button>
         </div>
       </div>
-      <button class="icon-button small" title="New Terminal" @click="newTerminal"><Plus :size="15" /></button>
+      <button class="icon-button small" :title="`New Terminal (${NEW_TAB_KEYS})`" @click="newTerminal"><Plus :size="15" /></button>
       <button class="agent-button" :title="`New ${agent} tab: ${command}`" @click="newAgent()">
         <Sparkle :size="13" :stroke-width="1.75" /> {{ agent }}
       </button>

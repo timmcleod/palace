@@ -669,6 +669,19 @@ function onNavKeydown(event) {
     else showTerminal();
     return;
   }
+  // Cmd+T (Ctrl+Shift+T on Linux, where Ctrl+T is the shell's) opens a terminal tab,
+  // showing the panel, from anywhere, as in the terminal apps.
+  if (
+    (isMac ? event.metaKey && !event.ctrlKey && !event.shiftKey : event.ctrlKey && !event.metaKey && event.shiftKey) &&
+    !event.altKey &&
+    event.code === "KeyT" &&
+    overview.value &&
+    !dialogOpen()
+  ) {
+    event.preventDefault();
+    showTerminal({ newTab: true });
+    return;
+  }
   // Whatever's typed in a terminal is the terminal's.
   if (inTerminal) return;
   // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
