@@ -350,9 +350,73 @@ export async function paste(tab) {
 // Keys the terminal handles as terminals on the desktop do. False keeps the key from the
 // program in the terminal.
 // What Option (back and forward a word: Meta-b, Meta-f) and Cmd (start and end of the
-// line: Ctrl+A, Ctrl+E; delete to its start: Ctrl+U) with these keys type on a Mac.
+// line: Ctrl+A, Ctrl+E; delete to its start: Ctrl+U) with these keys type on a Mac, to
+// a program other than the shell (see moveAtPrompt for the shell).
 const MAC_OPTION_KEYS = { ArrowLeft: "\x1bb", ArrowRight: "\x1bf" };
 const MAC_CMD_KEYS = { ArrowLeft: "\x01", ArrowRight: "\x05", Backspace: "\x15" };
+
+// The shells, as the program in front: at their prompt, Option and Cmd with the arrows
+// move by pressing the arrow keys (see moveAtPrompt).
+const SHELLS = new Set(["zsh", "bash", "sh", "dash", "ksh", "fish"]);
+const atPrompt = (tab) => {
+  const front = tab.session.front?.replace(/^-/, "");
+  return tab.kind !== "agent" ? !front || SHELLS.has(front) : SHELLS.has(front);
+};
+
+// At a shell's prompt, the arrow keys, pressed as many times as it takes, to go back or
+// forward a word (`by` "word") or to the start or end of the line ("line"), worked out
+// from the line on the screen. Ctrl+A, Ctrl+E, Meta-b and Meta-f do that only in a
+// shell's emacs keys: in its vi keys, which zsh takes when EDITOR or VISUAL names vi,
+// they were typed as ^A and the like. The arrows move in either. Going to the start, it
+// counts the prompt too, and the shell stops at the start of what's typed.
+function moveAtPrompt(tab, by, back) {
+  const { term } = tab.session;
+  const buffer = term.buffer.active;
+  const y = buffer.baseY + buffer.cursorY;
+  // The line, as typed: from the row it starts on, through the rows it wrapped onto.
+  let first = y;
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+  let last = y;
+  while (buffer.getLine(last + 1)?.isWrapped) last++;
+  const chars = [];
+  let cursor = null;
+  for (let row = first; row <= last; row++) {
+    const line = buffer.getLine(row);
+    for (let col = 0; col < term.cols; col++) {
+      if (row === y && col === buffer.cursorX) cursor = chars.length;
+      const cell = line?.getCell(col);
+      // The second half of a wide character takes no place of its own.
+      if (cell && cell.getWidth() === 0) continue;
+      chars.push(cell?.getChars() || " ");
+    }
+  }
+  cursor ??= chars.length;
+  const word = (ch) => /[\p{L}\p{N}_]/u.test(ch);
+  let count = 0;
+  if (by === "line") {
+    if (back) count = cursor;
+    else {
+      let end = chars.length;
+      while (end > cursor && chars[end - 1] === " ") end--;
+      count = end - cursor;
+    }
+  } else if (back) {
+    let at = cursor;
+    while (at > 0 && !word(chars[at - 1])) at--;
+    while (at > 0 && word(chars[at - 1])) at--;
+    count = cursor - at;
+  } else {
+    let end = chars.length;
+    while (end > cursor && chars[end - 1] === " ") end--;
+    let at = cursor;
+    while (at < end && !word(chars[at])) at++;
+    while (at < end && word(chars[at])) at++;
+    count = at - cursor;
+  }
+  if (count <= 0) return;
+  const app = term.modes.applicationCursorKeysMode;
+  type(tab, (app ? (back ? "\x1bOD" : "\x1bOC") : back ? "\x1b[D" : "\x1b[C").repeat(count));
+}
 
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
@@ -391,7 +455,12 @@ function onKey(tab, event) {
     const text = keys?.[event.key];
     if (text) {
       event.preventDefault();
-      type(tab, text);
+      // At a shell's prompt, the arrows move, whichever keys the shell is set to use.
+      if (event.key !== "Backspace" && atPrompt(tab)) {
+        moveAtPrompt(tab, keys === MAC_CMD_KEYS ? "line" : "word", event.key === "ArrowLeft");
+      } else {
+        type(tab, text);
+      }
       return false;
     }
   }
