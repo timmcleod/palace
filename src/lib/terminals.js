@@ -474,7 +474,8 @@ let allowed = null;
 async function notify(path, tab, record) {
   const now = Date.now();
   // A program can change its state as fast as it writes: one notification a few seconds.
-  if (now - tab.session.notifiedAt < 4000) return;
+  // Except that it needs you, which is said whatever came just before: it waits on you.
+  if (record.state !== "blocked" && now - tab.session.notifiedAt < 4000) return;
   tab.session.notifiedAt = now;
   const agent = tab.agent ?? agentOfProgram(record.app?.replace(/-code$/, ""));
   const text = describe(record, agent, folderName(path));
