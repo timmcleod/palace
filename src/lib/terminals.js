@@ -349,6 +349,11 @@ export async function paste(tab) {
 
 // Keys the terminal handles as terminals on the desktop do. False keeps the key from the
 // program in the terminal.
+// What Option (back and forward a word: Meta-b, Meta-f) and Cmd (start and end of the
+// line: Ctrl+A, Ctrl+E; delete to its start: Ctrl+U) with these keys type on a Mac.
+const MAC_OPTION_KEYS = { ArrowLeft: "\x1bb", ArrowRight: "\x1bf" };
+const MAC_CMD_KEYS = { ArrowLeft: "\x01", ArrowRight: "\x05", Backspace: "\x15" };
+
 function onKey(tab, event) {
   if (event.type !== "keydown") return true;
   // Typing in it is looking at it.
@@ -375,6 +380,20 @@ function onKey(tab, event) {
     event.preventDefault();
     if (tab.session.term.hasSelection()) copySelection(tab);
     return false;
+  }
+  // On a Mac, Option and Cmd with the arrows move by word and to the ends of the line,
+  // and Cmd+Backspace deletes to its start, as in Terminal.app and iTerm2: these send
+  // what shells take for that without any setup. Left alone, Option+Left sends
+  // ESC [1;3D, which zsh and bash don't know, so a stray "D" was typed, and Cmd with an
+  // arrow sent nothing.
+  if (isMac && !event.ctrlKey && !event.shiftKey) {
+    const keys = event.metaKey && !event.altKey ? MAC_CMD_KEYS : event.altKey && !event.metaKey ? MAC_OPTION_KEYS : null;
+    const text = keys?.[event.key];
+    if (text) {
+      event.preventDefault();
+      type(tab, text);
+      return false;
+    }
   }
   // Ctrl+' (Cmd+') shows and hides the panel, in App.vue, and isn't typed.
   if ((isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey && event.code === "Quote") return false;
