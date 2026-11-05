@@ -18,12 +18,7 @@ function inEmptyBar(event) {
   return !!event.target.closest(BARS) || (event.clientY < barHeight() && !!event.target.closest(".settings"));
 }
 
-// Off while Palace's windows on a Mac have title bars, so they can be tabs of one
-// window (see tauri.macos.conf.json): with its bars running under the window buttons,
-// macOS's tab bar covered the top of the page.
-const OVERLAY = false;
-
-if (isMac && OVERLAY) {
+if (isMac) {
   document.documentElement.dataset.titleBar = "overlay";
   document.addEventListener("mousedown", (event) => {
     if (!inEmptyBar(event)) return;

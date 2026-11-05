@@ -1236,11 +1236,11 @@ watch(
 // Recent repositories opened in other windows join the list here too.
 onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
 
-// Opens the worktree at `path` in a window of its own (a tab of this one on a Mac), or
+// Opens the worktree at `path` in a window of its own, or
 // brings forward the window it's open in.
 async function openWorktree(path) {
   if (await invoke("show_window_with", { path }).catch(() => false)) return;
-  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path, tab: true }).catch((e) =>
+  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path }).catch((e) =>
     tell("Couldn't Open the Worktree", String(e)),
   );
 }

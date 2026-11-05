@@ -48,35 +48,10 @@ pub fn set_window_repo(window: WebviewWindow, windows: State<'_, Windows>, path:
 pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, path: String) -> bool {
     let other = windows.0.lock().unwrap().iter().find(|(label, open)| *label != window.label() && **open == path).map(|(label, _)| label.clone());
     let Some(other) = other.and_then(|label| app.get_webview_window(&label)) else { return false };
-    bring_forward(&app, &other);
+    let _ = other.unminimize();
+    let _ = other.show();
+    let _ = other.set_focus();
     true
-}
-
-/// Brings a window forward, and on a Mac, where it may be a tab of another, its tab.
-fn bring_forward(app: &AppHandle, window: &WebviewWindow) {
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-    #[cfg(target_os = "macos")]
-    select_tab(app, window);
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
-}
-
-/// Makes `window` the tab showing in its tab group, if it's in one.
-#[cfg(target_os = "macos")]
-fn select_tab(app: &AppHandle, window: &WebviewWindow) {
-    use objc2_app_kit::NSWindow;
-    let Ok(ns) = window.ns_window() else { return };
-    let ns = ns as usize;
-    let _ = app.run_on_main_thread(move || {
-        // SAFETY: a live NSWindow, which Tauri keeps while its window is open, used on
-        // the main thread.
-        let ns = unsafe { &*(ns as *const NSWindow) };
-        if let Some(group) = ns.tabGroup() {
-            group.setSelectedWindow(Some(ns));
-        }
-    });
 }
 
 /// Shows `notice`, that a terminal in `window` finished or needs the user, in the Palace
@@ -103,7 +78,9 @@ struct Notice {
 #[tauri::command]
 pub fn show_terminal_tab(app: AppHandle, label: String, path: String, key: u32) -> bool {
     let Some(window) = app.get_webview_window(&label) else { return false };
-    bring_forward(&app, &window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
     app.emit_to(EventTarget::webview_window(&label), "show-terminal-tab", TerminalTab { path, key }).is_ok()
 }
 
@@ -116,17 +93,9 @@ pub(crate) struct TerminalTab {
 /// Opens a new window, a little below and to the right of `window`, with the repository
 /// at `path` open, as for a worktree, or with none open yet. `dark` is the theme Palace
 /// is showing, which the window takes from the start: otherwise it shows white until
-/// its page has loaded and turned it dark. With `tab`, on a Mac, it's a tab of `window`
-/// rather than a window of its own.
+/// its page has loaded and turned it dark.
 #[tauri::command]
-pub async fn new_window(
-    app: AppHandle,
-    window: WebviewWindow,
-    windows: State<'_, Windows>,
-    dark: bool,
-    path: Option<String>,
-    tab: Option<bool>,
-) -> Result<(), String> {
+pub async fn new_window(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, dark: bool, path: Option<String>) -> Result<(), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     // What its page opens as it starts (see window_start).
@@ -143,31 +112,8 @@ pub async fn new_window(
     let opened = builder.build().map_err(|e| format!("Couldn't open a window: {e}"))?;
     #[cfg(target_os = "linux")]
     crate::no_pinch_zoom(&opened);
-    #[cfg(target_os = "macos")]
-    if tab == Some(true) {
-        add_tab(&app, &window, &opened);
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = tab;
     show_themed(&opened, Some(theme));
     Ok(())
-}
-
-/// Makes `tab` a tab of `window`, just after it. The windows share a tabbing identifier
-/// (see tauri.macos.conf.json), but macOS opens one as a tab of another by itself only
-/// when System Settings says to prefer tabs always.
-#[cfg(target_os = "macos")]
-fn add_tab(app: &AppHandle, window: &WebviewWindow, tab: &WebviewWindow) {
-    use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
-    let (Ok(parent), Ok(child)) = (window.ns_window(), tab.ns_window()) else { return };
-    // AppKit's windows are used on its thread; the pointers are carried there as numbers.
-    let (parent, child) = (parent as usize, child as usize);
-    let _ = app.run_on_main_thread(move || {
-        // SAFETY: both are live NSWindows, which Tauri keeps for as long as their
-        // windows are open, and this runs on the main thread.
-        let (parent, child) = unsafe { (&*(parent as *const NSWindow), &*(child as *const NSWindow)) };
-        parent.addTabbedWindow_ordered(child, NSWindowOrderingMode::Above);
-    });
 }
 
 /// The sidebar's color in each theme (--sidebar-bg in styles.css), the page's
