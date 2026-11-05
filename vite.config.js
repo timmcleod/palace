@@ -9,6 +9,13 @@ export default defineConfig(() => ({
   // The syntax highlighting worker loads languages as separate chunks.
   worker: { format: "es" },
 
+  // `npm test`: the page's tests, beside what they test, in a stand-in page so that
+  // composables can be mounted and unmounted (see src/test/mount.js).
+  test: {
+    environment: "happy-dom",
+    include: ["src/**/*.test.js"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

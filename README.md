@@ -86,6 +86,7 @@ Then:
 ```sh
 npm install
 npm run tauri dev               # run the app, reloading as you edit
+npm test                        # run the page's tests
 cd src-tauri && cargo test      # run the backend tests
 npm run package                 # build the packages into src-tauri/target/release/bundle/
 ```

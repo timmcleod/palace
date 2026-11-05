@@ -1,5 +1,5 @@
-# Builds the page on every push and pull request that changes it, so an import that no
-# longer resolves shows up when it's made rather than when a release is tagged.
+# Builds the page and runs its tests on every push and pull request that changes it, so
+# a regression shows up when it's made rather than when a release is tagged.
 
 name: Check page
 
@@ -39,3 +39,6 @@ jobs:
 
       - name: Build the page
         run: npm run build
+
+      - name: Run the page's tests
+        run: npm test
