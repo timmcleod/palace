@@ -1,5 +1,6 @@
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Archive,
   ArrowDown,
@@ -22,10 +23,9 @@ import {
   X,
 } from "lucide-vue-next";
 import { buildTree, flattenTree } from "../lib/tree.js";
-import { commandKey, shortcut } from "../lib/platform.js";
+import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
-import { setDragImage } from "../lib/dragImage.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -47,6 +47,8 @@ const emit = defineEmits([
   "activate",
   "section-menu",
   "merge-into-head",
+  "rebase-head-onto",
+  "new-branch-from",
   "add-menu",
   "recent-menu",
 ]);
@@ -205,10 +207,12 @@ function toggleSection(id) {
 
 // --- Dragging branches -----------------------------------------------------------------
 
-// Dragging a branch onto the HEAD branch merges it. Dragging a branch, folder or
+// Dragging a branch onto the HEAD branch merges it, or with Alt (Option on a Mac) held,
+// rebases the HEAD branch onto it. Dragging a branch, folder or
 // divider elsewhere in Branches moves it among the rows in the same folder, except
 // while filtering. On the HEAD branch, the middle of the row merges and its edges
-// move.
+// move. Dragging a branch, local or remote, onto the Branches header creates a branch
+// starting there.
 
 // The name of the branch being dragged, if it can be merged; the row being dragged;
 // and where it would land: { key, merge } or { key, after }.
@@ -216,15 +220,79 @@ const dragging = ref(null);
 const dragRow = ref(null);
 const dropAt = ref(null);
 
+const altKey = isMac ? "Option" : "Alt";
 const ARRANGEABLE = /^branch(-folder|-divider)?:/;
 const canMerge = (row) => !row.folder && !row.divider && (row.key.startsWith("branch:") || row.key.startsWith("remote-branch:"));
 const canMove = (row) => !query.value && ARRANGEABLE.test(row.key);
-const canDrag = (row) => (canMerge(row) && !row.head) || canMove(row);
+const canDrag = (row) => canMerge(row) || canMove(row);
+
+// Whether the dragged branch is over the Branches header, to create a branch from it.
+const overBranches = ref(false);
+const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? dragRow.value.key.slice(dragRow.value.key.indexOf(":") + 1) : null);
+
+function onHeaderDragOver(section, event) {
+  if (section.id !== "branches" || !draggedBranch()) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  overBranches.value = true;
+}
+
+function onHeaderDragLeave(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) overBranches.value = false;
+}
+
+function onHeaderDrop(section, event) {
+  const name = section.id === "branches" ? draggedBranch() : null;
+  if (!name) return;
+  event.preventDefault();
+  onDragEnd();
+  emit("new-branch-from", name);
+}
 
 // What follows the pointer: the row's icon and name, rather than the web view's
-// snapshot of the whole row. It has to be on the page while dragging, so it sits
-// off-screen until the drag ends.
+// snapshot of the whole row, and beside it what dropping would do, "Create Branch" or
+// "Merge". The web view's drag image is fixed when the drag starts, so it's hidden, and
+// this is drawn on the page instead, moved with the pointer.
 let dragImage = null;
+let dragAction = null;
+const NO_IMAGE = Object.assign(new Image(), { src: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" });
+
+function followPointer(event) {
+  if (!dragImage) return;
+  // Held as the web view held it: 14px into its left end, at its middle.
+  dragImage.style.transform = `translate(${event.clientX - 14}px, ${event.clientY - dragImage.offsetHeight / 2}px)`;
+  dragImage.style.visibility = "visible";
+  checkAlt(event);
+}
+
+// Out of the window, it's not shown until the pointer's back.
+function leaveWindow(event) {
+  if (dragImage && !event.relatedTarget) dragImage.style.visibility = "hidden";
+}
+
+// Whether Alt is held, which makes a merge a rebase. A drag event's altKey says on Linux;
+// on macOS it's always false (see keys.rs), so Palace asks, as the pointer moves.
+const altHeld = ref(false);
+let asking = false;
+function checkAlt(event) {
+  if (event.altKey) {
+    altHeld.value = true;
+    return;
+  }
+  if (asking) return;
+  asking = true;
+  invoke("alt_held")
+    .then((held) => (altHeld.value = held))
+    .catch(() => {})
+    .finally(() => (asking = false));
+}
+
+watch([overBranches, dropAt, altHeld], ([creates, at, alt]) => {
+  if (!dragAction) return;
+  const action = creates ? "Create Branch" : at?.merge ? (alt ? "Rebase" : "Merge") : "";
+  dragAction.textContent = action;
+  dragAction.hidden = !action;
+});
 
 function onDragStart(row, event) {
   dragRow.value = row;
@@ -233,20 +301,32 @@ function onDragStart(row, event) {
   event.dataTransfer.effectAllowed = "copyMove";
 
   dragImage = document.createElement("div");
-  dragImage.className = "drag-image";
+  dragImage.className = "drag-image following";
+  dragAction = document.createElement("span");
+  dragAction.className = "drag-action";
+  dragAction.hidden = true;
+  dragImage.append(dragAction);
   const icon = event.currentTarget.querySelector(".row-icon")?.cloneNode(true);
   if (icon) dragImage.append(icon);
   dragImage.append(row.divider ? row.label || "Divider" : row.label);
   document.body.append(dragImage);
-  setDragImage(event, dragImage);
+  event.dataTransfer.setDragImage(NO_IMAGE, 0, 0);
+  document.addEventListener("dragover", followPointer);
+  document.addEventListener("dragleave", leaveWindow);
+  followPointer(event);
 }
 
 function onDragEnd() {
   dragging.value = null;
   dragRow.value = null;
   dropAt.value = null;
+  overBranches.value = false;
+  altHeld.value = false;
+  document.removeEventListener("dragover", followPointer);
+  document.removeEventListener("dragleave", leaveWindow);
   dragImage?.remove();
   dragImage = null;
+  dragAction = null;
 }
 
 // Where a drop on `row` would land, from how far down the row the pointer is.
@@ -283,9 +363,10 @@ function onDrop(row, event) {
   event.preventDefault();
   const name = dragging.value;
   const dragged = dragRow.value;
+  const rebase = altHeld.value || event.altKey;
   onDragEnd();
   if (at.merge) {
-    emit("merge-into-head", name);
+    emit(rebase ? "rebase-head-onto" : "merge-into-head", name);
     return;
   }
   const siblings = branchRows.value.filter((r) => r.parent === dragged.parent).map((r) => r.key);
@@ -342,8 +423,12 @@ function onRowClick(row, event) {
       <section v-for="section in sections" :key="section.id" class="section">
         <button
           class="section-header"
+          :class="{ 'drop-target': section.id === 'branches' && overBranches }"
           @click="toggleSection(section.id)"
           @contextmenu.prevent="emit('section-menu', section.id, $event)"
+          @dragover="onHeaderDragOver(section, $event)"
+          @dragleave="onHeaderDragLeave"
+          @drop="onHeaderDrop(section, $event)"
         >
           <span>{{ section.title }}</span>
           <span class="section-toggle">{{ collapsedSections.has(section.id) ? "Show" : "Hide" }}</span>
@@ -360,7 +445,7 @@ function onRowClick(row, event) {
               divider: row.divider,
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
-            :title="row.head && dragging ? `Merge ${dragging} into ${row.label}` : row.title"
+            :title="row.head && dragging ? `Merge ${dragging} into ${row.label}, or with ${altKey} held, rebase ${row.label} onto it` : row.title"
             :draggable="canDrag(row)"
             @dragstart="onDragStart(row, $event)"
             @dragend="onDragEnd"
@@ -526,6 +611,37 @@ function onRowClick(row, event) {
 
 .section-header:hover .section-toggle {
   visibility: visible;
+}
+
+/* A branch dragged onto Branches, to create a branch from it. */
+.section-header.drop-target {
+  border-radius: 6px;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-primary);
+}
+
+/* The drag image drawn on the page (see "What follows the pointer"), with what
+   dropping would do on its left. */
+:global(.drag-image.following) {
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+:global(.drag-image .drag-action) {
+  position: absolute;
+  right: calc(100% + 6px);
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--content-bg);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .row {

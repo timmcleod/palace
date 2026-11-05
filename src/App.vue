@@ -1802,6 +1802,8 @@ function startResize(event, pane, min, max) {
       @activate="sidebarActivate"
       @section-menu="(section, event) => actions.sectionMenu(section) && openMenu(event, actions.sectionMenu(section))"
       @merge-into-head="(name) => actions.merge(name)"
+      @rebase-head-onto="(name) => actions.rebase(name)"
+      @new-branch-from="(name) => actions.newBranch(name, name)"
       @add-menu="(event) => openMenu(event, actions.addMenu())"
       @recent-menu="recentMenu"
     />
