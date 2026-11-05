@@ -103,8 +103,21 @@ export function dropRunning(records) {
   }
 }
 
-/** What a notification about it says, as { title, body }, or null for none. */
-export function describe(record, agent, repository) {
+/** How long something took, as "42s", "4m 12s" or "1h 5m". */
+export function formatDuration(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * What a notification about it says, as { title, body }, or null for none. The body is
+ * what the program said, or else how long it worked (`worked`, in milliseconds, if
+ * known) and what it calls the session, as "Worked for 4m 12s · “Default position reset”".
+ */
+export function describe(record, agent, repository, worked = null) {
   const who = agent || "A program";
   const what = {
     done: `${who} finished`,
@@ -117,5 +130,6 @@ export function describe(record, agent, repository) {
       }[record.kind] ?? `${who} is waiting on you`,
   }[record.state];
   if (!what) return null;
-  return { title: `${what} in ${repository}`, body: record.msg ?? record.title ?? "" };
+  const about = [worked != null && `Worked for ${formatDuration(worked)}`, record.title && `“${record.title}”`];
+  return { title: `${what} in ${repository}`, body: record.msg ?? about.filter(Boolean).join(" · ") };
 }

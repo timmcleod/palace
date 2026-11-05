@@ -173,6 +173,7 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
     records: new Map(),
     reply: null,
     notifiedAt: 0,
+    workingSince: null,
   });
   term.onTitleChange((title) => (tab.title = title));
   term.parser.registerOscHandler(OSC, (body) => onStatus(path, tab, body));
@@ -418,6 +419,13 @@ function updateStatus(path, tab) {
   const record = summarize(tab.session.records);
   const before = tab.status;
   tab.status = statusOf(record);
+  // When it set to work, for how long it worked: from working after anything but
+  // working or waiting on the user, who answering sets it going again.
+  if (record?.state === "working" && before?.state !== "working" && before?.state !== "blocked") {
+    tab.session.workingSince = Date.now();
+  } else if (!record || record.state === "idle") {
+    tab.session.workingSince = null;
+  }
   // Working again, it's been answered, or set going again, so seen. Gone idle, the
   // result's still there to look at, or the question to answer.
   if (record?.state === "working") markTabSeen(tab);
@@ -478,7 +486,8 @@ async function notify(path, tab, record) {
   if (record.state !== "blocked" && now - tab.session.notifiedAt < 4000) return;
   tab.session.notifiedAt = now;
   const agent = tab.agent ?? agentOfProgram(record.app?.replace(/-code$/, ""));
-  const text = describe(record, agent, folderName(path));
+  const since = tab.session.workingSince;
+  const text = describe(record, agent, folderName(path), since ? now - since : null);
   if (!text) return;
   const body = text.body || tab.title;
   // In a Palace window, which may be another, it's a notice there that can bring the tab
