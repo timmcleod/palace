@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleCheck, Folder, SlidersHorizontal, Undo2, X } from "lucide-vue-next";
 import { CANCELED, confirmDiscard } from "../lib/confirm.js";
@@ -9,7 +9,7 @@ import { useIssueSuggestions } from "../lib/issueSuggestions.js";
 import IssueSuggestions from "./IssueSuggestions.vue";
 import FileIcon from "./FileIcon.vue";
 import { useWindowed } from "../lib/windowed.js";
-import { readJson, writeJson } from "../lib/storage.js";
+import { onSavedElsewhere, readJson, writeJson } from "../lib/storage.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -219,12 +219,14 @@ function onListKeydown(event) {
 
 // --- As a list or a tree ----------------------------------------------------------
 // The changed files are listed by their paths, or as a tree of their folders, chosen
-// with the button above them and kept for next time. A folder's box stages or unstages
-// every file in it; its row opens and closes it.
+// with the button above them and kept for next time, in every window. A folder's box
+// stages or unstages every file in it; its row opens and closes it.
 
 const TREE_KEY = "palace.workingCopyTree";
 const asTree = ref(readJson(TREE_KEY, false) === true);
 watch(asTree, (on) => writeJson(TREE_KEY, on));
+// Chosen in another window, it changes here too.
+onBeforeUnmount(onSavedElsewhere((key, value) => key === TREE_KEY && (asTree.value = value === true)));
 
 // Folders closed in the tree, by path.
 const closed = reactive(new Set());
