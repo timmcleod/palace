@@ -14,6 +14,7 @@ import { highlightText } from "../lib/highlight.js";
 import { settings } from "../lib/settings.js";
 import { ChevronRight, CircleAlert, UserRoundSearch } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
+import { useWindowed } from "../lib/windowed.js";
 
 // Every file as it was at a commit: a folder tree on top, the chosen file below.
 const props = defineProps({
@@ -84,6 +85,7 @@ async function revealFile(file) {
     const dir = parts.slice(0, i).join("/");
     if (!expanded.has(dir)) await toggle(dir);
   }
+  scrollToRow(rows.value.findIndex((row) => row.path === file));
   await openFile(file);
 }
 
@@ -146,6 +148,10 @@ const rows = computed(() => {
 });
 
 
+// A folder can hold tens of thousands of files: only the rows in view are drawn.
+const treeList = ref(null);
+const { spacer: treeSpacer, rows: shownRows, top: shownTop, height: treeHeight, scrollToRow } = useWindowed(treeList, rows, 26);
+
 function activate(row) {
   if (row.kind === "dir") toggle(row.path);
   else if (row.kind !== "submodule") openFile(row.path);
@@ -175,21 +181,25 @@ watch(
 
 <template>
   <div class="tree-view">
-    <div class="tree-list">
+    <div ref="treeList" class="tree-list">
       <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
-      <div
-        v-for="row in rows"
-        :key="row.path"
-        class="tree-row"
-        :class="{ selected: row.path === selected, muted: row.kind === 'submodule' }"
-        :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
-        :title="row.kind === 'submodule' ? 'A submodule: a separate repository' : row.path"
-        @click="activate(row)"
-      >
-        <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: expanded.has(row.path) }" />
-        <span v-else class="chevron" />
-        <FileIcon :name="row.name" :kind="row.kind" :open="expanded.has(row.path)" />
-        <span class="name">{{ row.name }}</span>
+      <div ref="treeSpacer" :style="{ height: `${treeHeight}px` }">
+        <div :style="{ transform: `translateY(${shownTop}px)` }">
+          <div
+            v-for="row in shownRows"
+            :key="row.path"
+            class="tree-row"
+            :class="{ selected: row.path === selected, muted: row.kind === 'submodule' }"
+            :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
+            :title="row.kind === 'submodule' ? 'A submodule: a separate repository' : row.path"
+            @click="activate(row)"
+          >
+            <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: expanded.has(row.path) }" />
+            <span v-else class="chevron" />
+            <FileIcon :name="row.name" :kind="row.kind" :open="expanded.has(row.path)" />
+            <span class="name">{{ row.name }}</span>
+          </div>
+        </div>
       </div>
     </div>
 

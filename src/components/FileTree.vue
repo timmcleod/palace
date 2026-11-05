@@ -11,6 +11,7 @@ import { computed, nextTick, shallowRef, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
+import { useWindowed } from "../lib/windowed.js";
 import { focusOnOpen, isUnsaved } from "../lib/editing.js";
 import { fileManager } from "../lib/platform.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
@@ -96,6 +97,9 @@ async function reveal(file) {
     const dir = parts.slice(0, i).join("/");
     if (!view.value.expanded.has(dir)) await toggle(dir);
   }
+  // In a long list it may be far off.
+  await nextTick();
+  scrollToRow(rows.value.findIndex((row) => row.path === file));
 }
 watch(() => props.selected, (file) => file && reveal(file), { immediate: true });
 
@@ -281,10 +285,12 @@ watch(() => props.selected, (file) => (cursor.value = file), { immediate: true }
 function moveTo(row) {
   if (!row) return;
   cursor.value = row.path;
-  nextTick(() => list.value?.querySelector(`[data-path="${CSS.escape(row.path)}"]`)?.scrollIntoView({ block: "nearest" }));
+  nextTick(() => scrollToRow(rows.value.indexOf(row)));
 }
 
+// A folder can hold tens of thousands of files: only the rows in view are drawn.
 const list = ref(null);
+const { spacer, rows: shownRows, top: shownTop, height: listHeight, scrollToRow } = useWindowed(list, rows, 26);
 
 function onKeydown(event) {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -319,26 +325,30 @@ function onKeydown(event) {
 <template>
   <div ref="list" class="file-tree" tabindex="0" @contextmenu="listMenu" @keydown="onKeydown">
     <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
-    <div
-      v-for="row in rows"
-      :key="row.path"
-      class="tree-row"
-      :data-path="row.path"
-      :class="{ selected: row.path === selected, cursor: row.path === cursor, muted: row.ignored || row.kind === 'submodule' }"
-      :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
-      :title="row.kind === 'submodule' ? 'A separate repository' : row.path"
-      @click="activate(row)"
-      @contextmenu.prevent="rowMenu($event, row)"
-    >
-      <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: view.expanded.has(row.path) }" />
-      <span v-else class="chevron" />
-      <FileIcon :name="row.name" :kind="row.kind" :open="view.expanded.has(row.path)" />
-      <span class="name" :class="statuses.get(row.path)">{{ row.name }}</span>
-      <span v-if="isUnsaved(path, row.path)" class="unsaved" title="Edits not saved" />
-      <span v-if="row.kind === 'dir' && changedFolders.has(row.path)" class="changed-dot" title="Has changes" />
-      <span v-else-if="BADGES[statuses.get(row.path)]" class="badge" :class="statuses.get(row.path)" :title="BADGES[statuses.get(row.path)][1]">
-        {{ BADGES[statuses.get(row.path)][0] }}
-      </span>
+    <div ref="spacer" :style="{ height: `${listHeight}px` }">
+      <div :style="{ transform: `translateY(${shownTop}px)` }">
+        <div
+          v-for="row in shownRows"
+          :key="row.path"
+          class="tree-row"
+          :data-path="row.path"
+          :class="{ selected: row.path === selected, cursor: row.path === cursor, muted: row.ignored || row.kind === 'submodule' }"
+          :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
+          :title="row.kind === 'submodule' ? 'A separate repository' : row.path"
+          @click="activate(row)"
+          @contextmenu.prevent="rowMenu($event, row)"
+        >
+          <ChevronRight v-if="row.kind === 'dir'" :size="14" class="chevron" :class="{ open: view.expanded.has(row.path) }" />
+          <span v-else class="chevron" />
+          <FileIcon :name="row.name" :kind="row.kind" :open="view.expanded.has(row.path)" />
+          <span class="name" :class="statuses.get(row.path)">{{ row.name }}</span>
+          <span v-if="isUnsaved(path, row.path)" class="unsaved" title="Edits not saved" />
+          <span v-if="row.kind === 'dir' && changedFolders.has(row.path)" class="changed-dot" title="Has changes" />
+          <span v-else-if="BADGES[statuses.get(row.path)]" class="badge" :class="statuses.get(row.path)" :title="BADGES[statuses.get(row.path)][1]">
+            {{ BADGES[statuses.get(row.path)][0] }}
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
