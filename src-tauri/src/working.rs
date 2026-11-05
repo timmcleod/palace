@@ -263,24 +263,37 @@ fn head_tree(repo: &Repository) -> Result<Option<Tree<'_>>, git2::Error> {
     }
 }
 
+// Staging and unstaging hand git the files as a list on its input, for update-index,
+// rather than naming them to `git add` or `git restore`: those match every file in the
+// repository against every name given, so staging 60,000 new files at once took
+// minutes, where this takes under a second. It's still git, so its filters (line
+// endings, LFS) apply as they do for `git add`.
+
 fn stage(path: &str, files: &[String]) -> Result<(), String> {
-    // -A also stages deletions of the listed paths.
-    let mut args = vec!["add", "-A", "--"];
-    args.extend(files.iter().map(String::as_str));
-    git(path, &args, None).map(drop)
+    // --add takes new files, and --remove stages deletions, as `add -A` does.
+    git_input(path, &["update-index", "--add", "--remove", "-z", "--stdin"], Some(&nul_separated(files))).map(drop)
 }
 
 fn unstage(path: &str, files: &[String]) -> Result<(), String> {
     let repo = Repository::discover(path).map_err(message)?;
-    // Before the first commit there's no HEAD to restore from; removing the paths from
-    // the index is the equivalent.
-    let mut args = if head_tree(&repo).map_err(message)?.is_some() {
-        vec!["restore", "--staged", "--"]
-    } else {
-        vec!["rm", "--cached", "-r", "-q", "--"]
-    };
-    args.extend(files.iter().map(String::as_str));
-    git(path, &args, None).map(drop)
+    // Each file goes back to what HEAD has, or, if HEAD hasn't it (a new file, or
+    // anything before the first commit), out of the index.
+    let head = head_tree(&repo).map_err(message)?;
+    let mut entries = Vec::new();
+    for file in files {
+        let entry = head.as_ref().and_then(|tree| tree.get_path(Path::new(file)).ok()).filter(|e| e.kind() != Some(git2::ObjectType::Tree));
+        let (mode, id) = entry.map_or((0, git2::Oid::zero()), |e| (e.filemode(), e.id()));
+        entries.extend_from_slice(format!("{mode:o} {id}\t{file}\0").as_bytes());
+    }
+    git_input(path, &["update-index", "-z", "--index-info"], Some(&entries))?;
+    // The entries put back don't yet say what's on disk, so git would take those files
+    // for changed until it had looked at them again.
+    let _ = git(path, &["update-index", "-q", "--refresh"], None);
+    Ok(())
+}
+
+fn nul_separated(files: &[String]) -> Vec<u8> {
+    files.iter().flat_map(|file| file.bytes().chain([0])).collect()
 }
 
 fn apply_hunk(
@@ -680,6 +693,44 @@ mod tests {
                 ("c.txt".into(), None, Some("untracked")),
             ]
         );
+    }
+
+    #[test]
+    fn unstaging_a_rename_and_files_in_folders_keeps_what_head_has() {
+        let t = TempRepo::new("unstage-rename");
+        t.commit(&[("old.txt", Some("same\n")), ("dir/run.sh", Some("echo\n"))], "First");
+        let script = Path::new(t.path()).join("dir/run.sh");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            git(t.path(), &["commit", "-qam", "Executable"], None).unwrap();
+        }
+        t.write(&[("old.txt", None), ("new.txt", Some("same\n")), ("dir/run.sh", Some("echo hi\n"))]);
+
+        let all: Vec<String> = ["old.txt", "new.txt", "dir/run.sh"].map(String::from).to_vec();
+        stage(t.path(), &all).unwrap();
+        assert_eq!(
+            statuses(&t),
+            [("dir/run.sh".into(), Some("modified"), None), ("new.txt".into(), Some("renamed"), None)]
+        );
+
+        unstage(t.path(), &all).unwrap();
+        assert_eq!(
+            statuses(&t),
+            [
+                ("dir/run.sh".into(), None, Some("modified")),
+                ("new.txt".into(), None, Some("untracked")),
+                ("old.txt".into(), None, Some("deleted")),
+            ]
+        );
+        // The index has the executable bit back from HEAD.
+        #[cfg(unix)]
+        {
+            let repo = Repository::open(t.path()).unwrap();
+            let index = repo.index().unwrap();
+            assert_eq!(index.get_path(Path::new("dir/run.sh"), 0).unwrap().mode, 0o100755);
+        }
     }
 
     #[test]
