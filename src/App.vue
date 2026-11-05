@@ -73,6 +73,7 @@ import {
 import { useGitActions } from "./lib/gitActions.js";
 import { useUndo } from "./lib/undo.js";
 import { useStatusCard } from "./lib/statusCard.js";
+import { useBackgroundFetch } from "./lib/backgroundFetch.js";
 import { useNavigation } from "./lib/navigation.js";
 import { splitKey } from "./lib/sidebarKeys.js";
 import {
@@ -718,7 +719,7 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") {
       loadAvatars(overview.value.path);
-      fetchedAt[overview.value.path] = Date.now();
+      markFetched(overview.value.path);
     }
     // Successes get out of the way; failures stay until dismissed.
     dismissStatusLater(op, 5000);
@@ -774,56 +775,16 @@ function refreshAndFetch() {
 
 // --- Background fetch --------------------------------------------------------------
 
-// Every few minutes, the open repository's remotes are fetched quietly, so the counts
-// of commits to pull and push stay current. Failures (offline, a locked key) are let
-// go until the next time.
-const fetchedAt = reactive({});
-const triedAt = {};
-let backgroundFetch = null;
-const now = ref(Date.now());
-
-function fetchIfDue() {
-  now.value = Date.now();
-  const o = overview.value;
-  if (!settings.fetchInBackground || !o?.remotes.length || backgroundFetch || remoteBusy.value) return;
-  if (loading.value || !navigator.onLine) return;
-  const last = Math.max(fetchedAt[o.path] ?? 0, triedAt[o.path] ?? 0);
-  if (now.value - last < settings.fetchMinutes * 60_000) return;
-  triedAt[o.path] = now.value;
-  backgroundFetch = invoke("fetch_in_background", { path: o.path })
-    .then(() => {
-      fetchedAt[o.path] = Date.now();
-      if (o.path === overview.value?.path) {
-        loadAvatars(o.path);
-        refresh();
-      }
-    })
-    .catch(() => {})
-    .finally(() => (backgroundFetch = null));
-}
-
-// Anything the user does goes first: a background fetch still running is canceled.
-// It also keeps the fetch's new tags out of an undo step's before and after.
-async function stopBackgroundFetch() {
-  if (!backgroundFetch) return;
-  invoke("cancel_remote").catch(() => {});
-  await backgroundFetch;
-}
-
-const fetchTimer = setInterval(fetchIfDue, 30_000);
-onBeforeUnmount(() => clearInterval(fetchTimer));
-// A repository is fetched shortly after it's opened, once it has had time to load.
-watch(
-  () => overview.value?.path,
-  () => setTimeout(fetchIfDue, 3000),
-);
-
-const fetchTitle = computed(() => {
-  const at = overview.value && fetchedAt[overview.value.path];
-  if (!at) return `Fetch from all remotes (${shortcut("Ctrl+R")})`;
-  const minutes = Math.floor((now.value - at) / 60_000);
-  const ago = minutes < 1 ? "just now" : minutes === 1 ? "a minute ago" : `${minutes} minutes ago`;
-  return `Fetch from all remotes (${shortcut("Ctrl+R")}), last fetched ${ago}`;
+// See backgroundFetch.js. Whatever the user runs stops a background fetch first.
+const {
+  stop: stopBackgroundFetch,
+  markFetched,
+  fetchTitle,
+} = useBackgroundFetch({
+  overview,
+  busy: () => remoteBusy.value,
+  loading: () => loading.value,
+  refresh,
 });
 
 // --- Undo and redo -----------------------------------------------------------------
