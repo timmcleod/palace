@@ -27,8 +27,10 @@ export function useStatusCard() {
   }
 
   // Dismisses `shown` after `ms`, restarting any countdown already going, unless it's
-  // been replaced by then.
+  // been replaced by then. For a card already replaced, it does nothing, leaving the
+  // countdown of the one shown, as a push finishing after another card took its place.
   function dismissLater(shown, ms) {
+    if (card.value !== shown) return;
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (card.value === shown) card.value = null;

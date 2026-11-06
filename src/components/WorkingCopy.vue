@@ -57,7 +57,8 @@ async function load() {
   const seq = ++loadSeq;
   try {
     const result = await invoke("working_status", { path: props.path });
-    if (seq === loadSeq) show(result);
+    // Read while git was staging, it may be from before; the read after shows it.
+    if (seq === loadSeq && !busy.value) show(result);
   } catch (e) {
     if (seq === loadSeq) error.value = String(e);
   }
@@ -69,6 +70,9 @@ watch(
     if (!list) return;
     // Newer than any read here still under way.
     loadSeq++;
+    // While git stages or unstages, a refresh may have read the status before it began,
+    // which would undo the boxes just checked. The refresh once git's done brings it.
+    if (busy.value) return;
     show(list);
   },
   { immediate: true },
@@ -111,6 +115,22 @@ function toggleFiles(list) {
   setStaged(list, !list.every(fullyStaged));
 }
 
+// How a file shows unstaged, as git will then report it: what was staged joins what
+// wasn't. A rename comes apart into its old path deleted and its new one untracked; a
+// file added and since deleted isn't a change at all.
+function unstaged(file) {
+  const rest = { ...file, staged: null };
+  if (file.staged === "renamed" && file.old_path) {
+    const parts = { ...rest, old_path: null };
+    return [{ ...parts, path: file.old_path, unstaged: "deleted" }, ...(file.unstaged === "deleted" ? [] : [{ ...parts, unstaged: "untracked" }])];
+  }
+  if (file.staged === "added") return file.unstaged === "deleted" ? [] : [{ ...rest, unstaged: "untracked" }];
+  // Deleted in the index but there again in the working copy, it's a change to it.
+  if (file.staged === "deleted") return [{ ...rest, unstaged: file.unstaged === "untracked" ? "modified" : "deleted" }];
+  // Deleted, or turned into a link, in the working copy since, that's what it is now.
+  return [{ ...rest, unstaged: ["deleted", "typechange"].includes(file.unstaged) ? file.unstaged : file.staged }];
+}
+
 // Stages the files, or unstages them. The boxes change at once: reading the status
 // again after staging can take a moment in a working copy with many changes, and that
 // reading puts them right if this was wrong. Conflicted files wait for it.
@@ -119,14 +139,9 @@ function setStaged(list, staging) {
   const shown = new Map();
   for (const file of list) {
     if (file.conflicted) continue;
-    shown.set(
-      file,
-      staging
-        ? { staged: file.staged ?? (file.unstaged === "untracked" ? "added" : file.unstaged), unstaged: null }
-        : { staged: null, unstaged: file.staged === "added" ? "untracked" : file.staged },
-    );
+    shown.set(file, staging ? [{ ...file, staged: file.staged ?? (file.unstaged === "untracked" ? "added" : file.unstaged), unstaged: null }] : unstaged(file));
   }
-  if (shown.size) files.value = files.value.map((f) => (shown.has(f) ? { ...f, ...shown.get(f) } : f));
+  if (shown.size) files.value = files.value.flatMap((f) => shown.get(f) ?? [f]);
   if (staging) {
     run("stage_files", { files: list.filter((f) => !fullyStaged(f)).map((f) => f.path) });
   } else {

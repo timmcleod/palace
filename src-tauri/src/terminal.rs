@@ -358,6 +358,42 @@ pub fn close_window(window: &str) {
     }
 }
 
+/// Hangs up the terminals in `window`, as close_window does, then waits, up to `limit`,
+/// for their shells and the programs in front in them to exit: hung up, a program may
+/// take a moment to stop, writing as it goes.
+pub fn close_window_and_wait(window: &str, limit: Duration) {
+    // A shell by its process, and what's in front by its process group, which holds
+    // what it started.
+    let running: Vec<(i32, bool)> = TERMINALS
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|t| t.window == window)
+        .flat_map(|t| {
+            let front = t.master.process_group_leader().filter(|front| Some(*front as u32) != t.shell).map(|front| (front, true));
+            t.shell.map(|shell| (shell as i32, false)).into_iter().chain(front)
+        })
+        .collect();
+    close_window(window);
+    let started = Instant::now();
+    while running.iter().any(|&(id, group)| still_running(id, group)) && started.elapsed() < limit {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Whether the process `id`, or with `group`, any process in the group `id`, is still
+/// running.
+#[cfg(unix)]
+fn still_running(id: i32, group: bool) -> bool {
+    // SAFETY: signal 0 sends nothing; it only checks that the process exists.
+    unsafe { libc::kill(if group { -id } else { id }, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn still_running(_id: i32, _group: bool) -> bool {
+    false
+}
+
 /// How to undo the AppImage's environment for the shell: each variable to remove (None)
 /// or set. Inside the AppImage, it points GTK and GLib at the libraries and schemas
 /// bundled with Palace, which would break programs from the system started in a
@@ -458,6 +494,35 @@ mod tests {
         wait_for(&|name| name == "sleep");
         tauri::async_runtime::block_on(terminal_close(id));
         assert_eq!(front(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn closing_a_window_waits_for_what_its_terminals_run_to_stop() {
+        let dir = std::env::temp_dir().join(format!("palace-test-terminal-close-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A window of its own, so closing it hangs up no other test's terminals.
+        let window = "test-close-and-wait";
+        let output = Channel::new(|_| Ok(()));
+        let exited = Channel::new(|_| Ok(()));
+        let id = open(window.into(), dir.to_string_lossy().into_owned(), 80, 24, output, exited).unwrap();
+        tauri::async_runtime::block_on(terminal_write(id, "sleep 30\n".into())).unwrap();
+        let started = Instant::now();
+        let front = loop {
+            let terminals = TERMINALS.lock().unwrap();
+            let terminal = &terminals[&id];
+            if let Some(front) = terminal.master.process_group_leader().filter(|front| Some(*front as u32) != terminal.shell) {
+                break front;
+            }
+            drop(terminals);
+            assert!(started.elapsed() < Duration::from_secs(10), "sleep never started");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+
+        close_window_and_wait(window, Duration::from_secs(10));
+        assert!(!still_running(front, true), "sleep is still running");
+        assert!(busy_programs(window).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -796,6 +796,7 @@ async function offerPullRequest(op, branch) {
 const actions = useGitActions({
   overview,
   run: runGit,
+  busy: () => remoteBusy.value,
   compare: openComparison,
   pullRequest: { available: () => issueRemotes.value.length > 0 && hasPulls.value, create: createPullRequest },
   viewedBranch: () => {

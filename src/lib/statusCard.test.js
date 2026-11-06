@@ -47,6 +47,18 @@ describe("useStatusCard", () => {
     expect(status.card.value).toBe(failed);
   });
 
+  // As a push finishing after a merged pull request's card has taken its place.
+  test("dismissLater for a card no longer shown keeps the countdown of the one that is", () => {
+    const status = useStatusCard();
+    const pushing = status.show({ title: "Pushing…", state: "running" });
+    const merged = status.show({ title: "Merged pull request", state: "done" }, { dismissAfter: 15_000 });
+    status.dismissLater(pushing, 5000);
+    vi.advanceTimersByTime(14_999);
+    expect(status.card.value).toBe(merged);
+    vi.advanceTimersByTime(1);
+    expect(status.card.value).toBeNull();
+  });
+
   test("dismissLater restarts the countdown", () => {
     const status = useStatusCard();
     const op = status.show({ title: "Pushed", state: "done" }, { dismissAfter: 5000 });

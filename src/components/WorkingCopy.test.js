@@ -117,4 +117,47 @@ describe("the changed files", () => {
     await settle();
     expect(boxes()).toEqual([false, false]);
   });
+  test("stay checked when a refresh read before staging comes back while git stages", async () => {
+    let staged;
+    vi.mocked(invoke).mockImplementation((command) =>
+      command === "stage_files" ? new Promise((resolve) => (staged = resolve)) : Promise.resolve([]),
+    );
+    const { statusFiles } = show();
+    statusFiles.value = [file("a.txt"), file("b.txt", "untracked")];
+    await settle();
+    const boxes = () => [...document.querySelectorAll(".file input[type=checkbox]")].map((box) => box.checked);
+    const button = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
+
+    button("Stage All").click();
+    await settle();
+    expect(boxes()).toEqual([true, true]);
+    // A refresh that read the status before staging began.
+    statusFiles.value = [file("a.txt"), file("b.txt", "untracked")];
+    await settle();
+    expect(boxes()).toEqual([true, true]);
+
+    // Once git's done, the refresh after it shows what it read.
+    staged();
+    await settle();
+    statusFiles.value = [{ ...file("a.txt"), staged: "modified", unstaged: null }, file("b.txt", "untracked")];
+    await settle();
+    expect(boxes()).toEqual([true, false]);
+  });
+
+  test("unstaged show as git will report them, before it's done", async () => {
+    vi.mocked(invoke).mockImplementation((command) => (command === "working_status" ? Promise.resolve([]) : new Promise(() => {})));
+    const { statusFiles } = show();
+    statusFiles.value = [
+      { ...file("new-name.txt"), old_path: "old-name.txt", staged: "renamed", unstaged: null },
+      { ...file("added-then-deleted.txt"), staged: "added", unstaged: "deleted" },
+      { ...file("changed-then-deleted.txt"), staged: "modified", unstaged: "deleted" },
+      { ...file("added.txt"), staged: "added", unstaged: null },
+    ];
+    await settle();
+    [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Unstage All").click();
+    await settle();
+    const rows = [...document.querySelectorAll(".file .file-path")].map((row) => row.textContent.trim());
+    expect(rows.sort()).toEqual(["added.txt", "changed-then-deleted.txt", "new-name.txt", "old-name.txt"]);
+    expect(document.body.textContent).not.toContain("→");
+  });
 });
