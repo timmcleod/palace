@@ -20,11 +20,14 @@ import GateLogo from "./GateLogo.vue";
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
-import { shortcut } from "../lib/platform.js";
+import { isMac, shortcut } from "../lib/platform.js";
 import { cloneFolder } from "../lib/clone.js";
 import { checkForUpdates, updates } from "../lib/updates.js";
 import { PALACE_URL } from "../lib/star.js";
 import castleUrl from "../assets/castle.webp";
+
+// Opens a shell tab whatever the setting (see TerminalPanel.vue).
+const newTabKeys = isMac ? shortcut("Ctrl+T") : "Ctrl+Shift+T";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -539,6 +542,16 @@ const SAMPLE = {
                 </div>
               </div>
               <label class="switch"><input v-model="settings.agentNotifications" type="checkbox" /><span /></label>
+            </div>
+            <div class="item">
+              <div class="text">
+                <div class="title">Start the agent when the terminal opens</div>
+                <div class="desc">
+                  Opening the terminal with no tabs starts the agent the terminal's ⋯ menu sets, Claude Code unless you
+                  change it, rather than a shell. {{ newTabKeys }} still opens a shell.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.terminalStartsAgent" type="checkbox" /><span /></label>
             </div>
           </div>
         </section>

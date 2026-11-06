@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-vue-next";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 import { isMac, shortcut } from "../lib/platform.js";
+import { settings } from "../lib/settings.js";
 import {
   AGENTS,
   agentCommand,
@@ -256,6 +257,11 @@ function moreMenu(event) {
     ...others,
     { separator: true },
     { label: "Agent Command…", action: editAgentCommand },
+    {
+      label: `Start ${agent.value} When the Terminal Opens`,
+      checked: settings.terminalStartsAgent,
+      action: () => (settings.terminalStartsAgent = !settings.terminalStartsAgent),
+    },
   ]);
   checkInstalled();
 }

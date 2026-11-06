@@ -31,6 +31,9 @@ const DEFAULTS = {
   // a notice in the Palace window you're in, or the system's notification. The tabs
   // show it either way.
   agentNotifications: true,
+  // Opening the terminal panel with no tabs starts the agent (see agents.js) rather
+  // than a shell.
+  terminalStartsAgent: true,
   // Fetch the open repository's remotes every `fetchMinutes` minutes.
   fetchInBackground: true,
   fetchMinutes: 5,
