@@ -1,3 +1,4 @@
+import { shellEscape } from "./shell.js";
 import { markRaw, reactive } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -45,6 +46,17 @@ export { AGENTS, agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand
 import { agentCommand, agentName, agentNamed, agentOfProgram } from "./agents.js";
 
 /** The program a command runs: its first word, after any VAR=value settings. */
+/**
+ * The agent `command` runs, among those Palace knows, when it isn't installed here, or
+ * null: installed, or a command that's the shell's to run, such as "cd api && claude"
+ * or an alias, which isn't checked.
+ */
+export async function missingAgent(command) {
+  const known = AGENTS.find((a) => a.program === programOf(command));
+  if (!known) return null;
+  return (await invoke("program_available", { program: known.program }).catch(() => true)) ? null : known;
+}
+
 export function programOf(command) {
   return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
 }
@@ -342,9 +354,6 @@ export function copySelection(tab) {
 }
 
 /** Pastes the clipboard's text. */
-// A path as a shell reads it back, as Terminal.app types a dropped file's: anything but
-// letters, digits and a few safe marks escaped with a backslash.
-const shellEscape = (path) => path.replace(/[^\p{L}\p{N}_.,:@%+=/-]/gu, (c) => `\\${c}`);
 
 /**
  * Files dropped on the terminal: their paths are typed, as in Terminal.app, so an agent

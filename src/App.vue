@@ -45,6 +45,7 @@ import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import FolderGoneBanner from "./components/FolderGoneBanner.vue";
 import CopyText from "./components/CopyText.vue";
+import SearchHint from "./components/SearchHint.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
 import NewPullRequestDialog from "./components/NewPullRequestDialog.vue";
 import SettingsView from "./components/SettingsView.vue";
@@ -96,6 +97,7 @@ import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
 import { CANCELED, CONFLICT, NOT_A_REPOSITORY, STALE_STEP, errorDetail, isError } from "./lib/errors.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
+import { dragEdge } from "./lib/resize.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
@@ -405,6 +407,8 @@ const historySearch = ref("");
 // How many commits the history lists, shown as the number of matches while searching.
 const historyCount = ref(null);
 const toolbarSearch = ref(null);
+// The Stashes, Issues or Pull Requests view's own search, whichever is showing.
+const viewSearch = ref(null);
 
 const stash = computed(() => overview.value?.stashes.find((s) => s.index === selectedStash.value) ?? null);
 
@@ -465,14 +469,15 @@ const { nav, go, describe, forget: forgetPlaces } = useNavigation({
 // says whether there was one: files and commits, or stashes, issues or pull requests.
 function focusToolbarSearch() {
   // Hidden, as with Settings filling the window, there's none to go to.
-  const input = [...document.querySelectorAll("header.toolbar .toolbar-search input")].find((el) => el.offsetParent);
-  if (!input) return false;
-  if (toolbarSearch.value) toolbarSearch.value.focus();
-  else {
-    input.focus();
-    input.select();
+  if (isFullView.value) return false;
+  if (toolbarSearch.value) {
+    toolbarSearch.value.focus();
+    return true;
   }
-  return true;
+  const input = viewSearch.value;
+  input?.focus();
+  input?.select();
+  return !!input;
 }
 
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
@@ -934,26 +939,12 @@ const panes = reactive({ sidebar: 300, history: 580, terminal: 300, ...readJson(
 const savePanes = () => writeJson(PANES_KEY, { sidebar: panes.sidebar, history: panes.history, terminal: panes.terminal });
 
 function startResize(event, pane, min, max) {
-  const startX = event.clientX;
   const startWidth = panes[pane];
-  const target = event.currentTarget;
-  target.setPointerCapture(event.pointerId);
-  // Not starting a selection in the text the drag begins beside, nor any it crosses.
-  event.preventDefault();
-  document.body.classList.add("resizing", "resizing-columns");
-
-  const move = (e) => {
-    panes[pane] = Math.min(max, Math.max(min, startWidth + e.clientX - startX));
-  };
-  // Released, or taken away, as when the window loses the pointer.
-  const stop = () => {
-    target.removeEventListener("pointermove", move);
-    target.removeEventListener("lostpointercapture", stop);
-    document.body.classList.remove("resizing", "resizing-columns");
-    savePanes();
-  };
-  target.addEventListener("pointermove", move);
-  target.addEventListener("lostpointercapture", stop);
+  dragEdge(event, {
+    axis: "x",
+    move: (distance) => (panes[pane] = Math.min(max, Math.max(min, startWidth + distance))),
+    done: savePanes,
+  });
 }
 
 // --- Files view --------------------------------------------------------------------
@@ -1019,13 +1010,12 @@ async function showTerminal({ newTab = false, folder = "" } = {}) {
   terminalOpen.value = true;
   terminalLoaded.value = true;
   const path = overview.value.path;
-  const { AGENTS, agentCommand, openTerminal, programOf, tabsFor } = await import("./lib/terminals.js");
+  const { agentCommand, missingAgent, openTerminal, tabsFor } = await import("./lib/terminals.js");
   if (!newTab && tabsFor(path).tabs.length) return terminalPanel.value?.focus();
   if (!newTab && !folder && settings.terminalStartsAgent) {
     const command = agentCommand(path);
-    const known = AGENTS.find((a) => a.program === programOf(command));
     // Not installed, it's a shell: the agent's button says how to install it.
-    const ready = !known || (await invoke("program_available", { program: known.program }).catch(() => true));
+    const ready = !(await missingAgent(command));
     // Opened meanwhile, as by a second press while that was asked, it isn't again.
     if (tabsFor(path).tabs.length || overview.value?.path !== path) return terminalPanel.value?.focus();
     if (ready) return openTerminal(path, { command, kind: "agent" });
@@ -1847,12 +1837,13 @@ const breadcrumb = computed(() => {
         </button>
         <label v-if="isStashes" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
-          <input v-model="stashQuery" placeholder=" " aria-label="Search for a stash's message" spellcheck="false" @keydown.esc="stashQuery = ''" />
-          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search stashes</span>
+          <input ref="viewSearch" v-model="stashQuery" placeholder=" " aria-label="Search for a stash's message" spellcheck="false" @keydown.esc="stashQuery = ''" />
+          <SearchHint what="stashes" />
         </label>
         <label v-else-if="isPulls" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
           <input
+            ref="viewSearch"
             v-model="pullQuery"
             placeholder=" "
             aria-label="Search pull requests"
@@ -1860,11 +1851,12 @@ const breadcrumb = computed(() => {
             spellcheck="false"
             @keydown.esc="pullQuery = ''"
           />
-          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search pull requests</span>
+          <SearchHint what="pull requests" />
         </label>
         <label v-else-if="isIssues" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
           <input
+            ref="viewSearch"
             v-model="issueQuery"
             placeholder=" "
             aria-label="Search issues"
@@ -1872,7 +1864,7 @@ const breadcrumb = computed(() => {
             spellcheck="false"
             @keydown.esc="issueQuery = ''"
           />
-          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search issues</span>
+          <SearchHint what="issues" />
         </label>
         <ToolbarSearch
           v-else

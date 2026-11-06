@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-vue-next";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
-import { isMac, shortcut } from "../lib/platform.js";
+import { isMac, NEW_TERMINAL_KEYS, shortcut } from "../lib/platform.js";
+import { dragEdge } from "../lib/resize.js";
 import { settings } from "../lib/settings.js";
 import {
   AGENTS,
@@ -16,6 +17,7 @@ import {
   markSeen,
   openTerminal,
   dropFiles,
+  missingAgent,
   paste,
   programOf,
   removeTab,
@@ -187,7 +189,7 @@ function focus() {
 defineExpose({ focus });
 
 // Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's (see App.vue).
-const NEW_TAB_KEYS = isMac ? shortcut("Ctrl+T") : "Ctrl+Shift+T";
+
 
 function newTerminal() {
   openTerminal(props.path);
@@ -204,8 +206,8 @@ const agent = computed(() => agentName(command.value));
 // checked. `run` is the repository's agent command, unless another agent is picked
 // from the menu for this one tab.
 async function newAgent(run = command.value) {
-  const known = AGENTS.find((a) => a.program === programOf(run));
-  if (known && !(await invoke("program_available", { program: known.program }).catch(() => true))) {
+  const known = await missingAgent(run);
+  if (known) {
     const isDefault = run === command.value;
     const install = await askConfirm({
       title: `${known.title} Isn't Installed`,
@@ -329,27 +331,17 @@ function terminalMenu(event) {
   ]);
 }
 
+// Its top edge, dragged up, makes it taller.
 function startResize(event) {
-  const startY = event.clientY;
   const startHeight = props.height;
-  const target = event.currentTarget;
-  target.setPointerCapture(event.pointerId);
-  // Not starting a selection in the text the drag begins beside, nor any it crosses.
-  event.preventDefault();
-  document.body.classList.add("resizing", "resizing-rows");
-  const move = (e) => {
-    const max = Math.max(160, window.innerHeight - 200);
-    emit("update:height", Math.min(max, Math.max(120, startHeight - (e.clientY - startY))));
-  };
-  // Released, or taken away, as when the window loses the pointer.
-  const stop = () => {
-    target.removeEventListener("pointermove", move);
-    target.removeEventListener("lostpointercapture", stop);
-    document.body.classList.remove("resizing", "resizing-rows");
-    emit("resized");
-  };
-  target.addEventListener("pointermove", move);
-  target.addEventListener("lostpointercapture", stop);
+  dragEdge(event, {
+    axis: "y",
+    move: (distance) => {
+      const max = Math.max(160, window.innerHeight - 200);
+      emit("update:height", Math.min(max, Math.max(120, startHeight - distance)));
+    },
+    done: () => emit("resized"),
+  });
 }
 </script>
 
@@ -385,7 +377,7 @@ function startResize(event) {
           <button class="tab-close" title="Close" @click.stop="closeTab(tab)"><X :size="12" /></button>
         </div>
       </div>
-      <button class="icon-button small" :title="`New Terminal (${NEW_TAB_KEYS})`" @click="newTerminal"><Plus :size="15" /></button>
+      <button class="icon-button small" :title="`New Terminal (${NEW_TERMINAL_KEYS})`" @click="newTerminal"><Plus :size="15" /></button>
       <button class="agent-button" :title="`New ${agent} tab: ${command}`" @click="newAgent()">
         <Sparkle :size="13" :stroke-width="1.75" /> {{ agent }}
       </button>

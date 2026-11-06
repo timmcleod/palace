@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
+import SearchHint from "./SearchHint.vue";
 import { shortcut } from "../lib/platform.js";
 
 // The toolbar's search: files by name or path, and commits in the history being shown
@@ -207,7 +208,7 @@ defineExpose({ focus });
         @input="onInput"
         @keydown="onKeydown"
       />
-      <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search</span>
+      <SearchHint />
     </label>
     <Teleport to="body">
       <div v-if="open && query.trim()" ref="list" class="results" :style="position" @mousedown.prevent>

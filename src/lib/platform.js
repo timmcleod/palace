@@ -5,6 +5,10 @@ export const isMac = /Mac/.test(navigator.platform || navigator.userAgent);
 // Whether the platform's command key is held: Cmd on a Mac, Ctrl elsewhere.
 export const commandKey = (event) => (isMac ? event.metaKey : event.ctrlKey);
 
+// The keys that open a new terminal tab, a shell whatever else is set (see onKeydown in
+// App.vue): Cmd+T on a Mac, and Ctrl+Shift+T on Linux, where Ctrl+T is the shell's.
+export const NEW_TERMINAL_KEYS = isMac ? "⌘T" : "Ctrl+Shift+T";
+
 // The file manager, as it's named in menus.
 export const fileManager = isMac ? "Finder" : "Files";
 
