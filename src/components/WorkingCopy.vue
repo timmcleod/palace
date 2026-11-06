@@ -194,6 +194,7 @@ watch(
 );
 
 function onRowClick(file, event) {
+  folderCursor.value = null;
   const list = shownOrder.value;
   if (event.shiftKey && anchor) {
     const from = list.findIndex((f) => f.path === anchor);
@@ -220,26 +221,45 @@ function onRowClick(file, event) {
 }
 
 // ↑ and ↓ move to the previous or next file and show its changes; with Shift, they
-// extend the selection from where it started.
+// extend the selection from where it started. In the tree they stop at folders too,
+// and → opens the folder they're on, or goes into it, while ← closes it, or goes up to
+// the folder it's in.
 const listEl = ref(null);
+
+// The folder ↑ and ↓ are on in the tree, by path, while no file is selected.
+const folderCursor = ref(null);
+watch(
+  () => props.selectedPath,
+  (path) => path && (folderCursor.value = null),
+);
 
 function onListKeydown(event) {
   const all = files.value ?? [];
   if ((event.ctrlKey || event.metaKey) && event.key === "a" && all.length) {
     event.preventDefault();
+    folderCursor.value = null;
     chosen.value = new Set(all.map((f) => f.path));
     return;
   }
+  const folderAt = folderCursor.value && rows.value.findIndex((row) => row.folder === folderCursor.value);
+  const onFolder = folderAt >= 0 ? rows.value[folderAt] : null;
   // Space stages the selected files, or unstages them, rather than scrolling.
   if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
     event.preventDefault();
-    toggleFiles(all.filter((f) => chosen.value.has(f.path)));
+    toggleFiles(onFolder ? onFolder.files : all.filter((f) => chosen.value.has(f.path)));
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (asTree.value && !event.shiftKey && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+    event.preventDefault();
+    moveInTree(event.key, onFolder ? folderAt : rows.value.findIndex((row) => row.file?.path === props.selectedPath));
     return;
   }
   const list = shownOrder.value;
   if ((event.key !== "ArrowDown" && event.key !== "ArrowUp") || !list.length) return;
   event.preventDefault();
 
+  folderCursor.value = null;
   const at = list.findIndex((f) => f.path === props.selectedPath);
   const step = event.key === "ArrowDown" ? 1 : -1;
   const next = at < 0 ? 0 : Math.min(list.length - 1, Math.max(0, at + step));
@@ -257,6 +277,45 @@ function onListKeydown(event) {
   nextTick(() => scrollToRow(rows.value.findIndex((row) => row.file === file)));
 }
 
+// Moves in the tree for `key`, from the row at `at` (-1 for none).
+function moveInTree(key, at) {
+  const all = rows.value;
+  const row = all[at];
+  let next = at;
+  if (key === "ArrowDown") next = Math.min(all.length - 1, at + 1);
+  else if (key === "ArrowUp") next = at < 0 ? 0 : Math.max(0, at - 1);
+  else if (key === "ArrowRight") {
+    if (!row?.folder) return;
+    if (closed.has(row.folder)) return closed.delete(row.folder);
+    next = at + 1;
+  } else if (key === "ArrowLeft") {
+    if (!row) return;
+    if (row.folder && !closed.has(row.folder)) return closed.add(row.folder);
+    // Up to the folder it's in: the nearest row above, one level out.
+    next = all.findLastIndex((other, i) => i < at && other.folder && other.depth === row.depth - 1);
+    if (next < 0) return;
+  }
+  goToRow(next);
+}
+
+// Puts the cursor on the row at `index`: a file is selected and shows its changes; a
+// folder is only marked, so ↑ and ↓ pass through it.
+function goToRow(index) {
+  const row = rows.value[index];
+  if (!row) return;
+  if (row.folder) {
+    folderCursor.value = row.folder;
+    chosen.value = new Set();
+    if (props.selectedPath) emit("select", null);
+  } else {
+    folderCursor.value = null;
+    chosen.value = new Set([row.file.path]);
+    anchor = row.file.path;
+    emit("select", row.file);
+  }
+  nextTick(() => scrollToRow(index));
+}
+
 // --- As a list or a tree ----------------------------------------------------------
 // The changed files are listed by their paths, or as a tree of their folders, chosen
 // with the button above them and kept for next time, in every window. A folder's box
@@ -264,7 +323,10 @@ function onListKeydown(event) {
 
 const TREE_KEY = "palace.workingCopyTree";
 const asTree = ref(readJson(TREE_KEY, false) === true);
-watch(asTree, (on) => writeJson(TREE_KEY, on));
+watch(asTree, (on) => {
+  writeJson(TREE_KEY, on);
+  folderCursor.value = null;
+});
 // Chosen in another window, it changes here too.
 onBeforeUnmount(onSavedElsewhere((key, value) => key === TREE_KEY && (asTree.value = value === true)));
 
@@ -333,6 +395,9 @@ const shownOrder = computed(() => rows.value.filter((row) => row.file).map((row)
 // Alt-clicking (Option-clicking on a Mac) opens or closes the folders in it too. On a
 // Mac the click may not say Option is held, so Palace is asked (keys.rs).
 async function toggleFolder(row, event) {
+  folderCursor.value = row.folder;
+  chosen.value = new Set();
+  if (props.selectedPath) emit("select", null);
   const opening = closed.has(row.folder);
   const all = event.altKey || (isMac && (await invoke("alt_held").catch(() => false)));
   for (const folder of [row.folder, ...(all ? folderPaths(row.node, row.folder) : [])]) {
@@ -563,6 +628,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
             <div
               v-if="row.folder"
               class="file folder-row"
+              :class="{ selected: row.folder === folderCursor }"
               @click="toggleFolder(row, $event)"
               @contextmenu.prevent="onFolderMenu(row, $event)"
             >
@@ -590,7 +656,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
             <div
               v-else
               class="file"
-              :class="{ selected: chosen.has(row.file.path), current: row.file.path === selectedPath && chosen.size > 1 }"
+              :class="{
+                selected: chosen.has(row.file.path),
+                current: row.file.path === selectedPath && chosen.size > 1,
+              }"
               @click="onRowClick(row.file, $event)"
               @contextmenu.prevent="onRowMenu(row.file, $event)"
             >

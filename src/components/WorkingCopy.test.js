@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { writeJson } from "../lib/storage.js";
 import WorkingCopy from "./WorkingCopy.vue";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -23,7 +24,10 @@ afterEach(() => {
 
 // Mounts the list with the changed files the window's refresh brought (`statusFiles`),
 // both reactive, so a test can change them as a refresh would.
+let selected = [];
 function show() {
+  selected = [];
+  const selectedPath = ref(null);
   const statusFiles = ref(null);
   const refreshKey = ref(0);
   const root = document.createElement("div");
@@ -32,6 +36,12 @@ function show() {
     render: () =>
       h(WorkingCopy, {
         path: "/repo",
+        // As the window does, the file selected comes back as the one shown.
+        selectedPath: selectedPath.value,
+        onSelect: (file) => {
+          selected.push(file?.path ?? null);
+          selectedPath.value = file?.path ?? null;
+        },
         draft: reactive({ subject: "", body: "", amend: false }),
         refreshKey: refreshKey.value,
         statusFiles: statusFiles.value,
@@ -161,3 +171,42 @@ describe("the changed files", () => {
     expect(document.body.textContent).not.toContain("→");
   });
 });
+
+describe("in the tree, the arrow keys", () => {
+  afterEach(() => writeJson("palace.workingCopyTree", false));
+
+  test("go through folders and files, open and close folders, and go up to the one a file's in", async () => {
+    writeJson("palace.workingCopyTree", true);
+    const { statusFiles } = show();
+    statusFiles.value = [file("src/a.js"), file("src/b.js"), file("z.txt")];
+    await settle();
+    const list = document.querySelector(".files");
+    const press = async (key) => {
+      list.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      await settle();
+    };
+    const shown = () =>
+      [...document.querySelectorAll(".file")].map((row) => (row.classList.contains("selected") ? "*" : "") + row.querySelector(".file-path").textContent.trim());
+    expect(shown()).toEqual(["src", "a.js", "b.js", "z.txt"]);
+
+    await press("ArrowDown");
+    expect(shown()).toEqual(["*src", "a.js", "b.js", "z.txt"]);
+    await press("ArrowLeft");
+    expect(shown()).toEqual(["*src", "z.txt"]);
+    await press("ArrowRight");
+    expect(shown()).toEqual(["*src", "a.js", "b.js", "z.txt"]);
+    await press("ArrowRight");
+    expect(shown()).toEqual(["src", "*a.js", "b.js", "z.txt"]);
+    expect(selected.at(-1)).toBe("src/a.js");
+    await press("ArrowDown");
+    expect(selected.at(-1)).toBe("src/b.js");
+
+    // Up to the folder, which shows no file's changes, and Space stages all in it.
+    await press("ArrowLeft");
+    expect(shown()).toEqual(["*src", "a.js", "b.js", "z.txt"]);
+    expect(selected.at(-1)).toBe(null);
+    await press(" ");
+    expect(vi.mocked(invoke).mock.calls.at(-1)).toEqual(["stage_files", { path: "/repo", files: ["src/a.js", "src/b.js"] }]);
+  });
+});
+
