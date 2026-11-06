@@ -1,7 +1,8 @@
 <script setup>
 import { ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CANCELED, confirmDiscard } from "../lib/confirm.js";
+import { confirmDiscard } from "../lib/confirm.js";
+import { CANCELED } from "../lib/errors.js";
 import DiffTable from "./DiffTable.vue";
 
 // The staged and unstaged changes of one working-copy file, with hunk staging.

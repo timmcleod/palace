@@ -92,8 +92,7 @@ import {
   tell,
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
-import { CANCELED } from "./lib/confirm.js";
-import { CONFLICT, NOT_A_REPOSITORY, errorDetail, isError } from "./lib/errors.js";
+import { CANCELED, CONFLICT, NOT_A_REPOSITORY, STALE_STEP, errorDetail, isError } from "./lib/errors.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
@@ -629,7 +628,7 @@ async function runGit([running, done, failed], command, args = {}, { quietError,
     } else {
       op.state = "failed";
       op.title = failed;
-      op.message = message;
+      op.message = isError(message, STALE_STEP) ? errorDetail(message, STALE_STEP) : message;
       // A push rejected because the remote has commits this branch doesn't is usually
       // fixed by pulling them in. If the branch was rewritten (amend, rebase) instead,
       // force pushing publishes it.

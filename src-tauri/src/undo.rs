@@ -5,6 +5,7 @@
 //! operation changed is touched, and only if nothing else has changed it since.
 
 use crate::cli::git;
+use crate::errors::STALE_STEP;
 use crate::working::{read_status, remove_empty_parents};
 use git2::{BranchType, Index, ObjectType, Oid, Repository, RepositoryState, TreeWalkMode, TreeWalkResult};
 use serde::{Deserialize, Serialize};
@@ -263,7 +264,7 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
     let leaves_stash = to.files.is_empty() && from.stashes.iter().any(|s| !to.stashes.contains(s));
     let moves_stashes = from.stashes != to.stashes && !leaves_stash;
     if moves_stashes && stashes_now != from.stashes {
-        return Err("The stash list has changed since, so it can't be put back safely.".into());
+        return Err(format!("{STALE_STEP}The stash list has changed since, so it can't be put back safely."));
     }
     let files: Vec<&FileState> = to.files.iter().filter(|file| !from.files.contains(file)).collect();
     if !files.is_empty() {
@@ -273,11 +274,11 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
             let was = from.files.iter().find(|f| f.path == file.path);
             let now = file_state(&repo, workdir, &index, &file.path, false, &mut 0).ok();
             if was.is_none() || now.as_ref() != was {
-                return Err(format!("{} has changed since, so it can't be put back safely.", file.path));
+                return Err(format!("{STALE_STEP}{} has changed since, so it can't be put back safely.", file.path));
             }
             for (_, id) in file.index.iter().chain(&file.worktree) {
                 Oid::from_str(id).ok().and_then(|id| repo.find_blob(id).ok()).ok_or_else(|| {
-                    format!("The saved copy of {} is gone; git removes unused copies after a while.", file.path)
+                    format!("{STALE_STEP}The saved copy of {} is gone; git removes unused copies after a while.", file.path)
                 })?;
             }
         }
@@ -320,11 +321,11 @@ fn restore_refs(path: &str, from: &Snapshot, to: &Snapshot, mode: &str, done: &m
         .collect();
     for name in &changed {
         if now.refs.get(*name) != from.refs.get(*name) {
-            return Err(format!("{} has changed since, so it can't be put back safely.", describe(name)));
+            return Err(format!("{STALE_STEP}{} has changed since, so it can't be put back safely.", describe(name)));
         }
     }
     if now.head_branch != from.head_branch || (now.head_branch.is_none() && now.head_id != from.head_id) {
-        return Err("HEAD has moved since, so it can't be put back safely.".into());
+        return Err(format!("{STALE_STEP}HEAD has moved since, so it can't be put back safely."));
     }
 
     let mut pending: BTreeSet<&String> = changed;
@@ -640,7 +641,7 @@ mod tests {
         t.write(&[("a.txt", Some("3\n"))]);
 
         let error = undo(&t, &step, "keep").unwrap_err();
-        assert_eq!(error, "a.txt has changed since, so it can't be put back safely.");
+        assert_eq!(error, format!("{STALE_STEP}a.txt has changed since, so it can't be put back safely."));
         assert_eq!(read(&t, "a.txt"), "3\n");
     }
 
@@ -910,7 +911,7 @@ mod tests {
         let third = t.commit(&[("a.txt", Some("3\n"))], "Third");
 
         let error = undo(&t, &step, "soft").unwrap_err();
-        assert_eq!(error, format!("“{}” has changed since, so it can't be put back safely.", t.branch()));
+        assert_eq!(error, format!("{STALE_STEP}“{}” has changed since, so it can't be put back safely.", t.branch()));
         assert_eq!(t.head(), third);
         assert_ne!(t.head(), first);
     }

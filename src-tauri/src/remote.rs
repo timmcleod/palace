@@ -994,7 +994,7 @@ mod tests {
             fetch.join().unwrap()
         });
 
-        assert_eq!(result, Err("Canceled.".to_string()));
+        assert_eq!(result, Err(crate::errors::CANCELED.to_string()));
         assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
         // The slot is free again for the next operation.
         assert!(running.0.lock().unwrap().is_none());

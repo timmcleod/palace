@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm } from "./overlays.js";
-import { CANCELED } from "./confirm.js";
+import { CANCELED, STALE_STEP } from "./errors.js";
 import { useUndo } from "./undo.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -115,7 +115,11 @@ describe("undo and redo", () => {
     error = "The network is down";
     await undo.undo();
     expect(undo.newest().label).toBe("Merge");
+    // Worded like it, but without the backend's prefix, it's kept: the wording isn't relied on.
     error = "main has moved since";
+    await undo.undo();
+    expect(undo.newest().label).toBe("Merge");
+    error = `${STALE_STEP}“main” has changed since, so it can't be put back safely.`;
     await undo.undo();
     expect(undo.newest()).toBeUndefined();
   });

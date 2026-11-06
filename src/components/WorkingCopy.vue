@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleCheck, Folder, SlidersHorizontal, Undo2, X } from "lucide-vue-next";
-import { CANCELED, confirmDiscard } from "../lib/confirm.js";
+import { confirmDiscard } from "../lib/confirm.js";
+import { CANCELED } from "../lib/errors.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 import { commandKey, fileManager, isMac, shortcut } from "../lib/platform.js";
 import { useIssueSuggestions } from "../lib/issueSuggestions.js";

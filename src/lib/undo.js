@@ -1,7 +1,6 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { CANCELED } from "./confirm.js";
-import { CONFLICT, isError } from "./errors.js";
+import { CANCELED, CONFLICT, STALE_STEP, isError } from "./errors.js";
 import { askConfirm } from "./overlays.js";
 
 // Operations that can be undone, and what Undo calls them, from their arguments.
@@ -142,8 +141,9 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
       undoing ? { from: step.after, to: step.before, mode: step.mode } : { from: step.before, to: step.after, mode: step.mode },
     );
     if (error) {
-      // Something else has moved what it changed, so it can never be replayed.
-      if (error.includes("changed since") || error.includes("moved since")) stack.value = stack.value.slice(0, -1);
+      // Something else has moved what it changed, or its saved copies are gone, so it
+      // can never be replayed.
+      if (isError(error, STALE_STEP)) stack.value = stack.value.slice(0, -1);
       return;
     }
     stack.value = stack.value.slice(0, -1);

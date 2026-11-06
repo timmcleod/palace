@@ -5,7 +5,7 @@ import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
 import { undoHint } from "./confirm.js";
 import { keepDraft } from "./drafts.js";
-import { CONFLICT, PULL_REWRITTEN, errorDetail, isError } from "./errors.js";
+import { CANCELED, CONFLICT, PULL_REWRITTEN, errorDetail, isError } from "./errors.js";
 import { githubAccount } from "./github.js";
 import { githubRepoOf } from "./githubRemote.js";
 import {
@@ -40,7 +40,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   const confirm = (message, title, confirmLabel, danger = true) => askConfirm({ title, message, confirmLabel, danger });
 
   async function checkout(kind, name) {
-    if (!(await leaveDetached())) return "Canceled.";
+    if (!(await leaveDetached())) return CANCELED;
     return run(["Checking out…", "Checked out", "Checkout failed"], "checkout", { kind, name });
   }
 
@@ -49,7 +49,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   // since, as by its author force-pushing, pr-N is replaced, but if it has commits of
   // your own on it, only once you've said to.
   async function checkoutPull(remote, number, branch) {
-    if (!(await leaveDetached())) return "Canceled.";
+    if (!(await leaveDetached())) return CANCELED;
     const titles = ["Checking out…", `Checked out #${number}`, "Checkout failed"];
     const rewritten = (e) => isError(e, PULL_REWRITTEN);
     const error = await run(titles, "checkout_pull", { remote, number, branch }, { quietError: rewritten });
@@ -64,7 +64,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       "Replace the Pull Request's Branch?",
       "Replace",
     );
-    if (!replace) return "Canceled.";
+    if (!replace) return CANCELED;
     return run(titles, "checkout_pull", { remote, number, branch, replace: true });
   }
 

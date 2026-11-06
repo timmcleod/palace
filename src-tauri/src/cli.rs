@@ -238,7 +238,7 @@ fn run_with_progress(mut command: Command, running: &Running, mut on_progress: i
         Ok(s) if s.success() => Ok(join_output(&transcript, &stdout)),
         #[cfg(unix)]
         Ok(s) if std::os::unix::process::ExitStatusExt::signal(&s) == Some(libc::SIGTERM) => {
-            Err("Canceled.".into())
+            Err(crate::errors::CANCELED.into())
         }
         Ok(_) => Err(join_output(&transcript, &stdout)),
         Err(e) => Err(format!("git failed: {e}")),
