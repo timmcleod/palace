@@ -81,4 +81,40 @@ describe("the changed files", () => {
     expect(document.body.textContent).toContain("3 changed files");
   });
 
+  test("are checked at once by Stage All, and unchecked by Unstage All, before git is done", async () => {
+    // Git takes its time: what it does doesn't come back during the test.
+    vi.mocked(invoke).mockImplementation((command) => (command === "working_status" ? Promise.resolve([]) : new Promise(() => {})));
+    const { statusFiles } = show();
+    statusFiles.value = [file("a.txt"), file("b.txt", "untracked")];
+    await settle();
+    const boxes = () => [...document.querySelectorAll(".file input[type=checkbox]")].map((box) => box.checked);
+    const button = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
+    expect(boxes()).toEqual([false, false]);
+
+    button("Stage All").click();
+    await settle();
+    expect(boxes()).toEqual([true, true]);
+    expect(vi.mocked(invoke).mock.calls.at(-1)).toEqual(["stage_files", { path: "/repo", files: ["a.txt", "b.txt"] }]);
+
+    // As the refresh after it would bring them, staged.
+    statusFiles.value = [
+      { ...file("a.txt"), staged: "modified", unstaged: null },
+      { ...file("b.txt"), staged: "added", unstaged: null },
+    ];
+    await settle();
+    vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
+    // The first operation never finished here, so the list is still busy; a new mount
+    // stands in for the next time.
+    app.unmount();
+    const next = show();
+    next.statusFiles.value = [
+      { ...file("a.txt"), staged: "modified", unstaged: null },
+      { ...file("b.txt"), staged: "added", unstaged: null },
+    ];
+    await settle();
+    expect(boxes()).toEqual([true, true]);
+    button("Unstage All").click();
+    await settle();
+    expect(boxes()).toEqual([false, false]);
+  });
 });

@@ -108,11 +108,14 @@ function toggle(file, event) {
 // Stages the files, or unstages them if they're all staged already, as Space does for
 // the selected files.
 function toggleFiles(list) {
+  setStaged(list, !list.every(fullyStaged));
+}
+
+// Stages the files, or unstages them. The boxes change at once: reading the status
+// again after staging can take a moment in a working copy with many changes, and that
+// reading puts them right if this was wrong. Conflicted files wait for it.
+function setStaged(list, staging) {
   if (busy.value || !list.length) return;
-  const staging = !list.every(fullyStaged);
-  // The boxes change at once: reading the status again after staging can take a moment
-  // in a working copy with many changes, and that reading puts them right if this was
-  // wrong. Conflicted files wait for it.
   const shown = new Map();
   for (const file of list) {
     if (file.conflicted) continue;
@@ -134,12 +137,14 @@ function toggleFiles(list) {
 const unstagedFiles = computed(() => files.value?.filter((f) => f.unstaged) ?? []);
 const stagedFiles = computed(() => files.value?.filter((f) => f.staged) ?? []);
 
+// Stage All and Unstage All change the boxes at once too, as git can take a second or
+// two over tens of thousands of files.
 function stageAll() {
-  run("stage_files", { files: unstagedFiles.value.map((f) => f.path) });
+  setStaged(unstagedFiles.value, true);
 }
 
 function unstageAll() {
-  run("unstage_files", { files: stagedFiles.value.flatMap(pathsOf) });
+  setStaged(stagedFiles.value, false);
 }
 
 async function discard(list) {
