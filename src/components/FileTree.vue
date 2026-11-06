@@ -22,6 +22,9 @@ const props = defineProps({
   path: { type: String, required: true },
   selected: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
+  // The changed files as the window's last refresh read them, for their marks, or null
+  // when it didn't: then they're read here.
+  statusFiles: { type: Array, default: null },
 });
 // "deleted" says what was deleted, so the editor can let it go, "renamed" what was
 // renamed ({ from, to }), so it can follow, and "open-terminal" a folder to start a
@@ -53,7 +56,7 @@ async function load() {
   const dirs = ["", ...view.value.expanded];
   const [results, status] = await Promise.all([
     Promise.allSettled(dirs.map(listing)),
-    invoke("working_status", { path: props.path }).catch(() => []),
+    props.statusFiles ? null : invoke("working_status", { path: props.path }).catch(() => []),
   ]);
   if (seq !== loadSeq) return;
   const loaded = new Map();
@@ -68,8 +71,15 @@ async function load() {
     if (!loaded.has(dir) && view.value.expanded.has(dir)) loaded.set(dir, entries);
   }
   listings.value = loaded;
-  statuses.value = new Map(status.map((f) => [f.path, f.conflicted ? "conflicted" : (f.unstaged ?? f.staged)]));
+  if (status) statuses.value = statusesOf(status);
 }
+
+const statusesOf = (list) => new Map(list.map((f) => [f.path, f.conflicted ? "conflicted" : (f.unstaged ?? f.staged)]));
+watch(
+  () => props.statusFiles,
+  (list) => list && (statuses.value = statusesOf(list)),
+  { immediate: true },
+);
 
 watch(() => [props.path, props.refreshKey, view.value.showIgnored], load, { immediate: true });
 

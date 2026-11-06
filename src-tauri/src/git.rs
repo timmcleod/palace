@@ -21,6 +21,10 @@ pub struct RepoOverview {
     submodules: Vec<Submodule>,
     /// Its worktrees, its own first, or none when it has only that one.
     worktrees: Vec<crate::worktree::Worktree>,
+    /// The changed files, as working_status lists them, when asked for: read anyway to
+    /// count them, they spare a view that lists them reading the status again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files: Option<Vec<crate::working::WorkingFile>>,
 }
 
 #[derive(Serialize)]
@@ -71,10 +75,12 @@ pub struct Submodule {
     path: String,
 }
 
+/// The repository at `path`: its HEAD, branches, remotes, tags and so on. With `files`,
+/// the changed files too.
 #[tauri::command]
-pub async fn repo_overview(path: String) -> Result<RepoOverview, String> {
+pub async fn repo_overview(path: String, files: Option<bool>) -> Result<RepoOverview, String> {
     let path = Path::new(&path);
-    read_overview(path).map_err(|e| {
+    read_overview(path, files.unwrap_or(false)).map_err(|e| {
         let outside = e.class() == ErrorClass::Repository && e.code() == ErrorCode::NotFound && path.is_dir();
         format!("{}{}", if outside { NOT_A_REPOSITORY } else { "" }, e.message())
     })
@@ -87,7 +93,7 @@ pub async fn init_repo(path: String) -> Result<(), String> {
     crate::cli::git_in(Path::new(&path), &["init"]).map(drop)
 }
 
-fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
+fn read_overview(path: &Path, with_files: bool) -> Result<RepoOverview, git2::Error> {
     let mut repo = Repository::discover(path)?;
 
     let root = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
@@ -128,6 +134,7 @@ fn read_overview(path: &Path) -> Result<RepoOverview, git2::Error> {
         stashes,
         submodules,
         worktrees,
+        files: with_files.then_some(status),
     })
 }
 
@@ -324,16 +331,33 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.to_string_lossy().into_owned();
 
-        let refused = tauri::async_runtime::block_on(repo_overview(path.clone())).err().unwrap();
+        let refused = tauri::async_runtime::block_on(repo_overview(path.clone(), None)).err().unwrap();
         assert!(refused.starts_with(NOT_A_REPOSITORY), "{refused}");
         // A folder that's gone isn't one to create a repository in.
-        let gone = tauri::async_runtime::block_on(repo_overview(format!("{path}/gone"))).err().unwrap();
+        let gone = tauri::async_runtime::block_on(repo_overview(format!("{path}/gone"), None)).err().unwrap();
         assert!(!gone.starts_with(NOT_A_REPOSITORY), "{gone}");
 
         tauri::async_runtime::block_on(init_repo(path.clone())).unwrap();
-        let overview = tauri::async_runtime::block_on(repo_overview(path)).unwrap();
+        let overview = tauri::async_runtime::block_on(repo_overview(path, None)).unwrap();
         assert_eq!(overview.commit_count, None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_changed_files_come_with_the_overview_only_when_asked_for() {
+        let t = crate::test_support::TempRepo::new("overview-files");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        t.write(&[("a.txt", Some("edited\n")), ("new.txt", Some("new\n"))]);
+
+        let without = tauri::async_runtime::block_on(repo_overview(t.path().into(), None)).unwrap();
+        assert_eq!(without.changes, 2);
+        assert!(without.files.is_none());
+        assert!(serde_json::to_value(&without).unwrap().get("files").is_none());
+
+        let with = tauri::async_runtime::block_on(repo_overview(t.path().into(), Some(true))).unwrap();
+        let files = with.files.unwrap();
+        let listed = crate::working::read_status(&t.repo).unwrap();
+        assert_eq!(serde_json::to_value(&files).unwrap(), serde_json::to_value(&listed).unwrap());
     }
 
     #[test]

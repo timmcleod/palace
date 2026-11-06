@@ -24,6 +24,9 @@ const props = defineProps({
   undoable: { type: Function, default: (step, work) => work() },
   // The GitHub repository ({ owner, repo }) whose issues "#" suggests, or null.
   issueRepo: { type: Object, default: null },
+  // The changed files as the window's last refresh read them, or null when it didn't:
+  // then they're read here.
+  statusFiles: { type: Array, default: null },
 });
 // "open-file" asks to open a file in the Files view, to edit it.
 const emit = defineEmits(["select", "changed", "open-file"]);
@@ -39,21 +42,37 @@ let anchor = null;
 
 let loadSeq = 0;
 
+function show(result) {
+  files.value = result;
+  // Files that are no longer changed drop out of the selection.
+  chosen.value = new Set(result.filter((f) => chosen.value.has(f.path)).map((f) => f.path));
+  // Hand the parent the fresh copy of the selected file, or null if it's gone.
+  emit("select", result.find((f) => f.path === props.selectedPath) ?? null);
+}
+
+// The window's refresh brings the files while this is showing, reading the status once
+// for both; they're read here only when it hasn't, as when this has just opened.
 async function load() {
+  if (props.statusFiles) return;
   const seq = ++loadSeq;
   try {
     const result = await invoke("working_status", { path: props.path });
-    if (seq !== loadSeq) return;
-    files.value = result;
-    // Files that are no longer changed drop out of the selection.
-    chosen.value = new Set(result.filter((f) => chosen.value.has(f.path)).map((f) => f.path));
-    // Hand the parent the fresh copy of the selected file, or null if it's gone.
-    emit("select", result.find((f) => f.path === props.selectedPath) ?? null);
+    if (seq === loadSeq) show(result);
   } catch (e) {
     if (seq === loadSeq) error.value = String(e);
   }
 }
 
+watch(
+  () => props.statusFiles,
+  (list) => {
+    if (!list) return;
+    // Newer than any read here still under way.
+    loadSeq++;
+    show(list);
+  },
+  { immediate: true },
+);
 watch(() => [props.path, props.refreshKey], load, { immediate: true });
 
 // Runs a git operation, then has the whole window refresh. With `step`, it can be

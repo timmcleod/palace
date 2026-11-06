@@ -189,6 +189,9 @@ const isFullView = computed(() => isSettings.value || isGitHub.value);
 const browsingGitHub = ref(false);
 const isStashes = computed(() => selected.value === "workspace:stashes");
 const isFiles = computed(() => selected.value === "workspace:files");
+// The views that list the changed files, which the overview then brings, so each
+// refresh reads the status once rather than once for it and again for them.
+const listsFiles = computed(() => isWorkingCopy.value || isFiles.value);
 const isIssues = computed(() => selected.value === "workspace:issues");
 const isPulls = computed(() => selected.value === "workspace:pulls");
 // Comparing two revisions: the history lists what `head` has that `base` doesn't,
@@ -1161,8 +1164,11 @@ async function loadRepository(path, { quiet = false, keepOnError = false } = {})
   }
 
   try {
-    const data = await invoke("repo_overview", { path });
+    const data = await invoke("repo_overview", { path, files: listsFiles.value });
     if (seq !== loadSeq) return;
+    // With another refresh to follow, as for files just staged, the files this one read
+    // may be from before: they wait for it, rather than undo what the list shows.
+    if (quiet && refreshAgain && data.path === overview.value?.path) data.files = overview.value.files;
     // Open in another window already, that window comes forward instead.
     if (data.path !== overview.value?.path && (await invoke("show_window_with", { path: data.path }).catch(() => false))) return;
     if (seq !== loadSeq) return;
@@ -1296,13 +1302,29 @@ function recentMenu(anchor) {
   ]);
 }
 
+// One refresh at a time: asked for again while one is under way, as the watcher does
+// while an agent writes files, it goes once more when that one's done, so nothing's
+// missed, but reads don't pile up.
+let refreshing = null;
+let refreshAgain = false;
+
 function refresh() {
   // While a repository the user chose is still opening, a refresh would reload the one
   // on screen and, being newer, win over the switch. The window regains focus as the
   // folder picker closes, so without this, opening another repository did nothing.
   if (!overview.value || loading.value) return;
-  loadRepository(overview.value.path, { quiet: true });
+  if (refreshing) {
+    refreshAgain = true;
+    return;
+  }
   refreshKey.value++;
+  refreshing = loadRepository(overview.value.path, { quiet: true }).finally(() => {
+    refreshing = null;
+    if (refreshAgain) {
+      refreshAgain = false;
+      refresh();
+    }
+  });
 }
 
 function removeRecent(path) {
@@ -1631,6 +1653,7 @@ const breadcrumb = computed(() => {
         :selected-path="workingFile?.path"
         :undoable="undoableWithNotice"
         :issue-repo="githubAccount ? issueRepo : null"
+        :status-files="overview.files ?? null"
         @select="workingFile = $event"
         @changed="refresh"
         @open-file="openInFiles"
@@ -1641,6 +1664,7 @@ const breadcrumb = computed(() => {
         :path="overview.path"
         :selected="openFiles[overview.path] ?? null"
         :refresh-key="refreshKey"
+        :status-files="overview.files ?? null"
         @select="openFiles[overview.path] = $event"
         @deleted="onFileDeleted"
         @renamed="onFileRenamed"
