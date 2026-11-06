@@ -225,7 +225,6 @@ pub fn run() {
             windows::show_notice,
             windows::show_terminal_tab,
             windows::window_showing,
-            windows::close_windows,
             windows::folder_exists,
             windows::new_window,
 

@@ -30,7 +30,7 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
 // shown, when it isn't the current one. `openWorktree(path)` opens a worktree in a
 // window of its own, or brings forward the one it's open in.
-export function useGitActions({ overview, run, busy = () => false, compare, pullRequest, viewedBranch = () => null, openWorktree = () => {} }) {
+export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null, openWorktree = () => {} }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -647,13 +647,11 @@ export function useGitActions({ overview, run, busy = () => false, compare, pull
       changed ? "Remove and Lose Changes" : showing?.programs.length ? "Remove and Stop" : "Remove",
     );
     if (!ok) return;
-    // Closed first, so what its terminals run is stopped before the folder's deleted,
-    // rather than writing into it as it goes. Not while another operation keeps the
-    // worktree from being removed, though, or the window would close for nothing.
-    if (showing && busy()) return tell("Couldn't Remove the Worktree", "Another operation is still running. Try again once it's done.");
-    if (showing) await invoke("close_windows", { labels: showing.windows }).catch(() => {});
+    // The other window closes first, as part of removing it, so what its terminals run is
+    // stopped before the folder's deleted, rather than writing into it as it goes.
     await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
       worktree: worktree.path,
+      close: showing?.windows ?? [],
       force: changed || worktree.locked,
     });
   }

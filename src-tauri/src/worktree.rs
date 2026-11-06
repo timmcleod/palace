@@ -6,6 +6,7 @@ use crate::cli::git;
 use git2::{Repository, WorktreeLockStatus};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, WebviewWindow};
 
 #[derive(Serialize, Clone)]
 pub struct Worktree {
@@ -104,15 +105,31 @@ pub async fn add_worktree(path: String, folder: String, branch: String, create: 
 
 /// Removes the worktree at `worktree`: its folder, and the repository's note of it.
 /// With `force`, even with changes in it that would be lost, or while it's locked.
+/// The windows labeled `close`, which have it open, close first (see close_windows),
+/// so what their terminals run has stopped before its folder's deleted.
 #[tauri::command]
-pub async fn remove_worktree(path: String, worktree: String, force: bool) -> Result<String, String> {
+pub async fn remove_worktree(
+    app: AppHandle,
+    window: WebviewWindow,
+    path: String,
+    worktree: String,
+    force: bool,
+    close: Option<Vec<String>>,
+) -> Result<String, String> {
+    if let Some(labels) = close.filter(|labels| !labels.is_empty()) {
+        crate::windows::close_windows(&app, window.label(), labels).await;
+    }
+    remove(&path, &worktree, force)
+}
+
+fn remove(path: &str, worktree: &str, force: bool) -> Result<String, String> {
     let mut args = vec!["worktree", "remove"];
     if force {
         // Twice, to remove a locked one too.
         args.extend(["--force", "--force"]);
     }
-    args.push(&worktree);
-    git(&path, &args, None)?;
+    args.push(worktree);
+    git(path, &args, None)?;
     Ok(format!("Removed the worktree at {worktree}."))
 }
 
@@ -179,8 +196,8 @@ mod tests {
         // Changes in it, or its lock, stop a plain removal.
         std::fs::write(folder.join("new.txt"), "new\n").unwrap();
         assert!(block(worktree_has_changes(folder_str.clone())).unwrap());
-        assert!(block(remove_worktree(t.path().into(), folder_str.clone(), false)).is_err());
-        block(remove_worktree(t.path().into(), folder_str.clone(), true)).unwrap();
+        assert!(remove(t.path(), &folder_str, false).is_err());
+        remove(t.path(), &folder_str, true).unwrap();
         assert!(!folder.exists());
         assert!(read_worktrees(&t.repo).is_empty());
     }

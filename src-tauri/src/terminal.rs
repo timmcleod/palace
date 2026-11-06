@@ -358,23 +358,25 @@ pub fn close_window(window: &str) {
     }
 }
 
-/// Hangs up the terminals in `window`, as close_window does, then waits, up to `limit`,
-/// for their shells and the programs in front in them to exit: hung up, a program may
-/// take a moment to stop, writing as it goes.
-pub fn close_window_and_wait(window: &str, limit: Duration) {
+/// Hangs up the terminals in `windows`, as close_window does, then waits, up to `limit`
+/// for all of them, for their shells and the programs in front in them to exit: hung
+/// up, a program may take a moment to stop, writing as it goes.
+pub fn close_windows_and_wait(windows: &[String], limit: Duration) {
     // A shell by its process, and what's in front by its process group, which holds
     // what it started.
     let running: Vec<(i32, bool)> = TERMINALS
         .lock()
         .unwrap()
         .values()
-        .filter(|t| t.window == window)
+        .filter(|t| windows.contains(&t.window))
         .flat_map(|t| {
             let front = t.master.process_group_leader().filter(|front| Some(*front as u32) != t.shell).map(|front| (front, true));
             t.shell.map(|shell| (shell as i32, false)).into_iter().chain(front)
         })
         .collect();
-    close_window(window);
+    for window in windows {
+        close_window(window);
+    }
     let started = Instant::now();
     while running.iter().any(|&(id, group)| still_running(id, group)) && started.elapsed() < limit {
         std::thread::sleep(Duration::from_millis(50));
@@ -520,7 +522,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         };
 
-        close_window_and_wait(window, Duration::from_secs(10));
+        close_windows_and_wait(&[window.into()], Duration::from_secs(10));
         assert!(!still_running(front, true), "sleep is still running");
         assert!(busy_programs(window).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();

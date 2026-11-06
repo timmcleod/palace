@@ -58,7 +58,7 @@ pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_
 /// and what closing it would lose.
 #[derive(Serialize)]
 pub struct Showing {
-    /// The windows, by label, to close with `close_windows`.
+    /// The windows, by label, for remove_worktree to close.
     windows: Vec<String>,
     /// The programs running in its terminals, by name, or None for one it can't tell.
     programs: Vec<Option<String>>,
@@ -97,14 +97,11 @@ pub fn window_showing(window: WebviewWindow, windows: State<'_, Windows>, path: 
 /// has been asked already, as about removing the worktree they show (see
 /// window_showing). Their terminals are hung up first, and what ran in them given a
 /// few seconds to stop, so it's done before the folder it was in is deleted.
-#[tauri::command]
-pub async fn close_windows(app: AppHandle, window: WebviewWindow, labels: Vec<String>) {
-    let labels: Vec<String> = labels.into_iter().filter(|label| label != window.label()).collect();
+pub async fn close_windows(app: &AppHandle, window: &str, labels: Vec<String>) {
+    let labels: Vec<String> = labels.into_iter().filter(|label| label != window).collect();
     let hung_up = labels.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        for label in &hung_up {
-            crate::terminal::close_window_and_wait(label, std::time::Duration::from_secs(3));
-        }
+        crate::terminal::close_windows_and_wait(&hung_up, std::time::Duration::from_secs(3));
     })
     .await;
     for label in &labels {
