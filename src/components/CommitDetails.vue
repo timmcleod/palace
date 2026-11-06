@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, provide, reactive, ref, shallowRef
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
+import CopyText from "./CopyText.vue";
 import FileDiff from "./FileDiff.vue";
 import FileIcon from "./FileIcon.vue";
 import { splitIssueRefs } from "../lib/issues.js";
@@ -253,14 +254,14 @@ function splitPath(path) {
             </dd>
           </template>
           <dt>Commit Hash</dt>
-          <dd class="mono">{{ details.id }}</dd>
+          <dd class="mono"><CopyText :value="details.id" label="Copy the commit hash" /></dd>
           <dt>{{ details.parents.length > 1 ? "Parent Hashes" : "Parent Hash" }}</dt>
           <dd class="mono">
-            <div v-for="parent in details.parents" :key="parent">{{ parent }}</div>
+            <div v-for="parent in details.parents" :key="parent"><CopyText :value="parent" label="Copy the parent's hash" /></div>
             <span v-if="!details.parents.length" class="dim">None (root commit)</span>
           </dd>
           <dt>Tree Hash</dt>
-          <dd class="mono">{{ details.tree_id }}</dd>
+          <dd class="mono"><CopyText :value="details.tree_id" label="Copy the tree hash" /></dd>
         </dl>
         <Avatar :name="details.author.name" :email="details.author.email" :size="72" />
       </section>

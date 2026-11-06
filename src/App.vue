@@ -44,6 +44,7 @@ import ResetDialog from "./components/ResetDialog.vue";
 import HistoryList from "./components/HistoryList.vue";
 import OperationBanner from "./components/OperationBanner.vue";
 import FolderGoneBanner from "./components/FolderGoneBanner.vue";
+import CopyText from "./components/CopyText.vue";
 import RemoteStatus from "./components/RemoteStatus.vue";
 import NewPullRequestDialog from "./components/NewPullRequestDialog.vue";
 import SettingsView from "./components/SettingsView.vue";
@@ -1922,7 +1923,9 @@ const breadcrumb = computed(() => {
           <span class="dim">All changes on “{{ comparison.head }}”</span>
         </div>
         <div v-else class="subheader">
-          <span class="mono dim">{{ detailCommit?.short_id }}</span>
+          <span class="mono dim">
+            <CopyText v-if="detailCommit?.id" :value="detailCommit.id" label="Copy the full commit hash">{{ detailCommit.short_id }}</CopyText>
+          </span>
           <div class="segmented">
             <button :class="{ active: detailMode === 'changeset' }" @click="detailMode = 'changeset'">Changeset</button>
             <button :class="{ active: detailMode === 'tree' }" title="Every file at this commit" @click="detailMode = 'tree'">
