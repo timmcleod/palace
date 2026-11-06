@@ -256,7 +256,6 @@ const dragging = ref(null);
 const dragRow = ref(null);
 const dropAt = ref(null);
 
-const altKey = isMac ? "Option" : "Alt";
 const ARRANGEABLE = /^branch(-folder|-divider)?:/;
 const canMerge = (row) => !row.folder && !row.divider && (row.key.startsWith("branch:") || row.key.startsWith("remote-branch:"));
 const canMove = (row) => !query.value && ARRANGEABLE.test(row.key);
@@ -291,10 +290,9 @@ const scroller = ref(null);
 // How far the pointer moves, pressed, before it's a drag rather than a click.
 const DRAG_DISTANCE = 4;
 
-// What follows the pointer: the row's icon and name, and beside it what dropping
-// would do: "Create Branch", "Merge" or "Rebase".
+// What follows the pointer: the row's icon and name. What dropping would do is told
+// below where it'd land (see .drop-sentence).
 let dragImage = null;
-let dragAction = null;
 // The press that may become a drag: { row, element, x, y }.
 let pressed = null;
 let pointer = null;
@@ -317,10 +315,6 @@ function startDrag() {
   dragging.value = canMerge(row) && !row.head ? splitKey(row.key)[1] : null;
   dragImage = document.createElement("div");
   dragImage.className = "drag-image following";
-  dragAction = document.createElement("span");
-  dragAction.className = "drag-action";
-  dragAction.hidden = true;
-  dragImage.append(dragAction);
   const icon = element.querySelector(".row-icon")?.cloneNode(true);
   if (icon) dragImage.append(icon);
   dragImage.append(row.divider ? row.label || "Divider" : row.label);
@@ -437,17 +431,23 @@ function endDrag() {
   document.body.classList.remove("dragging-row");
   dragImage?.remove();
   dragImage = null;
-  dragAction = null;
 }
 
 onBeforeUnmount(endDrag);
 
-watch([overBranches, dropAt, altHeld], ([creates, at, alt]) => {
-  if (!dragAction) return;
-  const action = creates ? "Create Branch" : at?.merge ? (alt ? "Rebase" : "Merge") : "";
-  dragAction.textContent = action;
-  dragAction.hidden = !action;
-});
+// Whether what dropping would do is told above where it'd land, rather than below,
+// for lack of room at the bottom of the sidebar.
+const sentenceAbove = ref(false);
+watch(
+  [dropAt, overBranches, altHeld],
+  () => {
+    const sentence = scroller.value?.querySelector(".drop-sentence");
+    if (!sentence) return;
+    const below = sentence.parentElement.getBoundingClientRect().bottom + 4 + sentence.offsetHeight;
+    sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
+  },
+  { flush: "post" },
+);
 
 // Where a drop on `row` would land, from how far down the row the pointer is.
 function landing(row, rect, pointerY) {
@@ -521,6 +521,11 @@ function onRowClick(row, event) {
         >
           <span>{{ section.title }}</span>
           <span class="section-toggle">{{ collapsedSections.has(section.id) ? "Show" : "Hide" }}</span>
+          <Transition name="drop-sentence">
+            <span v-if="section.id === 'branches' && overBranches" class="drop-sentence" :class="{ above: sentenceAbove }">
+              Create a branch from <b>{{ draggedBranch() }}</b>
+            </span>
+          </Transition>
         </button>
 
         <template v-if="!collapsedSections.has(section.id)">
@@ -535,7 +540,7 @@ function onRowClick(row, event) {
               divider: row.divider,
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
-            :title="row.head && dragging ? `Merge ${dragging} into ${row.label}, or with ${altKey} held, rebase ${row.label} onto it` : row.title"
+            :title="dragRow ? undefined : row.title"
             :data-row="row.key"
             @pointerdown="onPointerDown(row, $event)"
             @click="onRowClick(row, $event)"
@@ -571,6 +576,14 @@ function onRowClick(row, event) {
                 </span>
               </span>
               <span v-else-if="row.count" class="count" :class="{ fresh: row.fresh }">{{ row.count }}</span>
+
+              <!-- Over the HEAD branch, what dropping does, in full: which branch moves where. -->
+              <Transition name="drop-sentence">
+                <span v-if="dropAt?.merge && dropAt.key === row.key" class="drop-sentence" :class="{ above: sentenceAbove }">
+                  <template v-if="altHeld">Rebase <b>{{ row.label }}</b> onto <b>{{ dragging }}</b></template>
+                  <template v-else>Merge <b>{{ dragging }}</b> into <b>{{ row.label }}</b></template>
+                </span>
+              </Transition>
             </template>
           </div>
         </template>
@@ -705,6 +718,7 @@ function onRowClick(row, event) {
 
 /* A branch dragged onto Branches, to create a branch from it. */
 .section-header.drop-target {
+  position: relative;
   border-radius: 6px;
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -712,8 +726,7 @@ function onRowClick(row, event) {
   color: var(--text-primary);
 }
 
-/* The drag image drawn on the page (see "What follows the pointer"), with what
-   dropping would do on its left. */
+/* The drag image drawn on the page (see "What follows the pointer"). */
 :global(body.dragging-row),
 :global(body.dragging-row *) {
   cursor: default !important;
@@ -727,17 +740,6 @@ function onRowClick(row, event) {
   visibility: hidden;
   pointer-events: none;
   opacity: 0.9;
-}
-
-:global(.drag-image .drag-action) {
-  position: absolute;
-  right: calc(100% + 6px);
-  padding: 3px 9px;
-  border-radius: 6px;
-  background: var(--content-bg);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
-  font-weight: 600;
-  color: var(--accent);
 }
 
 .row {
@@ -811,9 +813,59 @@ function onRowClick(row, event) {
 
 /* The HEAD branch while a branch is dragged over it, ready to merge. */
 .row.drop-target {
+  position: relative;
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Hung below the row, over those after it, so nothing under the pointer moves. */
+.drop-sentence {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 8px;
+  z-index: 5;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  /* A long branch name wraps rather than being cut short: it's the point. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: white;
+  pointer-events: none;
+}
+
+.drop-sentence.above {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.drop-sentence b {
+  font-weight: 700;
+}
+
+.drop-sentence-enter-active {
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.drop-sentence-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-sentence-enter-active {
+    transition: none;
+  }
 }
 
 .row:hover {
