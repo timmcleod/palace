@@ -980,8 +980,9 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+/* Four lines, scrolling past them, rather than a corner to drag it taller by. */
 textarea {
-  resize: vertical;
+  resize: none;
   min-height: 60px;
 }
 
