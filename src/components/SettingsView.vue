@@ -16,6 +16,7 @@ import {
   Star,
 } from "lucide-vue-next";
 import Acknowledgments from "./Acknowledgments.vue";
+import GateLogo from "./GateLogo.vue";
 import { loadAvatars } from "../lib/avatars.js";
 import { githubAccount as account, NEW_TOKEN_URL, signInWithToken, signOut as githubSignOut } from "../lib/github.js";
 import { settings } from "../lib/settings.js";
@@ -248,7 +249,7 @@ const SAMPLE = {
           <img :src="castleUrl" alt="" class="hero-castle" />
           <div class="hero-content">
             <div class="hero-title">
-              <img src="/palace.svg" alt="" class="hero-icon" />
+              <GateLogo :state="updates.state" class="hero-icon" />
               <h1>Palace</h1>
             </div>
             <span class="hero-version">
@@ -713,8 +714,6 @@ const SAMPLE = {
 }
 
 .hero-icon {
-  width: 38px;
-  height: 38px;
   margin: -3px;
 }
 
