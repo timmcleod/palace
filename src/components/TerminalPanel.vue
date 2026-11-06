@@ -148,15 +148,31 @@ function onTabListDragLeave(event) {
 }
 
 // Files dragged in from the desktop and dropped on the terminal: their paths are typed
-// in the tab showing (see dropFiles).
+// in the tab showing (see dropFiles). While they're held over it, it's outlined, saying
+// what dropping them does.
+const fileOver = ref(null);
+// Whether files from the desktop are what's dragged, to a tab they can go to.
+const droppingFiles = (event) => !!active.value && !!event.dataTransfer?.types.includes("Files");
+
 function onFileDragOver(event) {
-  if (!active.value || !event.dataTransfer?.types.includes("Files")) return;
+  if (!droppingFiles(event)) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = "copy";
+  const many = event.dataTransfer.items.length > 1;
+  fileOver.value =
+    active.value.kind === "agent"
+      ? `Drop to give ${active.value.agent} ${many ? "the files" : "the file"}`
+      : `Drop to paste ${many ? "their paths" : "its path"}`;
+}
+
+// Leaving for one of its own parts, the terminal's text, isn't leaving it.
+function onFileDragLeave(event) {
+  if (!body.value?.contains(event.relatedTarget)) fileOver.value = null;
 }
 
 function onFileDrop(event) {
-  if (!active.value || !event.dataTransfer?.types.includes("Files")) return;
+  fileOver.value = null;
+  if (!droppingFiles(event)) return;
   event.preventDefault();
   dropFiles(active.value, event.dataTransfer);
 }
@@ -384,7 +400,16 @@ function startResize(event) {
       <button class="icon-button small" title="More" @click="moreMenu"><Ellipsis :size="15" /></button>
       <button class="icon-button small" :title="`Hide (${shortcut('Ctrl+\'')})`" @click="emit('hide')"><ChevronDown :size="15" /></button>
     </header>
-    <div ref="body" class="terminal-body" @contextmenu="terminalMenu" @dragover="onFileDragOver" @drop="onFileDrop" />
+    <div
+      ref="body"
+      class="terminal-body"
+      :class="{ 'file-over': fileOver }"
+      :data-drop="fileOver"
+      @contextmenu="terminalMenu"
+      @dragover="onFileDragOver"
+      @dragleave="onFileDragLeave"
+      @drop="onFileDrop"
+    />
     <div v-if="!group.tabs.length" class="terminal-empty">
       <button class="secondary-button" @click="newTerminal"><SquareTerminal :size="14" /> New Terminal</button>
       <button class="secondary-button" @click="newAgent()"><Sparkle :size="14" /> {{ agent }}</button>
@@ -562,10 +587,32 @@ function startResize(event) {
 }
 
 .terminal-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   padding: 6px 0 4px 10px;
   overflow: hidden;
+}
+
+/* A file held over it: outlined and tinted, saying what dropping it does, over the
+   terminal's text without moving it. */
+.terminal-body.file-over::after {
+  content: attr(data-drop);
+  position: absolute;
+  inset: 4px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  /* Mostly the panel's own background, so the terminal's text under it doesn't compete
+     with what it says. */
+  background: color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, var(--content-bg) 88%, transparent));
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  pointer-events: none;
 }
 
 .terminal-body :deep(.terminal-host) {
