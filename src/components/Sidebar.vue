@@ -436,18 +436,16 @@ function endDrag() {
 onBeforeUnmount(endDrag);
 
 // Whether what dropping would do is told above where it'd land, rather than below,
-// for lack of room at the bottom of the sidebar.
+// for lack of room at the bottom of the sidebar. Asked again as the sidebar scrolls
+// under the pointer, which can bring where it'd land nearer the bottom.
 const sentenceAbove = ref(false);
-watch(
-  [dropAt, overBranches, altHeld],
-  () => {
-    const sentence = scroller.value?.querySelector(".drop-sentence");
-    if (!sentence) return;
-    const below = sentence.parentElement.getBoundingClientRect().bottom + 4 + sentence.offsetHeight;
-    sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
-  },
-  { flush: "post" },
-);
+function placeSentence() {
+  const sentence = scroller.value?.querySelector(".drop-sentence");
+  if (!sentence) return;
+  const below = sentence.parentElement.getBoundingClientRect().bottom + 4 + sentence.offsetHeight;
+  sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
+}
+watch([dropAt, overBranches, altHeld], placeSentence, { flush: "post" });
 
 // Where a drop on `row` would land, from how far down the row the pointer is.
 function landing(row, rect, pointerY) {
@@ -510,7 +508,7 @@ function onRowClick(row, event) {
       </button>
     </header>
 
-    <nav ref="scroller" class="sidebar-scroll">
+    <nav ref="scroller" class="sidebar-scroll" @scroll.passive="dragRow && placeSentence()">
       <section v-for="section in sections" :key="section.id" class="section">
         <button
           class="section-header"

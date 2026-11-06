@@ -241,7 +241,7 @@ function onListKeydown(event) {
     chosen.value = new Set(all.map((f) => f.path));
     return;
   }
-  const folderAt = folderCursor.value && rows.value.findIndex((row) => row.folder === folderCursor.value);
+  const folderAt = folderCursor.value ? rows.value.findIndex((row) => row.folder === folderCursor.value) : -1;
   const onFolder = folderAt >= 0 ? rows.value[folderAt] : null;
   // Space stages the selected files, or unstages them, rather than scrolling.
   if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
