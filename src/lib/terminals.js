@@ -43,9 +43,13 @@ export function tabsFor(path) {
 
 // Which agent a repository's agent tabs run, and what they're called: see agents.js.
 export { AGENTS, agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand } from "./agents.js";
-import { agentCommand, agentName, agentNamed, agentOfProgram } from "./agents.js";
+import { AGENTS, agentCommand, agentName, agentNamed, agentOfProgram } from "./agents.js";
 
 /** The program a command runs: its first word, after any VAR=value settings. */
+export function programOf(command) {
+  return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
+}
+
 /**
  * The agent `command` runs, among those Palace knows, when it isn't installed here, or
  * null: installed, or a command that's the shell's to run, such as "cd api && claude"
@@ -55,10 +59,6 @@ export async function missingAgent(command) {
   const known = AGENTS.find((a) => a.program === programOf(command));
   if (!known) return null;
   return (await invoke("program_available", { program: known.program }).catch(() => true)) ? null : known;
-}
-
-export function programOf(command) {
-  return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
 }
 
 // --- Colors -----------------------------------------------------------------------
