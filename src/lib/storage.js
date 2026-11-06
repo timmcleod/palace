@@ -98,6 +98,9 @@ export function writeJson(key, value) {
 
 const RECENTS_KEY = "palace.recentRepositories";
 const MAX_RECENTS = 30;
+// A list of more recent repositories than this, on the welcome screen or in the
+// sidebar's menu, has a field to find one in, and shows this many at a time.
+export const FILTER_RECENTS = 5;
 
 export function recentRepositories() {
   const recents = readJson(RECENTS_KEY, []);

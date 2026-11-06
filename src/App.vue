@@ -13,11 +13,9 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleAlert,
   CloudDownload,
   ExternalLink,
   EyeOff,
-  FolderGit2,
   GitBranch,
   GitCommitVertical,
   GitMerge,
@@ -56,11 +54,13 @@ import TerminalNotices from "./components/TerminalNotices.vue";
 import ToolbarSearch from "./components/ToolbarSearch.vue";
 import TreeView from "./components/TreeView.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
+import WelcomeView from "./components/WelcomeView.vue";
 import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import ReviewTray from "./components/ReviewTray.vue";
 import { clearComments, commentsIn, deleteComments, reviewMessage } from "./lib/review.js";
 import {
+  FILTER_RECENTS,
   forgetRepository,
   onSavedElsewhere,
   readJson,
@@ -1259,34 +1259,6 @@ function refresh() {
   refreshKey.value++;
 }
 
-// A list of more recent repositories than this has a field to find one in, and
-// shows this many, scrolling to the rest.
-const FILTER_RECENTS = 5;
-const recentList = ref(null);
-const recentListHeight = ref("none");
-watch(
-  [recentList, () => recents.value.length],
-  () => {
-    const row = recentList.value?.querySelector(".recent");
-    recentListHeight.value = recents.value.length > FILTER_RECENTS && row ? `${FILTER_RECENTS * row.offsetHeight}px` : "none";
-  },
-  { flush: "post" },
-);
-const recentQuery = ref("");
-const shownRecents = computed(() => {
-  const words = recentQuery.value.toLowerCase().split(/\s+/).filter(Boolean);
-  return recents.value.filter((repo) => {
-    const text = `${repo.name} ${repo.path}`.toLowerCase();
-    return words.every((word) => text.includes(word));
-  });
-});
-
-// Enter in the welcome screen's field opens the first match.
-function openFirstRecent() {
-  const repo = shownRecents.value[0];
-  if (repo) loadRepository(repo.path);
-}
-
 function removeRecent(path) {
   forgetRepository(path);
   recents.value = recentRepositories();
@@ -1947,53 +1919,17 @@ function startResize(event, pane, min, max) {
     <GitHubView standalone @clone="cloneRepository" @back="browsingGitHub = false" />
   </main>
 
-  <main v-else-if="starting" class="welcome">
-    <span class="starting"><Spinner :size="22" /></span>
-  </main>
-
-  <main v-else class="welcome">
-    <div class="welcome-card">
-      <img src="/palace.svg" alt="" class="welcome-icon" />
-      <h1>Palace</h1>
-      <p class="dim">Open a Git repository to get started.</p>
-
-      <p v-if="error" class="error"><CircleAlert :size="15" /> {{ error }}</p>
-
-      <div class="welcome-buttons">
-        <button class="primary-button" :disabled="loading" @click="chooseRepository">
-          {{ loading ? "Opening…" : "Open Repository…" }}
-        </button>
-        <button class="secondary-button" :disabled="loading" @click="browsingGitHub = true">Clone Repository…</button>
-      </div>
-
-      <div v-if="recents.length" class="recents">
-        <div class="recents-title">Recent</div>
-        <input
-          v-if="recents.length > FILTER_RECENTS"
-          v-model="recentQuery"
-          class="recent-filter"
-          type="text"
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="Find a repository"
-          @keydown.enter="openFirstRecent"
-        />
-        <div ref="recentList" class="recent-list" :style="{ maxHeight: recentListHeight }">
-          <div v-if="!shownRecents.length" class="recent-none">No matching repositories</div>
-          <div v-for="repo in shownRecents" :key="repo.path" class="recent" @click="loadRepository(repo.path)">
-            <FolderGit2 :size="17" :stroke-width="1.5" class="row-icon" />
-            <div class="recent-text">
-              <div>{{ repo.name }}</div>
-              <div class="recent-path">{{ repo.path }}</div>
-            </div>
-            <button class="icon-button small" title="Remove from list" @click.stop="removeRecent(repo.path)">
-              <X :size="14" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
+  <WelcomeView
+    v-else
+    :starting="starting"
+    :recents="recents"
+    :loading="loading"
+    :error="error"
+    @open-repository="chooseRepository"
+    @clone="browsingGitHub = true"
+    @open="(path) => loadRepository(path)"
+    @remove="removeRecent"
+  />
 
   <!-- Overlays, shown over whichever screen is up. -->
   <FormDialog v-if="formDialog" :key="formDialog.title" :dialog="formDialog" />
@@ -2335,48 +2271,6 @@ function startResize(event, pane, min, max) {
   }
 }
 
-.welcome {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  background: var(--sidebar-bg);
-}
-
-/* Only shown if reopening the last repository takes a moment. */
-.starting {
-  display: flex;
-  color: var(--text-tertiary);
-  opacity: 0;
-  animation: appear 0.2s 0.5s forwards;
-}
-
-@keyframes appear {
-  to {
-    opacity: 1;
-  }
-}
-
-.welcome-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: min(460px, calc(100vw - 32px));
-  /* No taller than the window: a long list of recent repositories scrolls instead. */
-  box-sizing: border-box;
-  max-height: calc(100vh - 56px);
-  padding: 36px 28px 24px;
-  border-radius: 14px;
-  background: var(--content-bg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 30px rgba(0, 0, 0, 0.08);
-  text-align: center;
-}
-
-.welcome-buttons {
-  display: flex;
-  gap: 10px;
-}
-
 .github-page {
   display: flex;
   height: 100vh;
@@ -2395,116 +2289,6 @@ function startResize(event, pane, min, max) {
   left: 0;
   z-index: 1;
   height: 28px;
-}
-
-/* Palace's icon. Its tile leaves a margin, as desktop icons do, which the negative
-   margin takes back. */
-.welcome-icon {
-  width: 72px;
-  height: 72px;
-  margin: -4px;
-}
-
-.welcome h1 {
-  margin: 10px 0 4px;
-  font-size: 22px;
-  font-weight: 600;
-}
-
-.welcome .dim {
-  margin: 0 0 18px;
-}
-
-.error {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0 0 16px;
-  color: var(--danger);
-  text-align: left;
-  word-break: break-word;
-}
-
-.error svg {
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-
-.recents {
-  display: flex;
-  flex-direction: column;
-  align-self: stretch;
-  min-height: 0;
-  margin-top: 24px;
-  text-align: left;
-}
-
-.recent-filter {
-  flex-shrink: 0;
-  margin: 0 0 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  outline: none;
-  background: var(--input-bg);
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.recent-filter:focus {
-  border-color: var(--accent);
-}
-
-.recent-none {
-  padding: 6px 8px;
-  font-size: 13px;
-  color: var(--text-tertiary);
-}
-
-.recent-list {
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.recents-title {
-  padding: 0 8px 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-}
-
-.recent {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 7px;
-}
-
-.recent:hover {
-  background: var(--row-hover);
-}
-
-.recent .icon-button {
-  visibility: hidden;
-}
-
-.recent:hover .icon-button {
-  visibility: visible;
-}
-
-.recent-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.recent-path {
-  overflow: hidden;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The terminal button's mark: a tab in the hidden panel has finished or needs you. */
