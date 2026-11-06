@@ -150,12 +150,12 @@ fn recent_authors(repo: &Repository) -> Vec<String> {
     let _ = walk.push_head();
     let _ = walk.push_glob("refs/heads");
     for oid in walk.flatten().take(AUTHOR_SCAN) {
-        if let Ok(commit) = repo.find_commit(oid) {
-            if let Ok(email) = commit.author().email() {
-                let email = email.trim().to_lowercase();
-                if !email.is_empty() && seen.insert(email.clone()) {
-                    emails.push(email);
-                }
+        if let Ok(commit) = repo.find_commit(oid)
+            && let Ok(email) = commit.author().email()
+        {
+            let email = email.trim().to_lowercase();
+            if !email.is_empty() && seen.insert(email.clone()) {
+                emails.push(email);
             }
         }
     }

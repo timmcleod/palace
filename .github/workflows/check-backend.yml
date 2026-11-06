@@ -1,6 +1,7 @@
-# Runs the backend tests on every push and pull request that changes the backend, so a
-# regression shows up when it's made rather than when a release is tagged. Linux only:
-# the release workflow still runs the tests on macOS before building for it.
+# Lints the backend with clippy and runs its tests on every push and pull request that
+# changes it, so a regression shows up when it's made rather than when a release is
+# tagged. Linux only: the release workflow still runs the tests on macOS before
+# building for it.
 
 name: Check backend
 
@@ -25,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install system libraries
         run: |
@@ -33,10 +34,17 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      # Any warning fails the check, so they're fixed as they come up.
+      - name: Lint the backend
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run the backend tests
         working-directory: src-tauri

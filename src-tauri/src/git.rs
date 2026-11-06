@@ -185,7 +185,7 @@ fn read_local_branches(repo: &Repository) -> Result<Vec<LocalBranch>, git2::Erro
         });
     }
 
-    branches.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    branches.sort_by_key(|b| b.name.to_lowercase());
     Ok(branches)
 }
 

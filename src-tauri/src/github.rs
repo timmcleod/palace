@@ -513,10 +513,10 @@ fn check_token(token: &str) -> Result<Account, String> {
         status => return Err(format!("GitHub couldn't check the token (HTTP {status}).")),
     }
     let scopes = response.headers().get("x-oauth-scopes").and_then(|v| v.to_str().ok()).map(str::to_string);
-    if let Some(scopes) = scopes {
-        if !scopes.split(',').any(|s| s.trim() == "repo") {
-            return Err("This token can't reach private repositories or push. Create one with the “repo” scope.".into());
-        }
+    if let Some(scopes) = scopes
+        && !scopes.split(',').any(|s| s.trim() == "repo")
+    {
+        return Err("This token can't reach private repositories or push. Create one with the “repo” scope.".into());
     }
     response.body_mut().read_json::<Account>().map_err(|e| format!("GitHub's reply didn't make sense: {e}"))
 }

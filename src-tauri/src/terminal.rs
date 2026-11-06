@@ -284,10 +284,10 @@ fn available(program: &str) -> bool {
     }
     // Where installers put programs: Claude Code's native installer and npm's, Homebrew.
     let usual = [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", ".volta/bin"];
-    if let Some(home) = &home {
-        if usual.iter().any(|dir| home.join(dir).join(program).is_file()) {
-            return true;
-        }
+    if let Some(home) = &home
+        && usual.iter().any(|dir| home.join(dir).join(program).is_file())
+    {
+        return true;
     }
     if ["/opt/homebrew/bin", "/usr/local/bin"].iter().any(|dir| Path::new(dir).join(program).is_file()) {
         return true;

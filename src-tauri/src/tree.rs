@@ -146,11 +146,13 @@ fn parse_blame(output: &str) -> Vec<BlameHunk> {
     let mut hunks: Vec<BlameHunk> = Vec::new();
     for (id, start, count, file) in groups {
         let file = if file.is_empty() { details.get(&id).map(|d| d.filename.clone()).unwrap_or_default() } else { file };
-        if let Some(last) = hunks.last_mut() {
-            if last.id == id && last.start + last.lines == start && last.file == file {
-                last.lines += count;
-                continue;
-            }
+        if let Some(last) = hunks.last_mut()
+            && last.id == id
+            && last.start + last.lines == start
+            && last.file == file
+        {
+            last.lines += count;
+            continue;
         }
         let d = details.get(&id).cloned().unwrap_or_default();
         hunks.push(BlameHunk {

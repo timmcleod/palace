@@ -89,12 +89,12 @@ pub async fn read_working_file(path: String, file: String, as_text: Option<bool>
     let size = meta.len();
     let empty = WorkingFileContents { size, kind: "binary", text: None, crlf: false, bom: false, image: None, version };
 
-    if let Some(mime) = image_type(&file).filter(|_| !as_text.unwrap_or(false)) {
-        if size as usize <= MAX_IMAGE {
-            let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
-            let url = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
-            return Ok(WorkingFileContents { kind: "image", image: Some(url), ..empty });
-        }
+    if let Some(mime) = image_type(&file).filter(|_| !as_text.unwrap_or(false))
+        && size as usize <= MAX_IMAGE
+    {
+        let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
+        let url = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        return Ok(WorkingFileContents { kind: "image", image: Some(url), ..empty });
     }
     if size > MAX_SHOWN {
         return Ok(WorkingFileContents { kind: "too_large", ..empty });

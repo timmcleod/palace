@@ -102,6 +102,7 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// other parents, as in `git log --first-parent`. If nothing has changed since the
 /// last load of the same history, the cached walk is reused.
 #[tauri::command]
+#[expect(clippy::too_many_arguments, reason = "each is a parameter the page passes to invoke(\"load_history\") by name")]
 pub async fn load_history(
     path: String,
     rev: Option<String>,
@@ -120,17 +121,16 @@ pub async fn load_history(
 
     let slot = state.of(&window);
     let mut cache = slot.lock().unwrap();
-    if let Some(h) = cache.as_ref() {
-        if h.path == path
-            && h.rev == rev
-            && h.hide == hide
-            && h.file == file
-            && h.search == search
-            && h.first_parent == first_parent
-            && h.fingerprint == fingerprint
-        {
-            return Ok(summary(h));
-        }
+    if let Some(h) = cache.as_ref()
+        && h.path == path
+        && h.rev == rev
+        && h.hide == hide
+        && h.file == file
+        && h.search == search
+        && h.first_parent == first_parent
+        && h.fingerprint == fingerprint
+    {
+        return Ok(summary(h));
     }
 
     let mut history = walk(&repo, path, rev, hide, file, first_parent, fingerprint).map_err(message)?;
@@ -548,10 +548,10 @@ fn free_lane(lanes: &mut Vec<Option<Oid>>) -> usize {
 fn ref_labels(repo: &Repository) -> Result<HashMap<Oid, Vec<RefLabel>>, git2::Error> {
     let mut labels: HashMap<Oid, Vec<RefLabel>> = HashMap::new();
 
-    if let Ok(head) = repo.head() {
-        if let Some(oid) = head.target() {
-            labels.entry(oid).or_default().push(RefLabel { name: "HEAD".into(), kind: "head" });
-        }
+    if let Ok(head) = repo.head()
+        && let Some(oid) = head.target()
+    {
+        labels.entry(oid).or_default().push(RefLabel { name: "HEAD".into(), kind: "head" });
     }
 
     let mut others = Vec::new();

@@ -34,7 +34,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # actions/checkout leaves the tag without its message, so it's fetched again. A
       # signed tag's signature isn't part of the notes, and nor is the message
@@ -107,14 +107,14 @@ jobs:
       IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -157,7 +157,7 @@ jobs:
 
       - name: Attach the packages to this run
         if: env.IS_RELEASE != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: palace-linux-packages
           path: |
@@ -174,9 +174,9 @@ jobs:
       IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -220,7 +220,7 @@ jobs:
 
       - name: Attach the packages to this run
         if: env.IS_RELEASE != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: palace-macos
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
@@ -283,7 +283,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: gh-pages
 
