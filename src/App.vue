@@ -919,17 +919,22 @@ function startResize(event, pane, min, max) {
   const startWidth = panes[pane];
   const target = event.currentTarget;
   target.setPointerCapture(event.pointerId);
+  // Not starting a selection in the text the drag begins beside, nor any it crosses.
+  event.preventDefault();
+  document.body.classList.add("resizing", "resizing-columns");
 
   const move = (e) => {
     panes[pane] = Math.min(max, Math.max(min, startWidth + e.clientX - startX));
   };
+  // Released, or taken away, as when the window loses the pointer.
   const stop = () => {
     target.removeEventListener("pointermove", move);
-    target.removeEventListener("pointerup", stop);
+    target.removeEventListener("lostpointercapture", stop);
+    document.body.classList.remove("resizing", "resizing-columns");
     savePanes();
   };
   target.addEventListener("pointermove", move);
-  target.addEventListener("pointerup", stop);
+  target.addEventListener("lostpointercapture", stop);
 }
 
 // --- Files view --------------------------------------------------------------------

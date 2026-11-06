@@ -242,6 +242,22 @@ textarea,
   user-select: none;
 }
 
+/* While a pane's edge is dragged to resize it, nothing's selected as the pointer
+   crosses text, and the resizing cursor stays wherever the pointer is. */
+body.resizing,
+body.resizing * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+body.resizing-columns * {
+  cursor: col-resize !important;
+}
+
+body.resizing-rows * {
+  cursor: row-resize !important;
+}
+
 .dim {
   color: var(--text-tertiary);
 }

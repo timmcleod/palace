@@ -313,17 +313,22 @@ function startResize(event) {
   const startHeight = props.height;
   const target = event.currentTarget;
   target.setPointerCapture(event.pointerId);
+  // Not starting a selection in the text the drag begins beside, nor any it crosses.
+  event.preventDefault();
+  document.body.classList.add("resizing", "resizing-rows");
   const move = (e) => {
     const max = Math.max(160, window.innerHeight - 200);
     emit("update:height", Math.min(max, Math.max(120, startHeight - (e.clientY - startY))));
   };
+  // Released, or taken away, as when the window loses the pointer.
   const stop = () => {
     target.removeEventListener("pointermove", move);
-    target.removeEventListener("pointerup", stop);
+    target.removeEventListener("lostpointercapture", stop);
+    document.body.classList.remove("resizing", "resizing-rows");
     emit("resized");
   };
   target.addEventListener("pointermove", move);
-  target.addEventListener("pointerup", stop);
+  target.addEventListener("lostpointercapture", stop);
 }
 </script>
 
