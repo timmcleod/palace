@@ -15,6 +15,7 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
+  History,
   ListFilter,
   Lock,
   Package,
@@ -142,16 +143,43 @@ const branchRows = computed(() =>
   ),
 );
 
-const tagRows = computed(() =>
-  flattenTree(
-    buildTree(props.overview.tags.filter(matches), (t) => t),
+// The newest tags show, and the rest wait in a folder of their own, "Older", closed until
+// it's opened: a repository that tags each release gathers many, a thousand or more,
+// and the old ones are rarely what's wanted. Filtering finds among them all.
+const RECENT_TAGS = 5;
+const OLDER_TAGS = "tags-older:";
+const olderTagsOpen = ref(false);
+// Folders, for tags named with slashes as "release/1.0", inside Older have keys of their
+// own, as one can be among the newest too.
+const tagTree = (tags, depth = 0, keyPrefix = "tag-folder:") =>
+  flattenTree(buildTree(tags, (t) => t), {
+    depth,
+    keyPrefix,
+    isOpen,
+    leafRow: (t) => ({ key: `tag:${t}`, icon: Tag, title: t }),
+  });
+const tagRows = computed(() => {
+  const tags = props.overview.tags.filter(matches);
+  // A folder for only one or two more would save nothing.
+  if (query.value || tags.length <= RECENT_TAGS + 2) return tagTree(tags);
+  const older = tags.slice(RECENT_TAGS);
+  return [
+    ...tagTree(tags.slice(0, RECENT_TAGS)),
     {
-      keyPrefix: "tag-folder:",
-      isOpen,
-      leafRow: (t) => ({ key: `tag:${t}`, icon: Tag, title: t }),
+      key: OLDER_TAGS,
+      label: "Older",
+      icon: History,
+      title: `${older.length} older tags`,
+      depth: 0,
+      parent: "",
+      folder: true,
+      open: olderTagsOpen.value,
+      count: older.length,
+      older: true,
     },
-  ),
-);
+    ...(olderTagsOpen.value ? tagTree(older, 1, "tag-folder-older:") : []),
+  ];
+});
 
 const remoteRows = computed(() =>
   props.overview.remotes.flatMap((remote) => {
@@ -472,6 +500,10 @@ const COMPARABLE = ["branch", "remote-branch", "tag"];
 
 function onRowClick(row, event) {
   if (row.divider) return;
+  if (row.key === OLDER_TAGS) {
+    olderTagsOpen.value = !olderTagsOpen.value;
+    return;
+  }
   // Ctrl- (Cmd- on a Mac) or Shift-clicking a second branch or tag compares it with
   // the first.
   if ((commandKey(event) || event.shiftKey) && !row.folder && COMPARABLE.includes(row.key.split(":")[0])) {
@@ -536,16 +568,19 @@ function onRowClick(row, event) {
               current: switching ? row.key === switching : row.current,
               gone: row.gone,
               divider: row.divider,
+              older: row.older,
             }]"
             :style="{ paddingLeft: `${(row.divider ? 28 : 8) + row.depth * 18}px` }"
             :title="dragRow ? undefined : row.title"
             :data-row="row.key"
             @pointerdown="onPointerDown(row, $event)"
             @click="onRowClick(row, $event)"
-            @dblclick="emit('activate', row)"
+            @dblclick="row.older || emit('activate', row)"
             @contextmenu.prevent="
-              row.divider || emit('update:selected', row.key);
-              emit('menu', row, $event);
+              if (!row.older) {
+                row.divider || emit('update:selected', row.key);
+                emit('menu', row, $event);
+              }
             "
           >
             <template v-if="row.divider">
@@ -897,6 +932,15 @@ function onRowClick(row, event) {
 .row-icon {
   flex-shrink: 0;
   color: var(--icon);
+}
+
+/* "Older", the folder of all but the newest tags: quieter than the tags above it. */
+.row.older {
+  color: var(--text-secondary);
+}
+
+.row.older .row-icon {
+  color: var(--text-tertiary);
 }
 
 .switching {
