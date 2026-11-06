@@ -15,6 +15,7 @@ import {
   isBusy,
   markSeen,
   openTerminal,
+  dropFiles,
   paste,
   programOf,
   removeTab,
@@ -142,6 +143,20 @@ function onTabListDragOver(event) {
 
 function onTabListDragLeave(event) {
   if (!tabList.value.contains(event.relatedTarget)) dropAt.value = null;
+}
+
+// Files dragged in from the desktop and dropped on the terminal: their paths are typed
+// in the tab showing (see dropFiles).
+function onFileDragOver(event) {
+  if (!active.value || !event.dataTransfer?.types.includes("Files")) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
+function onFileDrop(event) {
+  if (!active.value || !event.dataTransfer?.types.includes("Files")) return;
+  event.preventDefault();
+  dropFiles(active.value, event.dataTransfer);
 }
 
 function onTabListDrop(event) {
@@ -377,7 +392,7 @@ function startResize(event) {
       <button class="icon-button small" title="More" @click="moreMenu"><Ellipsis :size="15" /></button>
       <button class="icon-button small" :title="`Hide (${shortcut('Ctrl+\'')})`" @click="emit('hide')"><ChevronDown :size="15" /></button>
     </header>
-    <div ref="body" class="terminal-body" @contextmenu="terminalMenu" />
+    <div ref="body" class="terminal-body" @contextmenu="terminalMenu" @dragover="onFileDragOver" @drop="onFileDrop" />
     <div v-if="!group.tabs.length" class="terminal-empty">
       <button class="secondary-button" @click="newTerminal"><SquareTerminal :size="14" /> New Terminal</button>
       <button class="secondary-button" @click="newAgent()"><Sparkle :size="14" /> {{ agent }}</button>

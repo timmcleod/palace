@@ -342,6 +342,34 @@ export function copySelection(tab) {
 }
 
 /** Pastes the clipboard's text. */
+// A path as a shell reads it back, as Terminal.app types a dropped file's: anything but
+// letters, digits and a few safe marks escaped with a backslash.
+const shellEscape = (path) => path.replace(/[^\p{L}\p{N}_.,:@%+=/-]/gu, (c) => `\\${c}`);
+
+/**
+ * Files dropped on the terminal: their paths are typed, as in Terminal.app, so an agent
+ * such as Claude Code takes a dropped image. Where the web view won't say where a file
+ * is, as WebKit on macOS may not, it's a copy Palace saves (see drop.rs).
+ */
+export async function dropFiles(tab, transfer) {
+  const uris = (transfer.getData("text/uri-list") || "").split(/\r?\n/).filter((line) => line.startsWith("file://"));
+  let paths = uris.map((uri) => decodeURIComponent(new URL(uri).pathname));
+  if (!paths.length) {
+    const saved = await Promise.all(
+      [...transfer.files].map(async (file) =>
+        invoke("save_dropped_file", new Uint8Array(await file.arrayBuffer()), {
+          // Headers carry only plain text.
+          headers: { name: file.name.replace(/[^A-Za-z0-9._-]+/g, "-") || "dropped" },
+        }).catch(() => null),
+      ),
+    );
+    paths = saved.filter(Boolean);
+  }
+  if (!paths.length) return;
+  tab.session.term.paste(`${paths.map(shellEscape).join(" ")} `);
+  tab.session.term.focus();
+}
+
 export async function paste(tab) {
   const text = await readText().catch(() => "");
   if (text) tab.session.term.paste(text);

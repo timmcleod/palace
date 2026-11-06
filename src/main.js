@@ -14,6 +14,20 @@ document.addEventListener("contextmenu", (event) => {
   if (!editable && !overSelection) event.preventDefault();
 });
 
+// A file dragged in from the desktop and dropped where nothing takes it would replace
+// Palace with the file, as a browser shows it: the web view has the drop, as Palace's own
+// dragging needs (dragDropEnabled in tauri.conf.json). Nothing happens instead. Where
+// something takes files, as the terminal does, it has handled the event first.
+const draggingFiles = (event) => event.dataTransfer?.types.includes("Files");
+window.addEventListener("dragover", (event) => {
+  if (!draggingFiles(event) || event.defaultPrevented) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "none";
+});
+window.addEventListener("drop", (event) => {
+  if (draggingFiles(event)) event.preventDefault();
+});
+
 // The saved settings are read first: the rest of Palace reads them as it loads.
 loadStore().then(async () => {
   // Applies the theme before the first paint.

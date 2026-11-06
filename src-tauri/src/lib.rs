@@ -10,6 +10,7 @@ mod git;
 mod github;
 mod history;
 mod issues;
+mod drop;
 mod keys;
 mod notify;
 mod open;
@@ -138,6 +139,7 @@ pub fn run() {
             issues::github_render_markdown,
 
             keys::alt_held,
+            drop::save_dropped_file,
 
             notify::can_notify,
             notify::notify_tab,
