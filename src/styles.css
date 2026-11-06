@@ -345,6 +345,44 @@ body.resizing-rows * {
   color: var(--text-primary);
 }
 
+/* "Type / to search", as on GitHub, where the field's empty and not being typed in:
+   drawn over it, as a placeholder can't show the key. The field's own placeholder is a
+   space, so the browser can say when it's empty. */
+.toolbar-search {
+  position: relative;
+}
+
+.toolbar-search .search-hint {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  /* Where the field's text starts: past the padding, the icon and the gap. */
+  left: calc(10px + 15px + 6px);
+  overflow: hidden;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.toolbar-search .search-hint kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
+  font-size: 11px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.toolbar-search:focus-within .search-hint,
+.toolbar-search input:not(:placeholder-shown) ~ .search-hint {
+  display: none;
+}
+
 /* The image that follows the pointer while dragging a branch (see Sidebar.vue). */
 .drag-image {
   position: fixed;

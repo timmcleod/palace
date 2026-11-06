@@ -198,14 +198,16 @@ defineExpose({ focus });
       <input
         ref="input"
         v-model="query"
-        placeholder="Search"
-        :title="`Search files and commits (${shortcut('Ctrl+F')})`"
+        placeholder=" "
+        aria-label="Search files and commits"
+        :title="`Search files and commits (${shortcut('Ctrl+F')} or /)`"
         spellcheck="false"
         @focus="onFocus"
         @blur="open = false"
         @input="onInput"
         @keydown="onKeydown"
       />
+      <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search</span>
     </label>
     <Teleport to="body">
       <div v-if="open && query.trim()" ref="list" class="results" :style="position" @mousedown.prevent>
@@ -218,7 +220,7 @@ defineExpose({ focus });
           @mouseenter="active = i"
           @click="pick(item)"
         >
-          <FileIcon :name="file" :size="15" class="icon" />
+          <FileIcon :name="item.file" :size="15" class="icon" />
           <span class="name">{{ item.name }}</span>
           <span class="dir">{{ item.dir }}</span>
         </div>

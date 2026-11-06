@@ -461,6 +461,20 @@ const { nav, go, describe, forget: forgetPlaces } = useNavigation({
 
 // --- Keyboard shortcuts ------------------------------------------------------------
 
+// Goes to the view's search in the toolbar, its text selected to be typed over, and
+// says whether there was one: files and commits, or stashes, issues or pull requests.
+function focusToolbarSearch() {
+  // Hidden, as with Settings filling the window, there's none to go to.
+  const input = [...document.querySelectorAll("header.toolbar .toolbar-search input")].find((el) => el.offsetParent);
+  if (!input) return false;
+  if (toolbarSearch.value) toolbarSearch.value.focus();
+  else {
+    input.focus();
+    input.select();
+  }
+  return true;
+}
+
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
 const dialogOpen = () =>
   [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
@@ -522,11 +536,15 @@ function onKeydown(event) {
     return;
   }
   // Ctrl+F goes to the toolbar search, except in the Files view's editor, which finds
-  // in the file.
+  // in the file. So does /, as on GitHub, where it isn't typed: not in a text field,
+  // the editor or a terminal, where Claude Code's commands start with it.
+  if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !inTextField(event.target) && !inTerminal && !dialogOpen()) {
+    if (focusToolbarSearch()) event.preventDefault();
+    return;
+  }
   if (event.target.closest?.(".cm-editor")) return;
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && toolbarSearch.value) {
+  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && focusToolbarSearch()) {
     event.preventDefault();
-    toolbarSearch.value.focus();
     return;
   }
   // Ctrl+, opens Settings.
@@ -1829,27 +1847,32 @@ const breadcrumb = computed(() => {
         </button>
         <label v-if="isStashes" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
-          <input v-model="stashQuery" placeholder="Search for Stash Message" spellcheck="false" @keydown.esc="stashQuery = ''" />
+          <input v-model="stashQuery" placeholder=" " aria-label="Search for a stash's message" spellcheck="false" @keydown.esc="stashQuery = ''" />
+          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search stashes</span>
         </label>
         <label v-else-if="isPulls" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
           <input
             v-model="pullQuery"
-            placeholder="Search Pull Requests"
+            placeholder=" "
+            aria-label="Search pull requests"
             title="Words to find, or GitHub search terms such as author:octocat"
             spellcheck="false"
             @keydown.esc="pullQuery = ''"
           />
+          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search pull requests</span>
         </label>
         <label v-else-if="isIssues" class="toolbar-search stash-search">
           <Search :size="15" :stroke-width="1.5" />
           <input
             v-model="issueQuery"
-            placeholder="Search Issues"
+            placeholder=" "
+            aria-label="Search issues"
             title="Words to find, or GitHub search terms such as author:octocat"
             spellcheck="false"
             @keydown.esc="issueQuery = ''"
           />
+          <span class="search-hint" aria-hidden="true">Type <kbd>/</kbd> to search issues</span>
         </label>
         <ToolbarSearch
           v-else
