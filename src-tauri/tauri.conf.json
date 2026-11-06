@@ -32,8 +32,8 @@
       "appimage"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "A Git client for Linux",
-    "longDescription": "Palace is a desktop Git client: browse history with a branch graph, review commits and diffs, stage changes by file or hunk, commit, and fetch, pull and push.",
+    "shortDescription": "Run your agent, review its work, ship it",
+    "longDescription": "Your agent writes the code. Palace shows you what changed. You decide what gets shipped.",
     "publisher": "Tim McLeod",
     "copyright": "Copyright (c) 2026 Tim McLeod",
     "license": "MIT",

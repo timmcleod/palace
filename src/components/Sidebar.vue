@@ -29,6 +29,7 @@ import Spinner from "./Spinner.vue";
 import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
+import { splitKey } from "../lib/sidebarKeys.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -282,7 +283,7 @@ function updateAlt(event) {
     .catch(() => {})
     .finally(() => (askingAlt = false));
 }
-const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? dragRow.value.key.slice(dragRow.value.key.indexOf(":") + 1) : null);
+const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? splitKey(dragRow.value.key)[1] : null);
 
 const rowsByKey = computed(() => new Map(sections.value.flatMap((s) => s.rows.map((row) => [row.key, row]))));
 const scroller = ref(null);
@@ -313,7 +314,7 @@ function onPointerDown(row, event) {
 function startDrag() {
   const { row, element } = pressed;
   dragRow.value = row;
-  dragging.value = canMerge(row) && !row.head ? row.key.slice(row.key.indexOf(":") + 1) : null;
+  dragging.value = canMerge(row) && !row.head ? splitKey(row.key)[1] : null;
   dragImage = document.createElement("div");
   dragImage.className = "drag-image following";
   dragAction = document.createElement("span");

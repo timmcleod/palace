@@ -1,7 +1,7 @@
 [package]
 name = "palace"
 version = "0.28.0"
-description = "A Git client for Linux"
+description = "Run your agent, review its work, ship it"
 authors = ["Tim McLeod"]
 license = "MIT"
 repository = "https://github.com/timmcleod/palace"
