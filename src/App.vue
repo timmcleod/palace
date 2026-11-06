@@ -105,6 +105,8 @@ import { issueError } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
+// --- State shared across views -----------------------------------------------------
+
 const overview = ref(null);
 const loading = ref(false);
 const error = ref("");
@@ -123,6 +125,8 @@ const workingFile = ref(null);
 const draft = reactive({ subject: "", body: "", amend: false, saved: null });
 // Other repositories' drafts, kept for when they're open again: path → draft.
 const otherDrafts = new Map();
+
+// --- History and commit details ----------------------------------------------------
 
 // Set when the history shows only the commits that changed this file.
 const fileFilter = ref(null);
@@ -174,6 +178,8 @@ const focusFile = computed(() => {
   if (fileFilter.value) return fileFilter.value;
   return blameFocus.value?.id === detailCommit.value?.id ? blameFocus.value.file : null;
 });
+
+// --- Views, and comparing ----------------------------------------------------------
 
 const isWorkingCopy = computed(() => selected.value === "workspace:working-copy");
 const isSettings = computed(() => selected.value === "workspace:settings");
@@ -235,6 +241,8 @@ const comparedKeys = computed(() => {
         : `remote-branch:${name}`;
   return [keyOf(c.base), keyOf(c.head)];
 });
+
+// --- Issues and Pull Requests views ------------------------------------------------
 
 // The Issues and Pull Requests views: what's chosen and searched for in each. Which
 // repository on GitHub they show, and how many are open, is issueRepo.js's.
@@ -384,6 +392,8 @@ function checkoutPull({ number, head, headRepo }) {
   tell("Couldn't Check Out the Pull Request", `None of this repository's remotes is ${full ?? "on GitHub"}.`);
 }
 
+// --- Stashes, and searching the history --------------------------------------------
+
 // The Stashes view: the chosen stash (by index) and the search for one by message.
 const selectedStash = ref(null);
 const stashQuery = ref("");
@@ -447,6 +457,10 @@ const { nav, go, describe, forget: forgetPlaces } = useNavigation({
 });
 
 // --- Keyboard shortcuts ------------------------------------------------------------
+
+const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
+const dialogOpen = () =>
+  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
 
 function onKeydown(event) {
   const key = event.key.toLowerCase();
@@ -527,7 +541,7 @@ function onKeydown(event) {
 window.addEventListener("keydown", onKeydown);
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
-// --- Running git operations ------------------------------------------------------
+// --- Running git operations --------------------------------------------------------
 
 // The status card; see statusCard.js. remoteBusy is whether an operation is running,
 // which most others wait for.
@@ -554,6 +568,8 @@ const NETWORK = new Set([
   "finish_remote_rename",
 ]);
 
+// The current branch, for the toolbar's Pull and Push buttons: where they go, and how far
+// behind or ahead it is.
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 
 /**
@@ -703,11 +719,7 @@ async function undoableWithNotice(step, work) {
   return result;
 }
 
-const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
-const dialogOpen = () =>
-  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
-
-// --- Pull requests -----------------------------------------------------------------
+// --- Creating pull requests --------------------------------------------------------
 
 // They go where issues do: origin's repository, or the one it was forked from.
 const pullTarget = () => issueRepo.value ?? issueRemotes.value[0] ?? null;
@@ -777,6 +789,8 @@ async function offerPullRequest(op, branch) {
   dismissStatusLater(op, 10_000);
 }
 
+// --- Git actions and the sidebar ---------------------------------------------------
+
 const actions = useGitActions({
   overview,
   run: runGit,
@@ -844,6 +858,8 @@ async function switchTo(key, kind, name) {
   }
 }
 
+// --- Windows and live refresh ------------------------------------------------------
+
 // Live refresh: the backend watches the open repository and reports changes made
 // anywhere, such as saving a file in an editor or committing from a terminal.
 watch(
@@ -890,19 +906,32 @@ const unlistenProgress = thisWindow.listen("remote-progress", (event) => {
 });
 onBeforeUnmount(() => unlistenProgress.then((unlisten) => unlisten()));
 
+// --- Pane widths -------------------------------------------------------------------
+
 const PANES_KEY = "palace.paneWidths";
 const panes = reactive({ sidebar: 300, history: 580, terminal: 300, ...readJson(PANES_KEY, {}) });
 const savePanes = () => writeJson(PANES_KEY, { sidebar: panes.sidebar, history: panes.history, terminal: panes.terminal });
 
-// The terminal panel below the history and details, loaded the first time it's opened.
-// Opening it for a repository with no terminals starts one.
-const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
-const terminalOpen = ref(false);
-const terminalLoaded = ref(false);
-// Whether a terminal tab has finished or needs you since you last looked, so the hidden
-// panel's button can say so.
-const terminalUnseen = ref(false);
-const terminalPanel = ref(null);
+function startResize(event, pane, min, max) {
+  const startX = event.clientX;
+  const startWidth = panes[pane];
+  const target = event.currentTarget;
+  target.setPointerCapture(event.pointerId);
+
+  const move = (e) => {
+    panes[pane] = Math.min(max, Math.max(min, startWidth + e.clientX - startX));
+  };
+  const stop = () => {
+    target.removeEventListener("pointermove", move);
+    target.removeEventListener("pointerup", stop);
+    savePanes();
+  };
+  target.addEventListener("pointermove", move);
+  target.addEventListener("pointerup", stop);
+}
+
+// --- Files view --------------------------------------------------------------------
+
 // The Files view's tree, whose Ignored toggle is in the subheader above it.
 const fileTree = ref(null);
 
@@ -935,60 +964,20 @@ async function onFileRenamed({ from, to }) {
   renameEdits(path, from, to);
 }
 
+// --- Terminal panel ----------------------------------------------------------------
+
+// The terminal panel below the history and details, loaded the first time it's opened.
+// Opening it for a repository with no terminals starts one.
+const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
+const terminalOpen = ref(false);
+const terminalLoaded = ref(false);
+// Whether a terminal tab has finished or needs you since you last looked, so the hidden
+// panel's button can say so.
+const terminalUnseen = ref(false);
+const terminalPanel = ref(null);
+
 // Terminals a page started before it reloaded have nothing to show them any more.
 invoke("terminal_close_all").catch(() => {});
-
-// Quitting, or closing the window, with programs still running in terminals or edits
-// not saved asks first, naming them (see quit.rs).
-// Closing a window asks about its own; quitting, about every window's.
-let askingToQuit = false;
-const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => {
-  // Palace goes ahead anyway on a second try if the page doesn't say it's asking.
-  invoke("quit_asking").catch(() => {});
-  if (askingToQuit) return;
-  askingToQuit = true;
-  const { quitting } = payload;
-  // Saving automatically, edits are saved first, and only those that couldn't be are
-  // asked about.
-  if (settings.autoSave) await finishSaving();
-  const doing = quitting ? "Quitting" : "Closing the window";
-  const lines = [];
-  const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
-  if (edited.length) {
-    lines.push(`Edits to ${edited.join(", ")} aren't saved. ${doing} loses them.`);
-  }
-  if (payload.terminals.length) {
-    const { describeTerminals } = await import("./lib/terminals.js");
-    const names = describeTerminals(payload.terminals).map((t) => `“${t.label}” in ${t.repository}`);
-    lines.push(
-      names.length === 1
-        ? `${names[0]} is still running. ${doing} stops it.`
-        : `${names.length} terminals are still running: ${names.join(", ")}. ${doing} stops them.`,
-    );
-  }
-  const elsewhere = [
-    ...payload.other_edits.map((file) => `edits to ${file} aren't saved`),
-    ...payload.other_terminals.map((folder) => `a terminal in ${folder} is still running`),
-  ];
-  if (elsewhere.length) {
-    const said = elsewhere.join("; ");
-    lines.push(`In other windows, ${said}. Quitting ${payload.other_edits.length ? "loses" : "stops"} ${elsewhere.length === 1 ? "it" : "them"}.`);
-  }
-  if (!lines.length) {
-    askingToQuit = false;
-    invoke("quit_confirmed", { quitting }).catch(() => {});
-    return;
-  }
-  const ok = await askConfirm({
-    title: quitting ? "Quit Palace?" : "Close Window?",
-    message: lines.join("\n\n"),
-    confirmLabel: quitting ? "Quit" : "Close",
-    danger: true,
-  });
-  askingToQuit = false;
-  if (ok) invoke("quit_confirmed", { quitting }).catch(() => {});
-});
-onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
 
 function toggleTerminal() {
   if (!overview.value) return;
@@ -1047,6 +1036,62 @@ async function showTerminalTab({ path, key }) {
   terminalPanel.value?.focus();
 }
 
+// --- Quitting and closing the window -----------------------------------------------
+
+// Quitting, or closing the window, with programs still running in terminals or edits
+// not saved asks first, naming them (see quit.rs).
+// Closing a window asks about its own; quitting, about every window's.
+let askingToQuit = false;
+const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => {
+  // Palace goes ahead anyway on a second try if the page doesn't say it's asking.
+  invoke("quit_asking").catch(() => {});
+  if (askingToQuit) return;
+  askingToQuit = true;
+  const { quitting } = payload;
+  // Saving automatically, edits are saved first, and only those that couldn't be are
+  // asked about.
+  if (settings.autoSave) await finishSaving();
+  const doing = quitting ? "Quitting" : "Closing the window";
+  const lines = [];
+  const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
+  if (edited.length) {
+    lines.push(`Edits to ${edited.join(", ")} aren't saved. ${doing} loses them.`);
+  }
+  if (payload.terminals.length) {
+    const { describeTerminals } = await import("./lib/terminals.js");
+    const names = describeTerminals(payload.terminals).map((t) => `“${t.label}” in ${t.repository}`);
+    lines.push(
+      names.length === 1
+        ? `${names[0]} is still running. ${doing} stops it.`
+        : `${names.length} terminals are still running: ${names.join(", ")}. ${doing} stops them.`,
+    );
+  }
+  const elsewhere = [
+    ...payload.other_edits.map((file) => `edits to ${file} aren't saved`),
+    ...payload.other_terminals.map((folder) => `a terminal in ${folder} is still running`),
+  ];
+  if (elsewhere.length) {
+    const said = elsewhere.join("; ");
+    lines.push(`In other windows, ${said}. Quitting ${payload.other_edits.length ? "loses" : "stops"} ${elsewhere.length === 1 ? "it" : "them"}.`);
+  }
+  if (!lines.length) {
+    askingToQuit = false;
+    invoke("quit_confirmed", { quitting }).catch(() => {});
+    return;
+  }
+  const ok = await askConfirm({
+    title: quitting ? "Quit Palace?" : "Close Window?",
+    message: lines.join("\n\n"),
+    confirmLabel: quitting ? "Quit" : "Close",
+    danger: true,
+  });
+  askingToQuit = false;
+  if (ok) invoke("quit_confirmed", { quitting }).catch(() => {});
+});
+onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
+
+// --- Review comments for the agent -------------------------------------------------
+
 // Sends the repository's review comments to its agent: into the prompt of its agent
 // tab, or a new one, for the user to add to and send. They're in the prompt then, all
 // of them, so they go from here.
@@ -1095,6 +1140,8 @@ async function clearReview() {
   }
   clearComments(path);
 }
+
+// --- Opening and refreshing repositories -------------------------------------------
 
 // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
 let loadSeq = 0;
@@ -1269,6 +1316,8 @@ function removeRecent(path) {
 window.addEventListener("focus", refresh);
 onBeforeUnmount(() => window.removeEventListener("focus", refresh));
 
+// --- Checks at startup -------------------------------------------------------------
+
 // Without a usable git, Palace shows how to install it instead of the app.
 const gitStatus = ref(null);
 const checkingGit = ref(false);
@@ -1324,22 +1373,7 @@ onMounted(() => {
   });
 });
 
-const subtitle = computed(() => {
-  const o = overview.value;
-  if (!o) return "";
-  if (isStashes.value) return `Stashes (${o.stashes.length} ${o.stashes.length === 1 ? "Stash" : "Stashes"})`;
-  if (isIssues.value && issueRepo.value) {
-    const open = openIssues.value == null ? "" : ` (${openIssues.value.toLocaleString()} Open)`;
-    return `Issues on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
-  }
-  if (isPulls.value && issueRepo.value) {
-    const open = openPulls.value == null ? "" : ` (${openPulls.value.toLocaleString()} Open)`;
-    return `Pull requests on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
-  }
-  const where = o.head.branch ?? `detached at ${o.head.short_id}`;
-  if (o.commit_count == null) return `${where} (no commits yet)`;
-  return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
-});
+// --- Which history is shown --------------------------------------------------------
 
 // Selecting a ref in the sidebar shows its history; Workspace › History goes back to
 // HEAD. A stash opens in the Stashes view. Other items (folders, Settings, …) leave
@@ -1393,6 +1427,25 @@ const historyRev = computed(() => {
   }[r.kind];
 });
 
+// --- Toolbar title -----------------------------------------------------------------
+
+const subtitle = computed(() => {
+  const o = overview.value;
+  if (!o) return "";
+  if (isStashes.value) return `Stashes (${o.stashes.length} ${o.stashes.length === 1 ? "Stash" : "Stashes"})`;
+  if (isIssues.value && issueRepo.value) {
+    const open = openIssues.value == null ? "" : ` (${openIssues.value.toLocaleString()} Open)`;
+    return `Issues on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
+  }
+  if (isPulls.value && issueRepo.value) {
+    const open = openPulls.value == null ? "" : ` (${openPulls.value.toLocaleString()} Open)`;
+    return `Pull requests on ${issueRepo.value.owner}/${issueRepo.value.repo}${open}`;
+  }
+  const where = o.head.branch ?? `detached at ${o.head.short_id}`;
+  if (o.commit_count == null) return `${where} (no commits yet)`;
+  return `${where} (${o.commit_count.toLocaleString()} ${o.commit_count === 1 ? "Commit" : "Commits"})`;
+});
+
 const breadcrumb = computed(() => {
   const o = overview.value;
   if (!o) return [];
@@ -1408,24 +1461,6 @@ const breadcrumb = computed(() => {
   const head = o.branches.find((b) => b.is_head);
   return [o.head.branch ?? o.head.short_id ?? "HEAD", head?.upstream].filter(Boolean);
 });
-
-function startResize(event, pane, min, max) {
-  const startX = event.clientX;
-  const startWidth = panes[pane];
-  const target = event.currentTarget;
-  target.setPointerCapture(event.pointerId);
-
-  const move = (e) => {
-    panes[pane] = Math.min(max, Math.max(min, startWidth + e.clientX - startX));
-  };
-  const stop = () => {
-    target.removeEventListener("pointermove", move);
-    target.removeEventListener("pointerup", stop);
-    savePanes();
-  };
-  target.addEventListener("pointermove", move);
-  target.addEventListener("pointerup", stop);
-}
 </script>
 
 <template>
