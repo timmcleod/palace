@@ -815,9 +815,9 @@ onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" &&
 
 // Opens the worktree at `path` in a window of its own, or
 // brings forward the window it's open in.
-async function openWorktree(path) {
+async function openWorktree(path, { task = null } = {}) {
   if (await invoke("show_window_with", { path }).catch(() => false)) return;
-  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path }).catch((e) =>
+  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path, task }).catch((e) =>
     tell("Couldn't Open the Worktree", String(e)),
   );
 }
@@ -1146,6 +1146,8 @@ async function checkGit() {
     const start = await invoke("window_start").catch(() => ({ repo: null, first: true }));
     const reopen = start.repo ?? (start.first ? recents.value[0]?.path : null);
     if (reopen) await loadRepository(reopen);
+    // Opened for a task (New Task): its agent starts on it.
+    if (start.task && overview.value?.path === reopen) pasteToAgent(start.task, { submit: true });
   }
   starting.value = false;
 }

@@ -251,6 +251,46 @@ describe("worktrees", () => {
   });
 });
 
+describe("a new task", () => {
+  const main = { path: "/code/palace", branch: "main", main: true, current: true, locked: false, prunable: false };
+
+  test("starts on a branch named after it, beside the repository, in a window of its own", async () => {
+    const { actions, ran, openWorktree } = actionsOn({ worktrees: [main], branches: [branch("main", { is_head: true }), branch("fix-the-login-bug")] });
+    vi.mocked(openForm).mockResolvedValue({ task: " Fix the login bug ", name: "", location: "/code" });
+    await actions.newTask();
+    expect(ran()).toEqual([
+      ["add_worktree", { folder: "/code/palace-fix-the-login-bug-2", branch: "main", create: "fix-the-login-bug-2", remote: false }],
+    ]);
+    expect(openWorktree).toHaveBeenCalledWith("/code/palace-fix-the-login-bug-2", { task: "Fix the login bug" });
+  });
+
+  test("takes the branch name given", async () => {
+    const { actions, ran } = actionsOn({ worktrees: [main] });
+    vi.mocked(openForm).mockResolvedValue({ task: "Anything", name: " feature/search ", location: "/code" });
+    await actions.newTask();
+    expect(ran()[0][1]).toMatchObject({ folder: "/code/palace-feature-search", create: "feature/search" });
+  });
+
+  test("starts nothing when canceled, or when the worktree couldn't be made", async () => {
+    const { actions, run, openWorktree } = actionsOn({ worktrees: [main] });
+    vi.mocked(openForm).mockResolvedValue(null);
+    await actions.newTask();
+    expect(run).not.toHaveBeenCalled();
+
+    const failing = actionsOn({ worktrees: [main] }, { fails: { add_worktree: "fatal: already exists" } });
+    vi.mocked(openForm).mockResolvedValue({ task: "Anything", name: "", location: "/code" });
+    await failing.actions.newTask();
+    expect(failing.openWorktree).not.toHaveBeenCalled();
+    expect(openWorktree).not.toHaveBeenCalled();
+  });
+
+  test("is offered in the + menu and on Worktrees", () => {
+    const { actions } = actionsOn();
+    expect(labels(actions.addMenu())).toContain("New Task…");
+    expect(labels(actions.sectionMenu("worktrees"))).toContain("New Task…");
+  });
+});
+
 test("a commit's menu resets the branch whose history is shown, and only rewrites what can be", () => {
   const commit = { id: "abc1234def", short_id: "abc1234" };
   const { actions } = actionsOn();

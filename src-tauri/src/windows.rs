@@ -15,6 +15,10 @@ pub struct Windows(Mutex<HashMap<String, String>>);
 
 static NEXT: AtomicU32 = AtomicU32::new(2);
 
+/// What each new window's agent is to start on, by window, as for a worktree made for a
+/// task (New Task), until the window's page takes it as it starts.
+static TASKS: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
+
 /// How far each new window sits from the one it was opened from, so it doesn't hide it.
 const CASCADE: f64 = 28.0;
 
@@ -24,12 +28,18 @@ pub struct Start {
     repo: Option<String>,
     /// Whether it's the first window, which reopens the last repository at startup.
     first: bool,
+    /// What its agent is to start on, the first time only: not again as its page reloads.
+    task: Option<String>,
 }
 
 /// What a window's page opens as it starts.
 #[tauri::command]
 pub fn window_start(window: WebviewWindow, windows: State<'_, Windows>) -> Start {
-    Start { repo: windows.0.lock().unwrap().get(window.label()).cloned(), first: window.label() == "main" }
+    Start {
+        repo: windows.0.lock().unwrap().get(window.label()).cloned(),
+        first: window.label() == "main",
+        task: TASKS.lock().unwrap().remove(window.label()),
+    }
 }
 
 /// Notes the repository the window has open, or None for none.
@@ -159,12 +169,22 @@ pub(crate) struct TerminalTab {
 /// is showing, which the window takes from the start: otherwise it shows white until
 /// its page has loaded and turned it dark.
 #[tauri::command]
-pub async fn new_window(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, dark: bool, path: Option<String>) -> Result<(), String> {
+pub async fn new_window(
+    app: AppHandle,
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    dark: bool,
+    path: Option<String>,
+    task: Option<String>,
+) -> Result<(), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     // What its page opens as it starts (see window_start).
     if let Some(path) = path {
         windows.0.lock().unwrap().insert(config.label.clone(), path);
+    }
+    if let Some(task) = task.filter(|t| !t.trim().is_empty()) {
+        TASKS.lock().unwrap().insert(config.label.clone(), task);
     }
     let mut builder = WebviewWindowBuilder::from_config(&app, &config).map_err(|e| format!("Couldn't open a window: {e}"))?;
     if let (Ok(position), Ok(scale)) = (window.outer_position(), window.scale_factor()) {
@@ -217,6 +237,7 @@ pub fn show_first(app: &AppHandle) {
 /// repository, its history and network work, its edits, and its notifications.
 pub fn forget(app: &AppHandle, window: &str) {
     app.state::<Windows>().0.lock().unwrap().remove(window);
+    TASKS.lock().unwrap().remove(window);
     crate::terminal::close_window(window);
     app.state::<crate::watch::RepoWatcher>().forget(window);
     app.state::<crate::history::HistoryState>().forget(window);

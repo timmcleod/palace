@@ -71,13 +71,13 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
   }
 
   // Puts `text` in the prompt of the repository's agent, showing the panel, and says
-  // whether it could.
-  async function pasteToAgent(text) {
+  // whether it could. With `submit`, it's sent as well (see sendToAgent).
+  async function pasteToAgent(text, { submit = false } = {}) {
     const path = overview.value?.path;
     if (!path) return false;
     reveal();
     const { sendToAgent } = await terminals();
-    const tab = await sendToAgent(path, text);
+    const tab = await sendToAgent(path, text, { submit });
     if (!tab) {
       tell("Couldn't Reach the Agent", "The agent tab's agent didn't start. Check the agent tab for why, then try again.");
       return false;

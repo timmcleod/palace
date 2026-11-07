@@ -228,22 +228,27 @@ export async function startTab(path, tab) {
 }
 
 /**
- * Puts `text` in the prompt of the repository's agent, as if pasted, without sending
- * it: in the agent tab showing, or else the last one opened, or else a new one, once
- * its agent has started. Resolves to the tab, or null if a new agent never started.
+ * Puts `text` in the prompt of the repository's agent, as if pasted: in the agent tab
+ * showing, or else the last one opened, or else a new one, once its agent has started.
+ * It's left there for the user to send, unless `submit`, as for a task given in New
+ * Task. Resolves to the tab, or null if a new agent never started.
  */
-export async function sendToAgent(path, text) {
+export async function sendToAgent(path, text, { submit = false } = {}) {
   const group = tabsFor(path);
   const agents = group.tabs.filter((tab) => tab.kind === "agent");
   let tab = agents.find((t) => t.key === group.active) ?? agents.at(-1);
   if (tab) {
     group.active = tab.key;
-    pasteInto(tab, text);
-    return tab;
+  } else {
+    tab = openTerminal(path, { command: agentCommand(path), kind: "agent" });
+    if (!(await agentStarted(tab))) return null;
   }
-  tab = openTerminal(path, { command: agentCommand(path), kind: "agent" });
-  if (!(await agentStarted(tab))) return null;
   pasteInto(tab, text);
+  if (submit) {
+    // Enter on its own, a moment after: in the paste, it would be part of the text.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    type(tab, "\r");
+  }
   return tab;
 }
 

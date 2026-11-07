@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { agentOfProgram } from "./agents.js";
+import { branchForTask } from "./tasks.js";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
@@ -28,8 +29,9 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // error reporting, resolving to the error message or null; `overview` is the
 // repository overview ref. `pullRequest` is { available(), create(branch) }, for
 // branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
-// shown, when it isn't the current one. `openWorktree(path)` opens a worktree in a
-// window of its own, or brings forward the one it's open in.
+// shown, when it isn't the current one. `openWorktree(path, { task })` opens a worktree
+// in a window of its own, or brings forward the one it's open in; with `task`, its agent
+// starts on that.
 export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null, openWorktree = () => {} }) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
@@ -628,6 +630,37 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     if (!error && values.open) openWorktree(folder);
   }
 
+  // A task for an agent to work on beside this one: a new branch, from the current one,
+  // in a worktree of its own, opened in a window of its own, where the agent starts on
+  // what's said here. Several can go at once, each on its own branch.
+  async function newTask() {
+    const from = current() ?? "HEAD";
+    const values = await openForm({
+      title: "New Task",
+      message: `A new branch from ${from}, in a worktree of its own, opens in a window where the agent starts on the task.`,
+      fields: [
+        { key: "task", label: "What should the agent do?", type: "textarea" },
+        { key: "name", label: "Branch name", type: "text", optional: true, placeholder: "Named after the task" },
+        { key: "location", label: "Location", type: "folder", value: besideRepository(), chooseTitle: "Choose Where the Worktree Goes" },
+      ],
+      confirmLabel: "Start Task",
+      // Canceled, what was typed waits for next time, in this repository.
+      draft: `new-task:${overview.value.path}`,
+    });
+    if (!values) return;
+    const task = values.task.trim();
+    const taken = new Set(overview.value.branches.map((b) => b.name));
+    const name = values.name.trim() || branchForTask(task, taken);
+    const folder = `${values.location.replace(/\/+$/, "")}/${worktreeName(name)}`;
+    const error = await run(["Starting task…", "Started task", "Couldn't start the task"], "add_worktree", {
+      folder,
+      branch: from,
+      create: name,
+      remote: false,
+    });
+    if (!error) openWorktree(folder, { task });
+  }
+
   async function removeWorktree(worktree) {
     const name = folderName(worktree.path);
     const changed = !worktree.prunable && (await invoke("worktree_has_changes", { worktree: worktree.path }).catch(() => false));
@@ -925,6 +958,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];
     if (section === "worktrees") {
       return [
+        { label: "New Task…", action: newTask },
         { label: "New Worktree…", action: () => newWorktree() },
         worktrees().some((w) => w.prunable) && { label: "Prune Worktrees", action: pruneWorktrees },
       ];
@@ -937,6 +971,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       { label: "Create New Branch…", action: () => newBranch() },
       { label: "Create New Tag…", action: () => createTag() },
       { label: "New Worktree…", action: () => newWorktree() },
+      { label: "New Task…", action: newTask },
       { separator: true },
       { label: "Add Remote Repository…", action: addRemote },
     ];
@@ -945,6 +980,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   return {
     worktreeMenu,
     newWorktree,
+    newTask,
     checkout,
     checkoutPull,
     deleteMergedBranch,
