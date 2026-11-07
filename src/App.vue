@@ -98,7 +98,8 @@ import { CANCELED, CONFLICT, NOT_A_REPOSITORY, STALE_STEP, errorDetail, isError 
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { dragEdge } from "./lib/resize.js";
-import { commandKey, fileManager, isMac, shortcut } from "./lib/platform.js";
+import { useShortcuts } from "./lib/shortcuts.js";
+import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
 import { finishSaving, focusOnOpen, forgetEdits, openFiles, renameEdits, unsavedFiles } from "./lib/editing.js";
@@ -484,88 +485,53 @@ const inTextField = (target) => !!target.closest?.("input, textarea, select, [co
 const dialogOpen = () =>
   [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
 
-function onKeydown(event) {
-  const key = event.key.toLowerCase();
-  // Cmd+N (Ctrl+N) opens a new window. On a Mac, from a terminal too, where Cmd keys
-  // are Palace's; Ctrl+N is the shell's on Linux.
-  const inTerminal = !!event.target.closest?.(".terminal-panel");
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "n" && (isMac || !inTerminal) && !dialogOpen()) {
-    event.preventDefault();
-    newWindow();
-    return;
-  }
-  // Ctrl+' (Cmd+') shows the terminal panel and goes to it, or from it, hides it.
-  // Programs in a terminal can't use it, so it's Palace's there too. By the key, not the
-  // character, which needs Shift on some layouts.
-  if (commandKey(event) && !event.shiftKey && !event.altKey && event.code === "Quote" && overview.value && !dialogOpen()) {
-    event.preventDefault();
-    if (inTerminal && terminalOpen.value) terminalOpen.value = false;
-    else showTerminal();
-    return;
-  }
-  // Cmd+T (Ctrl+Shift+T on Linux, where Ctrl+T is the shell's) opens a terminal tab,
-  // showing the panel, from anywhere, as in the terminal apps.
-  if (
-    (isMac ? event.metaKey && !event.ctrlKey && !event.shiftKey : event.ctrlKey && !event.metaKey && event.shiftKey) &&
-    !event.altKey &&
-    event.code === "KeyT" &&
-    overview.value &&
-    !dialogOpen()
-  ) {
-    event.preventDefault();
-    showTerminal({ newTab: true });
-    return;
-  }
-  // Whatever's typed in a terminal is the terminal's.
-  if (inTerminal) return;
-  // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except in text fields and
-  // dialogs, which keep their own. On a Mac, these and the shortcuts below use Cmd.
-  if (commandKey(event) && !event.altKey && (key === "z" || key === "y") && !inTextField(event.target) && !dialogOpen()) {
-    event.preventDefault();
-    if (key === "y" || event.shiftKey) redo();
-    else undo();
-    return;
-  }
-  // Ctrl+R reloads the repository and fetches, as the Fetch button does, rather than
-  // reloading the window.
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "r" && overview.value && !dialogOpen()) {
-    event.preventDefault();
-    refreshAndFetch();
-    return;
-  }
-  // Ctrl+P finds a file to open in the Files view.
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "p" && overview.value && !dialogOpen()) {
-    event.preventDefault();
-    selected.value = "workspace:files";
-    nextTick(() => toolbarSearch.value?.focus());
-    return;
-  }
-  // Ctrl+F goes to the toolbar search, except in the Files view's editor, which finds
-  // in the file. So does /, as on GitHub, where it isn't typed: not in a text field,
-  // the editor or a terminal, where Claude Code's commands start with it.
-  if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !inTextField(event.target) && !inTerminal && !dialogOpen()) {
-    if (focusToolbarSearch()) event.preventDefault();
-    return;
-  }
-  if (event.target.closest?.(".cm-editor")) return;
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "f" && focusToolbarSearch()) {
-    event.preventDefault();
-    return;
-  }
-  // Ctrl+, opens Settings.
-  if (commandKey(event) && !event.shiftKey && !event.altKey && key === "," && overview.value && !dialogOpen()) {
-    event.preventDefault();
-    selected.value = "workspace:settings";
-    return;
-  }
-  // In text fields, Alt+arrows move by word (on a Mac) and stay theirs.
-  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight") || inTextField(event.target)) return;
-  event.preventDefault();
-  go(event.key === "ArrowLeft" ? "back" : "forward");
-}
-
-window.addEventListener("keydown", onKeydown);
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+// The window's keyboard shortcuts: which key is which, and where each applies, is in
+// shortcuts.js; what each does is here.
+useShortcuts(
+  (event) => ({
+    inTerminal: !!event.target.closest?.(".terminal-panel"),
+    inTextField: inTextField(event.target),
+    inEditor: !!event.target.closest?.(".cm-editor"),
+    dialogOpen: dialogOpen(),
+    repository: !!overview.value,
+  }),
+  {
+    newWindow: () => {
+      newWindow();
+    },
+    terminal: ({ inTerminal }) => {
+      if (inTerminal && terminalOpen.value) terminalOpen.value = false;
+      else showTerminal();
+    },
+    newTerminalTab: () => {
+      showTerminal({ newTab: true });
+    },
+    undo: () => {
+      undo();
+    },
+    redo: () => {
+      redo();
+    },
+    refresh: () => {
+      refreshAndFetch();
+    },
+    findFile: () => {
+      selected.value = "workspace:files";
+      nextTick(() => toolbarSearch.value?.focus());
+    },
+    // With no search showing, the key is left alone.
+    search: () => focusToolbarSearch(),
+    settings: () => {
+      selected.value = "workspace:settings";
+    },
+    back: () => {
+      go("back");
+    },
+    forward: () => {
+      go("forward");
+    },
+  },
+);
 
 // --- Running git operations --------------------------------------------------------
 
