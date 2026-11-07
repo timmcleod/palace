@@ -14,7 +14,7 @@ const QUICK_CHANGE = 800;
  * `view` holds the refs that make up where the user is, which going Back or Forward
  * sets: selected (the sidebar item's key), selectedCommit, selectedStash, fileFilter,
  * detailMode, treeFile, treeReveal and comparison. treeReveal is only set: it's the
- * file the Browse view opens on arrival. fileShown() is the file open in the Files
+ * file a commit's Files tab opens on arrival. fileShown() is the file open in the Files
  * view while it's shown, and showFile(file) opens one there. overview is the
  * repository overview ref; places are only kept while a repository is open.
  *

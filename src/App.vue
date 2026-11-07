@@ -158,7 +158,7 @@ function toggleFirstParent() {
 
 // The detail pane shows a commit's changes, or all its files ("tree").
 const detailMode = ref("changeset");
-// The file open in the Browse view, a file for it to open (going Back to it, say), and
+// The file open in a commit's Files tab, a file for it to open (going Back to it, say), and
 // the commit and file a blame click jumped to, whose diff opens on arrival.
 const treeFile = ref(null);
 const treeReveal = ref(null);
@@ -1742,7 +1742,7 @@ const breadcrumb = computed(() => {
           <div class="segmented">
             <button :class="{ active: detailMode === 'changeset' }" @click="detailMode = 'changeset'">Changeset</button>
             <button :class="{ active: detailMode === 'tree' }" title="Every file at this commit" @click="detailMode = 'tree'">
-              Browse
+              Files
             </button>
           </div>
         </div>
