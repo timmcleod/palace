@@ -1,3 +1,5 @@
+import { untakenName } from "./names.js";
+
 // New Task: a worktree with a branch of its own, made for a task an agent starts on in a
 // window of its own (see newTask in gitActions.js).
 
@@ -17,7 +19,5 @@ export function branchForTask(description, taken = new Set()) {
   }
   // A first word longer than that is cut short instead.
   base ||= (words[0] ?? "").slice(0, 40) || "task";
-  let name = base;
-  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
-  return name;
+  return untakenName(base, taken);
 }
