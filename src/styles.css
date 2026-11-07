@@ -242,6 +242,27 @@ textarea,
   user-select: none;
 }
 
+/* Where the keyboard is, when it's the keyboard that put it there (Tab, not a click):
+   one ring in the accent color for everything that can be tabbed to, rather than
+   WebKit's own, which differs between macOS and Linux. :where() gives it no weight, so
+   a component's own way of showing focus wins: text fields color their border, and
+   lists mark the row the cursor is on rather than ringing the whole list. */
+:where(
+    button,
+    a[href],
+    select,
+    summary,
+    input[type="checkbox"],
+    input[type="radio"],
+    [role="button"],
+    [role="option"],
+    [role="tab"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* While a pane's edge is dragged to resize it, nothing's selected as the pointer
    crosses text, and the resizing cursor stays wherever the pointer is. */
 body.resizing,
