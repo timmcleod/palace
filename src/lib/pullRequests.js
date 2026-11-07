@@ -19,7 +19,7 @@ export function pullRequestPlan(overview, target, name) {
   const remotes = overview.remotes;
   const onGitHub = (remote) => githubRepoOf(remote?.url);
 
-  let remote = null;
+  let remote;
   let remoteName = name;
   if (branch.upstream) {
     // The longest matching name, in case one remote's name starts another's.

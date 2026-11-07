@@ -1,5 +1,6 @@
-# Builds the page and runs its tests on every push and pull request that changes it, so
-# a regression shows up when it's made rather than when a release is tagged.
+# Lints and builds the page and runs its tests on every push and pull request that
+# changes it, so a regression shows up when it's made rather than when a release is
+# tagged.
 
 name: Check page
 
@@ -14,6 +15,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "vite.config.js"
+      - "eslint.config.js"
       - ".github/workflows/check-page.yml"
   pull_request:
     paths: *paths
@@ -36,6 +38,11 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Names used but never defined, in scripts and templates alike, which the build
+      # lets through (see eslint.config.js).
+      - name: Lint the page
+        run: npm run lint
 
       - name: Build the page
         run: npm run build

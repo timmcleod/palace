@@ -5,7 +5,7 @@
 // which isn't committed. Runs before `npm run dev` and `npm run build`.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(new URL(import.meta.url).pathname), "..");
@@ -24,7 +24,7 @@ function addText(text) {
 
 const LICENSE_FILE = /^(licen[cs]e|copying|notice)([-._].*)?$/i;
 function licenseTexts(dir) {
-  let files = [];
+  let files;
   try {
     files = readdirSync(dir).filter((f) => LICENSE_FILE.test(f)).sort();
   } catch {
@@ -53,7 +53,7 @@ function webUrl(url) {
 // --- npm ------------------------------------------------------------------------
 
 function npmPackages() {
-  let lines = [];
+  let lines;
   try {
     lines = execFileSync("npm", ["ls", "--omit=dev", "--all", "--parseable"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
       .split("\n")
@@ -131,7 +131,9 @@ function crates() {
     if (!files.length && p.license_file) {
       try {
         files.push(addText(readFileSync(join(dir, p.license_file), "utf8")));
-      } catch {}
+      } catch {
+        // Named in its metadata but not there: it goes without.
+      }
     }
     return {
       name: p.name,

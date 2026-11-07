@@ -429,7 +429,7 @@ function moveAtPrompt(tab, by, back) {
   }
   cursor ??= chars.length;
   const word = (ch) => /[\p{L}\p{N}_]/u.test(ch);
-  let count = 0;
+  let count;
   if (by === "line") {
     if (back) count = cursor;
     else {

@@ -29,7 +29,7 @@ import { buildTree, flattenTree } from "../lib/tree.js";
 import Spinner from "./Spinner.vue";
 import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
-import { branchOrder, dividerRows, isDivider, moveKey } from "../lib/branchOrder.js";
+import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { splitKey } from "../lib/sidebarKeys.js";
 
 const props = defineProps({
