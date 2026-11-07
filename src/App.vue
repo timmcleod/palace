@@ -94,12 +94,13 @@ import {
   tell,
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
-import { CANCELED, CONFLICT, NOT_A_REPOSITORY, STALE_STEP, errorDetail, isError } from "./lib/errors.js";
+import { CANCELED, CONFLICT, STALE_STEP, errorDetail, isError } from "./lib/errors.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { dragEdge } from "./lib/resize.js";
 import { useShortcuts } from "./lib/shortcuts.js";
 import { useTerminalPanel } from "./lib/terminalPanel.js";
+import { useRepository } from "./lib/repository.js";
 import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
@@ -667,7 +668,8 @@ const {
   overview,
   busy: () => remoteBusy.value,
   loading: () => loading.value,
-  refresh,
+  // Looked up when it's called: useRepository, which makes it, comes later.
+  refresh: () => refresh(),
 });
 
 // --- Undo and redo -----------------------------------------------------------------
@@ -1056,87 +1058,49 @@ async function clearReview() {
 
 // --- Opening and refreshing repositories -------------------------------------------
 
-// Each load gets a sequence number so a slow, older load can't overwrite a newer one.
-let loadSeq = 0;
-// The open repository's folder, once it's gone: removed as a worktree, or moved or
-// deleted. The window goes on showing it as it was, saying so, until it's closed.
-const folderGone = ref(false);
-const isWorktree = computed(() => !!overview.value?.worktrees?.some((w) => w.current && !w.main));
-
-/**
- * Opens the repository at `path`. `quiet` refreshes the open one in the background.
- * With `keepOnError`, a repository that can't be opened leaves the current one open
- * and says why, instead of going back to the welcome screen.
- */
-async function loadRepository(path, { quiet = false, keepOnError = false } = {}) {
-  const seq = ++loadSeq;
-  if (!quiet) {
-    loading.value = true;
-  }
-
-  try {
-    const data = await invoke("repo_overview", { path, files: listsFiles.value });
-    if (seq !== loadSeq) return;
-    // With another refresh to follow, as for files just staged, the files this one read
-    // may be from before: they wait for it, rather than undo what the list shows.
-    if (quiet && refreshAgain && data.path === overview.value?.path) data.files = overview.value.files;
-    // Open in another window already, that window comes forward instead.
-    if (data.path !== overview.value?.path && (await invoke("show_window_with", { path: data.path }).catch(() => false))) return;
-    if (seq !== loadSeq) return;
-    if (data.path !== overview.value?.path) {
-      selected.value = headHistoryKey(data);
-      historyRef.value = null;
-      selectedCommit.value = null;
-      workingFile.value = null;
-      fileFilter.value = null;
-      selectedStash.value = null;
-      stashQuery.value = "";
-      issueQuery.value = "";
-      pullQuery.value = "";
-      historySearch.value = "";
-      comparison.value = null;
-      forgetPlaces();
-      if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
-      Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
-      otherDrafts.delete(data.path);
-      switchRepository(overview.value?.path, data.path);
-    }
-    overview.value = data;
-    folderGone.value = false;
-    error.value = "";
+// Opening the repository, and refreshing it as it changes: see repository.js. What's
+// here is what the window does around it.
+const { folderGone, loadRepository, refresh } = useRepository({
+  overview,
+  loading,
+  error,
+  refreshKey,
+  listsFiles,
+  // Another repository: its views start afresh, and the commit message and undo steps
+  // being written for the one before wait for it to come back.
+  onSwitch(data) {
+    selected.value = headHistoryKey(data);
+    historyRef.value = null;
+    selectedCommit.value = null;
+    workingFile.value = null;
+    fileFilter.value = null;
+    selectedStash.value = null;
+    stashQuery.value = "";
+    issueQuery.value = "";
+    pullQuery.value = "";
+    historySearch.value = "";
+    comparison.value = null;
+    forgetPlaces();
+    if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
+    Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
+    otherDrafts.delete(data.path);
+    switchRepository(overview.value?.path, data.path);
+  },
+  onLoaded(data) {
     rememberRepository(data);
     recents.value = recentRepositories();
-  } catch (e) {
-    if (seq !== loadSeq) return;
-    // A failed background refresh keeps showing the last good state, saying so when
-    // that's because the folder is gone.
-    if (quiet) {
-      if (path === overview.value?.path && !(await invoke("folder_exists", { path }).catch(() => true))) {
-        if (seq === loadSeq) folderGone.value = true;
-      }
-      return;
-    }
-    if (isError(e, NOT_A_REPOSITORY)) {
-      offerToCreateRepository(path, { keepOnError });
-      return;
-    }
-    if (keepOnError && overview.value) {
-      showStatus({
-        title: "Couldn't open the repository",
-        state: "failed",
-        message: `${path}\n${e}`,
-        actions: recents.value.some((r) => r.path === path)
-          ? [{ label: "Remove from List", run: () => removeRecent(path) }]
-          : [],
-      });
-    } else {
-      overview.value = null;
-      error.value = `Couldn't open ${path}: ${e}`;
-    }
-  } finally {
-    if (seq === loadSeq) loading.value = false;
-  }
-}
+  },
+  onNotRepository: (path, options) => offerToCreateRepository(path, options),
+  onOpenFailed(path, e) {
+    showStatus({
+      title: "Couldn't open the repository",
+      state: "failed",
+      message: `${path}\n${e}`,
+      actions: recents.value.some((r) => r.path === path) ? [{ label: "Remove from List", run: () => removeRecent(path) }] : [],
+    });
+  },
+});
+const isWorktree = computed(() => !!overview.value?.worktrees?.some((w) => w.current && !w.main));
 
 // A folder chosen to open that isn't a repository can become one, then open.
 async function offerToCreateRepository(path, options) {
@@ -1213,40 +1177,11 @@ function recentMenu(anchor) {
   ]);
 }
 
-// One refresh at a time: asked for again while one is under way, as the watcher does
-// while an agent writes files, it goes once more when that one's done, so nothing's
-// missed, but reads don't pile up.
-let refreshing = null;
-let refreshAgain = false;
-
-function refresh() {
-  // While a repository the user chose is still opening, a refresh would reload the one
-  // on screen and, being newer, win over the switch. The window regains focus as the
-  // folder picker closes, so without this, opening another repository did nothing.
-  if (!overview.value || loading.value) return;
-  if (refreshing) {
-    refreshAgain = true;
-    return;
-  }
-  refreshKey.value++;
-  refreshing = loadRepository(overview.value.path, { quiet: true }).finally(() => {
-    refreshing = null;
-    if (refreshAgain) {
-      refreshAgain = false;
-      refresh();
-    }
-  });
-}
-
 function removeRecent(path) {
   forgetRepository(path);
   recents.value = recentRepositories();
 }
 
-// The file watcher catches most changes made elsewhere; refreshing on focus also
-// catches any it misses, such as on network drives where changes aren't reported.
-window.addEventListener("focus", refresh);
-onBeforeUnmount(() => window.removeEventListener("focus", refresh));
 
 // --- Checks at startup -------------------------------------------------------------
 
