@@ -55,12 +55,13 @@ function onKeydown(event) {
   margin: -1px -3px;
   padding: 1px 3px;
   border-radius: 4px;
-  cursor: pointer;
 }
 
+/* Tinted in the accent color, as something that does something when clicked, without
+   the pointer cursor the rest of Palace doesn't use for text. */
 .copy-text:hover {
-  background: var(--row-hover);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 .copy-text:focus-visible {
