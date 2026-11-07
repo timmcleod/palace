@@ -87,9 +87,12 @@ Then:
 npm install
 npm run tauri dev               # run the app, reloading as you edit
 npm test                        # run the page's tests
+npm run lint                    # check the page's code
 cd src-tauri && cargo test      # run the backend tests
 npm run package                 # build the packages into src-tauri/target/release/bundle/
 ```
+
+[ARCHITECTURE.md](ARCHITECTURE.md) says how the code is put together, where new code belongs, and the checks to run before pushing.
 
 ## License
 
