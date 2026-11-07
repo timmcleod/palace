@@ -99,6 +99,7 @@ import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { dragEdge } from "./lib/resize.js";
 import { useShortcuts } from "./lib/shortcuts.js";
+import { useTerminalPanel } from "./lib/terminalPanel.js";
 import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
@@ -949,85 +950,21 @@ async function onFileRenamed({ from, to }) {
 
 // --- Terminal panel ----------------------------------------------------------------
 
-// The terminal panel below the history and details, loaded the first time it's opened.
-// Opening it for a repository with no terminals starts one.
+// The terminal panel below the history and details, loaded the first time it's opened,
+// and the notices that a terminal's program finished or needs you: see terminalPanel.js.
 const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
-const terminalOpen = ref(false);
-const terminalLoaded = ref(false);
-// Whether a terminal tab has finished or needs you since you last looked, so the hidden
-// panel's button can say so.
-const terminalUnseen = ref(false);
-const terminalPanel = ref(null);
-
-// Terminals a page started before it reloaded have nothing to show them any more.
-invoke("terminal_close_all").catch(() => {});
-
-function toggleTerminal() {
-  if (!overview.value) return;
-  if (terminalOpen.value) terminalOpen.value = false;
-  else showTerminal();
-}
-
-// Shows the panel, starting a terminal if the repository has none, or with `newTab`,
-// whatever it has, in `folder` inside the repository if given. The first, unless it's
-// for a folder, is the agent, as Settings has it by default, where it's installed.
-async function showTerminal({ newTab = false, folder = "" } = {}) {
-  if (!overview.value) return;
-  terminalOpen.value = true;
-  terminalLoaded.value = true;
-  const path = overview.value.path;
-  const { agentCommand, missingAgent, openTerminal, tabsFor } = await import("./lib/terminals.js");
-  if (!newTab && tabsFor(path).tabs.length) return terminalPanel.value?.focus();
-  if (!newTab && !folder && settings.terminalStartsAgent) {
-    const command = agentCommand(path);
-    // Not installed, it's a shell: the agent's button says how to install it.
-    const ready = !(await missingAgent(command));
-    // Opened meanwhile, as by a second press while that was asked, it isn't again.
-    if (tabsFor(path).tabs.length || overview.value?.path !== path) return terminalPanel.value?.focus();
-    if (ready) return openTerminal(path, { command, kind: "agent" });
-  }
-  openTerminal(path, { folder });
-}
-
-// Notices that a terminal's program finished or needs you, sent here by whichever
-// window it's in (see notify in terminals.js), since this is the one you're in. One
-// waiting on you stays a minute, others a few seconds; the tab keeps its mark longer.
-const terminalNotices = ref([]);
-let nextNotice = 1;
-const unlistenNotice = thisWindow.listen("notice", ({ payload }) => {
-  const id = nextNotice++;
-  const others = terminalNotices.value.filter((n) => n.window !== payload.window || n.key !== payload.key);
-  terminalNotices.value = [...others, { ...payload, id }].slice(-3);
-  setTimeout(() => dismissNotice({ id }), payload.state === "blocked" ? 60000 : 12000);
-});
-onBeforeUnmount(() => unlistenNotice.then((unlisten) => unlisten()));
-
-function dismissNotice({ id }) {
-  terminalNotices.value = terminalNotices.value.filter((n) => n.id !== id);
-}
-
-// Brings the notice's tab forward: here, or in its own window, which comes forward.
-function openNotice(notice) {
-  dismissNotice(notice);
-  if (notice.window === thisWindow.label) showTerminalTab(notice);
-  else invoke("show_terminal_tab", { label: notice.window, path: notice.path, key: notice.key }).catch(() => {});
-}
-const unlistenShowTab = thisWindow.listen("show-terminal-tab", ({ payload }) => showTerminalTab(payload));
-onBeforeUnmount(() => unlistenShowTab.then((unlisten) => unlisten()));
-
-// Shows the terminal tab `key` of the repository at `path`, opening the repository
-// first if another's showing.
-async function showTerminalTab({ path, key }) {
-  if (overview.value?.path !== path) await loadRepository(path);
-  if (overview.value?.path !== path) return;
-  terminalOpen.value = true;
-  terminalLoaded.value = true;
-  const { tabsFor } = await import("./lib/terminals.js");
-  const group = tabsFor(path);
-  if (group.tabs.some((tab) => tab.key === key)) group.active = key;
-  await nextTick();
-  terminalPanel.value?.focus();
-}
+const {
+  open: terminalOpen,
+  loaded: terminalLoaded,
+  unseen: terminalUnseen,
+  panel: terminalPanel,
+  toggle: toggleTerminal,
+  show: showTerminal,
+  pasteToAgent,
+  notices: terminalNotices,
+  dismissNotice,
+  openNotice,
+} = useTerminalPanel({ overview, loadRepository: (path) => loadRepository(path), window: thisWindow });
 
 // --- Quitting and closing the window -----------------------------------------------
 
@@ -1099,23 +1036,6 @@ async function sendReview() {
   } finally {
     sendingReview.value = false;
   }
-}
-
-// Puts `text` in the prompt of the repository's agent, showing the terminal panel, and
-// says whether it could.
-async function pasteToAgent(text) {
-  const path = overview.value?.path;
-  if (!path) return false;
-  terminalOpen.value = true;
-  terminalLoaded.value = true;
-  const { sendToAgent } = await import("./lib/terminals.js");
-  const tab = await sendToAgent(path, text);
-  if (!tab) {
-    tell("Couldn't Reach the Agent", "The agent tab's agent didn't start. Check the agent tab for why, then try again.");
-    return false;
-  }
-  terminalPanel.value?.focus();
-  return true;
 }
 
 async function clearReview() {
