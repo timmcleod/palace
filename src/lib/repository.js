@@ -18,7 +18,8 @@ import { NOT_A_REPOSITORY, isError } from "./errors.js";
  *   onOpenFailed(path, error)      the one chosen couldn't open, and the one showing
  *                                  stays
  * Returns folderGone, whether the one showing's folder has gone, as removed or moved,
- * loadRepository and refresh.
+ * loadRepository, refresh, and loadsStarted, for telling which overviews were read
+ * after something happened (each has `readAt`).
  */
 export function useRepository({ overview, loading, error, refreshKey, listsFiles, onSwitch, onLoaded, onNotRepository, onOpenFailed }) {
   // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
@@ -39,6 +40,8 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
 
     try {
       const data = await invoke("repo_overview", { path, files: listsFiles.value });
+      // When it was read, as against what else happened meanwhile (see lostCommits.js).
+      data.readAt = seq;
       if (seq !== loadSeq) return;
       // With another refresh to follow, as for files just staged, the files this one read
       // may be from before: they wait for it, rather than undo what the list shows.
@@ -116,5 +119,9 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
   window.addEventListener("focus", refresh);
   onBeforeUnmount(() => window.removeEventListener("focus", refresh));
 
-  return { folderGone, loadRepository, refresh };
+  // How many loads have started, so far: an overview's readAt is the count as its own
+  // started.
+  const loadsStarted = () => loadSeq;
+
+  return { folderGone, loadRepository, refresh, loadsStarted };
 }

@@ -102,6 +102,7 @@ import { useShortcuts } from "./lib/shortcuts.js";
 import { useTerminalPanel } from "./lib/terminalPanel.js";
 import { useRepository } from "./lib/repository.js";
 import { useGitRun } from "./lib/gitRun.js";
+import { useLostCommits } from "./lib/lostCommits.js";
 import { allAgentStates } from "./lib/agentStates.js";
 import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
@@ -599,6 +600,17 @@ function refreshAndFetch() {
   if (overview.value?.remotes.length && !remoteBusy.value) runRemote("fetch");
 }
 
+// Branches that lose commits outside this window, as to an agent's `git reset --hard`,
+// are said to have, with a way to have them back: see lostCommits.js.
+useLostCommits({
+  overview,
+  // Looked up when it's called: useRepository, which makes it, comes later.
+  loadsStarted: () => loadsStarted(),
+  busy: () => remoteBusy.value,
+  show: (card) => showStatus(card),
+  run: (...args) => runGit(...args),
+});
+
 // --- Background fetch --------------------------------------------------------------
 
 // See backgroundFetch.js. Whatever the user runs stops a background fetch first.
@@ -1021,7 +1033,7 @@ async function clearReview() {
 
 // Opening the repository, and refreshing it as it changes: see repository.js. What's
 // here is what the window does around it.
-const { folderGone, loadRepository, refresh } = useRepository({
+const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
   overview,
   loading,
   error,

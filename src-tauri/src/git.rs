@@ -45,6 +45,8 @@ pub struct LocalBranch {
     /// The folder of another worktree it's checked out in, which keeps it from being
     /// checked out here.
     worktree: Option<String>,
+    /// The commit it's at, so the page can tell when it moves (see lost.rs).
+    tip: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -189,6 +191,7 @@ fn read_local_branches(repo: &Repository) -> Result<Vec<LocalBranch>, git2::Erro
             ahead,
             behind,
             worktree: None,
+            tip: branch.get().target().map(|oid| oid.to_string()),
         });
     }
 

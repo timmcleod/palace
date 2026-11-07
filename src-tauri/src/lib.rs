@@ -12,6 +12,7 @@ mod history;
 mod issues;
 mod drop;
 mod keys;
+mod lost;
 mod markdown;
 mod notify;
 mod open;
@@ -144,6 +145,7 @@ pub fn run() {
             keys::alt_held,
             drop::save_dropped_file,
             markdown::render_markdown,
+            lost::commits_left_behind,
 
             notify::can_notify,
             notify::notify_tab,

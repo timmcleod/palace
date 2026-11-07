@@ -37,8 +37,8 @@ pub async fn checkout(path: String, kind: String, name: String) -> Result<String
     }
 }
 
-/// How many commits a detached HEAD has that no branch, tag or remote branch has:
-/// what checking out something else would leave behind.
+/// How many commits a detached HEAD has that nothing else keeps (no branch, tag, remote
+/// branch, stash or other worktree): what checking out something else would leave behind.
 #[tauri::command]
 pub async fn commits_only_at_head(path: String) -> Result<usize, String> {
     let repo = open(&path)?;
@@ -46,15 +46,8 @@ pub async fn commits_only_at_head(path: String) -> Result<usize, String> {
         return Ok(0);
     }
     let head = repo.head().ok().and_then(|h| h.target()).ok_or("HEAD doesn't point at a commit.")?;
-    let mut walk = repo.revwalk().map_err(|e| e.message().to_string())?;
-    walk.push(head).map_err(|e| e.message().to_string())?;
-    for reference in repo.references().map_err(|e| e.message().to_string())?.flatten() {
-        let kept = reference.is_branch() || reference.is_tag() || reference.is_remote();
-        if let Some(id) = kept.then(|| reference.peel_to_commit().ok()).flatten().map(|c| c.id()) {
-            walk.hide(id).map_err(|e| e.message().to_string())?;
-        }
-    }
-    Ok(walk.count())
+    // What nothing else keeps: as a branch's lost commits are counted (see lost.rs).
+    crate::lost::unkept(&repo, head, false, usize::MAX).map_err(|e| e.message().to_string())
 }
 
 /// Checks out a remote branch as a local branch of the same name that tracks it,
