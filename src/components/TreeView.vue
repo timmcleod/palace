@@ -15,6 +15,7 @@ import { settings } from "../lib/settings.js";
 import { ChevronRight, CircleAlert, UserRoundSearch } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
 import { useWindowed } from "../lib/windowed.js";
+import { treeKey } from "../lib/treeKeys.js";
 
 // Every file as it was at a commit: a folder tree on top, the chosen file below.
 const props = defineProps({
@@ -155,8 +156,32 @@ const treeList = ref(null);
 const { spacer: treeSpacer, rows: shownRows, top: shownTop, height: treeHeight, scrollToRow } = useWindowed(treeList, rows, 26);
 
 function activate(row) {
+  cursor.value = row.path;
   if (row.kind === "dir") toggle(row.path);
   else if (row.kind !== "submodule") openFile(row.path);
+}
+
+// --- Keys -------------------------------------------------------------------------
+// The arrows move through the tree as in the Files view (see treeKeys.js).
+
+// The row the keys act on: the open file's, until they move.
+const cursor = ref(null);
+watch(selected, (file) => (cursor.value = file));
+
+function moveTo(row) {
+  cursor.value = row.path;
+  nextTick(() => scrollToRow(rows.value.indexOf(row)));
+}
+
+function onKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const all = rows.value;
+  const action = treeKey(event.key, all, all.findIndex((r) => r.path === cursor.value), (row) => expanded.has(row.path));
+  if (!action) return;
+  event.preventDefault();
+  if (action.move) moveTo(action.move);
+  else if (action.toggle) toggle(action.toggle.path);
+  else if (action.activate) activate(action.activate);
 }
 
 const lines = computed(() => {
@@ -183,7 +208,7 @@ watch(
 
 <template>
   <div class="tree-view">
-    <div ref="treeList" class="tree-list">
+    <div ref="treeList" class="tree-list tree" tabindex="0" @keydown="onKeydown">
       <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
       <div ref="treeSpacer" :style="{ height: `${treeHeight}px` }">
         <div :style="{ transform: `translateY(${shownTop}px)` }">
@@ -191,7 +216,7 @@ watch(
             v-for="row in shownRows"
             :key="row.path"
             class="tree-row"
-            :class="{ selected: row.path === selected, muted: row.kind === 'submodule' }"
+            :class="{ selected: row.path === selected, cursor: row.path === cursor, muted: row.kind === 'submodule' }"
             :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
             :title="row.kind === 'submodule' ? 'A submodule: a separate repository' : row.path"
             @click="activate(row)"
@@ -267,43 +292,6 @@ watch(
   border-bottom: 1px solid var(--border);
 }
 
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding-right: 10px;
-  white-space: nowrap;
-}
-
-.tree-row:hover {
-  background: var(--row-hover);
-}
-
-.tree-row.selected {
-  background: var(--row-selected);
-}
-
-.tree-row.muted {
-  color: var(--text-tertiary);
-}
-
-.chevron {
-  flex-shrink: 0;
-  width: 14px;
-  color: var(--text-tertiary);
-  transition: transform 0.1s;
-}
-
-.chevron.open {
-  transform: rotate(90deg);
-}
-
-
-.name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 .viewer {
   flex: 1;

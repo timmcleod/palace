@@ -312,6 +312,62 @@ textarea,
   background: var(--row-selected);
 }
 
+/* A tree of files and folders, as the Files view's and a commit's Files tab: its rows
+   in a list with the class "tree", which the arrow keys move through (see treeKeys.js).
+   While the list has the keys, the row they're on has a bar down its edge, and a tint
+   when it isn't the open file. A view sets the list's own size and place. */
+.tree:focus {
+  outline: none;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding-right: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tree-row:hover {
+  background: var(--row-hover);
+}
+
+.tree-row.selected {
+  background: var(--row-selected);
+}
+
+.tree:focus .tree-row.cursor {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.tree:focus .tree-row.cursor:not(.selected) {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.tree-row.muted {
+  color: var(--text-tertiary);
+}
+
+.tree-row .chevron {
+  flex-shrink: 0;
+  width: 14px;
+  color: var(--text-tertiary);
+  transition: transform 0.1s;
+}
+
+.tree-row .chevron.open {
+  transform: rotate(90deg);
+}
+
+.tree-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* While a pane's edge is dragged to resize it, nothing's selected as the pointer
    crosses text, and the resizing cursor stays wherever the pointer is. */
 body.resizing,

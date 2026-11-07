@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
 import { useWindowed } from "../lib/windowed.js";
+import { treeKey } from "../lib/treeKeys.js";
 import { focusOnOpen, isUnsaved } from "../lib/editing.js";
 import { fileManager } from "../lib/platform.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
@@ -284,9 +285,7 @@ function activate(row) {
 }
 
 // --- Keys -------------------------------------------------------------------------
-// The arrows move through the tree, as in a file manager: Up and Down from row to row,
-// Right opens a folder or steps into it, Left closes it or steps out to its folder.
-// Enter or Space opens a file.
+// The arrows move through the tree, as in a file manager (see treeKeys.js).
 
 // The row the keys act on: the open file's, until they move.
 const cursor = ref(null);
@@ -305,35 +304,17 @@ const { spacer, rows: shownRows, top: shownTop, height: listHeight, scrollToRow 
 function onKeydown(event) {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const all = rows.value;
-  if (!all.length) return;
-  const at = all.findIndex((r) => r.path === cursor.value);
-  const row = all[at];
-  const keys = {
-    ArrowDown: () => moveTo(all[at < 0 ? 0 : Math.min(at + 1, all.length - 1)]),
-    ArrowUp: () => moveTo(all[at < 0 ? 0 : Math.max(at - 1, 0)]),
-    Home: () => moveTo(all[0]),
-    End: () => moveTo(all.at(-1)),
-    ArrowRight: () => {
-      if (row?.kind !== "dir") return;
-      if (!view.value.expanded.has(row.path)) toggle(row.path);
-      else if (all[at + 1]?.depth > row.depth) moveTo(all[at + 1]);
-    },
-    ArrowLeft: () => {
-      if (!row) return;
-      if (row.kind === "dir" && view.value.expanded.has(row.path)) toggle(row.path);
-      else moveTo(all.find((r) => r.path === folderOf(row.path)));
-    },
-    Enter: () => row && activate(row),
-    " ": () => row && activate(row),
-  };
-  if (!keys[event.key]) return;
+  const action = treeKey(event.key, all, all.findIndex((r) => r.path === cursor.value), (row) => view.value.expanded.has(row.path));
+  if (!action) return;
   event.preventDefault();
-  keys[event.key]();
+  if (action.move) moveTo(action.move);
+  else if (action.toggle) toggle(action.toggle.path);
+  else if (action.activate) activate(action.activate);
 }
 </script>
 
 <template>
-  <div ref="list" class="file-tree" tabindex="0" @contextmenu="listMenu" @keydown="onKeydown">
+  <div ref="list" class="file-tree tree" tabindex="0" @contextmenu="listMenu" @keydown="onKeydown">
     <p v-if="error" class="message"><CircleAlert :size="15" /> {{ error }}</p>
     <div ref="spacer" :style="{ height: `${listHeight}px` }">
       <div :style="{ transform: `translateY(${shownTop}px)` }">
@@ -369,60 +350,6 @@ function onKeydown(event) {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 0;
-}
-
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding-right: 12px;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.tree-row:hover {
-  background: var(--row-hover);
-}
-
-.tree-row.selected {
-  background: var(--row-selected);
-}
-
-.file-tree:focus {
-  outline: none;
-}
-
-/* Where the keys are, while the tree has them: a bar down the row's edge, and a tint
-   when it isn't on the open file. */
-.file-tree:focus .tree-row.cursor {
-  box-shadow: inset 2px 0 var(--accent);
-}
-
-.file-tree:focus .tree-row.cursor:not(.selected) {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-}
-
-.tree-row.muted {
-  color: var(--text-tertiary);
-}
-
-.chevron {
-  flex-shrink: 0;
-  width: 14px;
-  color: var(--text-tertiary);
-  transition: transform 0.1s;
-}
-
-.chevron.open {
-  transform: rotate(90deg);
-}
-
-.name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Changed files' names take their status's color, as in the Working Copy. */
