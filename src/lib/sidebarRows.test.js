@@ -141,6 +141,23 @@ describe("sidebarSections", () => {
     });
   });
 
+  test("marks each worktree with what its agent's doing, in whichever window", () => {
+    const repo = overview({
+      worktrees: [
+        { path: "/code/repo", branch: "main", main: true, current: true },
+        { path: "/code/repo-a", branch: "a" },
+        { path: "/code/repo-b", branch: "b" },
+      ],
+    });
+    const agents = { "/code/repo-a": "blocked", "/code/repo-b": "something new" };
+    const [main, a, b] = section(sidebarSections(repo, { agents }), "worktrees").rows;
+    expect(main.agent).toBeNull();
+    expect(a.agent).toBe("blocked");
+    expect(a.title).toContain("Its agent needs you");
+    // A state it doesn't know shows nothing.
+    expect(b.agent).toBeNull();
+  });
+
   test("names worktrees by folder, beside their branch, saying when the folder's gone", () => {
     const repo = overview({
       worktrees: [

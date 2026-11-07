@@ -1,5 +1,5 @@
 import { shellEscape } from "./shell.js";
-import { markRaw, reactive } from "vue";
+import { markRaw, reactive, watch } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -10,6 +10,7 @@ import "@xterm/xterm/css/xterm.css";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { isMac } from "./platform.js";
+import { askConfirm } from "./overlays.js";
 import { settings } from "./settings.js";
 import { OSC, SUPPORTED_REPLY, applyReport, describe, dropRunning, parseReport, summarize } from "./programStatus.js";
 
@@ -43,11 +44,33 @@ export function tabsFor(path) {
 
 // Which agent a repository's agent tabs run, and what they're called: see agents.js.
 export { AGENTS, agentCommand, agentName, DEFAULT_AGENT_COMMAND, setAgentCommand } from "./agents.js";
-import { AGENTS, agentCommand, agentName, agentNamed, agentOfProgram } from "./agents.js";
+import { morePressing } from "./agentStates.js";
+import { AGENTS, agentCommand, agentName, agentNamed, agentOfProgram, programOf, taskCommand } from "./agents.js";
+export { programOf };
 
-/** The program a command runs: its first word, after any VAR=value settings. */
-export function programOf(command) {
-  return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
+/**
+ * Says `agent` isn't installed, how to install it, and offers to type its installer
+ * into a new terminal in the repository at `path`, for the user to run; `then` is what
+ * to do once it's installed. `repositoryCommand`: the agent is the repository's agent
+ * command's, which can be changed, rather than one picked for a tab. Resolves to whether
+ * the installer was typed. As for an agent tab, or New Task, wanting an agent that isn't
+ * here.
+ */
+export async function offerInstall(path, agent, { then, repositoryCommand = true } = {}) {
+  const install = await askConfirm({
+    title: `${agent.title} Isn't Installed`,
+    message: [
+      `${agent.name} tabs run ${agent.title}, which isn't installed here yet. Its installer, for macOS and Linux, is:`,
+      agent.install,
+      `Palace can type it into a terminal for you to run. Other ways to install it are at ${agent.setup}. Once it's installed, ${then ?? `open a ${agent.name} tab again`}.`,
+      repositoryCommand && "To use another agent instead, change the agent command in the terminal panel's ⋯ menu.",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    confirmLabel: "Install in Terminal",
+  });
+  if (install) openTerminal(path, { input: agent.install });
+  return install;
 }
 
 /**
@@ -134,7 +157,7 @@ new MutationObserver(() => {
  * `input` is typed too, but left for the user to run. The shell starts in `folder`
  * inside the repository, or at its top.
  */
-export function openTerminal(path, { command = null, input = null, kind = "shell", folder = "" } = {}) {
+export function openTerminal(path, { command = null, input = null, kind = "shell", folder = "", task = null } = {}) {
   const group = tabsFor(path);
   const term = new Terminal({
     fontFamily: 'ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace',
@@ -178,6 +201,7 @@ export function openTerminal(path, { command = null, input = null, kind = "shell
     command,
     input,
     folder,
+    task,
     started: false,
     typed: [],
     front: null,
@@ -216,7 +240,7 @@ export async function startTab(path, tab) {
   exited.onmessage = () => removeTab(path, tab);
   try {
     const cwd = session.folder ? `${path}/${session.folder}` : path;
-    tab.id = await invoke("terminal_open", { path: cwd, cols: session.term.cols, rows: session.term.rows, output, exited });
+    tab.id = await invoke("terminal_open", { path: cwd, cols: session.term.cols, rows: session.term.rows, output, exited, task: session.task });
   } catch (e) {
     session.term.write(`\r\n${e}\r\n`);
     return;
@@ -228,12 +252,11 @@ export async function startTab(path, tab) {
 }
 
 /**
- * Puts `text` in the prompt of the repository's agent, as if pasted: in the agent tab
- * showing, or else the last one opened, or else a new one, once its agent has started.
- * It's left there for the user to send, unless `submit`, as for a task given in New
- * Task. Resolves to the tab, or null if a new agent never started.
+ * Puts `text` in the prompt of the repository's agent, as if pasted, without sending
+ * it: in the agent tab showing, or else the last one opened, or else a new one, once
+ * its agent has started. Resolves to the tab, or null if a new agent never started.
  */
-export async function sendToAgent(path, text, { submit = false } = {}) {
+export async function sendToAgent(path, text) {
   const group = tabsFor(path);
   const agents = group.tabs.filter((tab) => tab.kind === "agent");
   let tab = agents.find((t) => t.key === group.active) ?? agents.at(-1);
@@ -244,12 +267,26 @@ export async function sendToAgent(path, text, { submit = false } = {}) {
     if (!(await agentStarted(tab))) return null;
   }
   pasteInto(tab, text);
-  if (submit) {
-    // Enter on its own, a moment after: in the paste, it would be part of the text.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    type(tab, "\r");
-  }
   return tab;
+}
+
+/**
+ * Starts the repository's agent on `task`, as New Task does, and resolves to how:
+ * "started", given it as it starts (see taskCommand), so it's working at once; "pasted",
+ * put in its prompt for the user to send, for an agent Palace can't give one to that way;
+ * { missing: agent }, not installed here; or null, when that agent never started.
+ */
+export async function startAgentOn(path, task) {
+  const agentCommandHere = agentCommand(path);
+  // Not installed, its command would only say "command not found".
+  const missing = await missingAgent(agentCommandHere);
+  if (missing) return { missing };
+  const command = taskCommand(agentCommandHere);
+  if (command) {
+    openTerminal(path, { command, kind: "agent", task: withoutControls(task) });
+    return "started";
+  }
+  return (await sendToAgent(path, task)) ? "pasted" : null;
 }
 
 // Pasted as a terminal pastes, marked as a paste for programs that ask, as agents do,
@@ -592,6 +629,41 @@ function withdrawNotifications(tab) {
   if (!isMac) invoke("withdraw_notifications", { key: tab.key }).catch(() => {});
 }
 window.addEventListener("focus", markSeen);
+
+// --- Each repository's agents, for every window --------------------------------------
+// One state for each repository's terminals, the most pressing of its tabs' (see
+// agentStates.js). Each window says what its own are (see windows.rs), so every
+// window's Worktrees can show which worktree's agent is busy or wants you.
+
+function tabState(tab) {
+  const state = tab.status?.state;
+  if (state === "working" || state === "blocked") return state;
+  if (tab.unseen && (state === "done" || state === "error")) return state;
+  return null;
+}
+
+/** Each repository's agents' state, by path, leaving out those with none. */
+export function repositoryStates() {
+  const states = {};
+  for (const [path, group] of Object.entries(terminals)) {
+    for (const tab of group.tabs) {
+      const state = tabState(tab);
+      if (state) states[path] = morePressing(states[path] ?? null, state);
+    }
+  }
+  return states;
+}
+
+// Said again only when it's changed.
+let reported = "{}";
+watch(repositoryStates, (states) => {
+  const now = JSON.stringify(states);
+  if (now === reported) return;
+  // Not sent, it's tried again with the next change.
+  invoke("set_agent_states", { states })
+    .then(() => (reported = now))
+    .catch(() => {});
+});
 
 // A program that's ended can't still be working or waiting, whatever it last said:
 // once only the shell's left, those records go.

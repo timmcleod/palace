@@ -37,6 +37,9 @@ const props = defineProps({
   // The row of a branch being checked out, shown as current, with a spinner, until
   // the switch is done.
   switching: { type: String, default: null },
+  // What each repository's agents are doing, by path, for its worktree's row: "working",
+  // "blocked", "done" or "error" (see repositoryStates in terminals.js).
+  agents: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits([
   "update:selected",
@@ -75,6 +78,7 @@ const sections = computed(() =>
     olderTagsOpen: olderTagsOpen.value,
     issues: props.issues,
     pulls: props.pulls,
+    agents: props.agents,
     order: branchOrder(props.overview.path),
     dividers: dividerRows(props.overview.path),
   }),
@@ -417,6 +421,9 @@ function onRowClick(row, event) {
               <span v-if="row.detail" class="row-detail">{{ row.detail }}</span>
               <Lock v-if="row.locked" :size="12" class="row-mark" />
               <FolderGit2 v-if="row.elsewhere" :size="13" class="row-mark" />
+              <!-- A worktree's agent, in whichever window: as its terminal tab shows it. -->
+              <Spinner v-if="row.agent === 'working'" :size="12" class="agent-mark" />
+              <span v-else-if="row.agent" class="agent-mark agent-dot" :class="row.agent" />
 
               <Spinner v-if="row.key === switching" :size="13" class="switching" />
               <span v-else-if="row.head || row.ahead || row.behind" class="pill">
@@ -785,6 +792,24 @@ function onRowClick(row, event) {
 .row-mark {
   flex-shrink: 0;
   color: var(--text-tertiary);
+}
+
+.agent-mark {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+/* As a terminal tab's mark: finished, or needs you, and red for an error. */
+.agent-dot {
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.agent-dot.error {
+  background: var(--danger);
 }
 
 .row.gone .row-label {

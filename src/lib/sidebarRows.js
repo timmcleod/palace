@@ -15,13 +15,14 @@ export const OLDER_TAGS = "tags-older:";
  *   olderTagsOpen  whether the Older tags are showing
  *   issues         { count, fresh } for the Issues row, or null for none
  *   pulls          { count } for the Pull Requests row, or null for none
+ *   agents         what each repository's agents are doing, by path, for its worktree
  *   order          the keys of the branches in the order they've been dragged into
  *   dividers       the dividers between them, as rows (see branchOrder.js)
  * A row is { key, label, depth, icon, … }: see the template in Sidebar.vue for the rest.
  * Worktrees, stashes and submodules show only when there are some.
  */
 export function sidebarSections(overview, view) {
-  const { query = "", collapsed = new Set(), olderTagsOpen = false, issues = null, pulls = null, order = [], dividers = [] } = view;
+  const { query = "", collapsed = new Set(), olderTagsOpen = false, issues = null, pulls = null, agents = {}, order = [], dividers = [] } = view;
   const matches = (name) => !query || name.toLowerCase().includes(query);
   // While filtering, every folder opens so matches nested inside them stay visible.
   const isOpen = (key) => query !== "" || !collapsed.has(key);
@@ -30,7 +31,7 @@ export function sidebarSections(overview, view) {
   return [
     { id: "workspace", title: "Workspace", rows: workspaceRows(overview, issues, pulls) },
     { id: "branches", title: "Branches", rows: branchRows(overview, views, query ? [] : dividers, order) },
-    { id: "worktrees", title: "Worktrees", rows: worktreeRows(overview, views), optional: true },
+    { id: "worktrees", title: "Worktrees", rows: worktreeRows(overview, views, agents), optional: true },
     { id: "tags", title: "Tags", rows: tagRows(overview, views, query, olderTagsOpen) },
     { id: "remotes", title: "Remotes", rows: remoteRows(overview, views, query) },
     { id: "stashes", title: "Stashes", rows: stashRows(overview, views), optional: true },
@@ -153,9 +154,17 @@ function submoduleRows(overview, { matches }) {
     .map((s) => ({ key: `submodule:${s.path}`, label: s.name, icon: Package, depth: 0, title: s.path }));
 }
 
+// What a worktree's agent doing says, in its row's tooltip.
+const AGENT_SAYS = {
+  working: "Its agent is working",
+  blocked: "Its agent needs you",
+  done: "Its agent has finished",
+  error: "Its agent stopped with an error",
+};
+
 // The repository's worktrees, its own first: each named for its folder, beside the
-// branch checked out in it.
-function worktreeRows(overview, { matches }) {
+// branch checked out in it, and what its agent is doing, in any window.
+function worktreeRows(overview, { matches }, agents) {
   return (overview.worktrees ?? [])
     .filter((w) => matches(w.path) || (w.branch && matches(w.branch)))
     .map((w) => ({
@@ -167,7 +176,14 @@ function worktreeRows(overview, { matches }) {
       current: w.current,
       locked: w.locked,
       gone: w.prunable,
-      title: [w.path, w.main && "The repository's own working copy", w.locked && "Locked", w.prunable && "Its folder is gone: Prune Worktrees forgets it"]
+      agent: AGENT_SAYS[agents[w.path]] ? agents[w.path] : null,
+      title: [
+        w.path,
+        AGENT_SAYS[agents[w.path]],
+        w.main && "The repository's own working copy",
+        w.locked && "Locked",
+        w.prunable && "Its folder is gone: Prune Worktrees forgets it",
+      ]
         .filter(Boolean)
         .join("\n"),
     }));

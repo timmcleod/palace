@@ -231,6 +231,8 @@ pub fn run() {
             windows::show_notice,
             windows::show_terminal_tab,
             windows::window_showing,
+            windows::set_agent_states,
+            windows::agent_states,
             windows::folder_exists,
             windows::new_window,
 

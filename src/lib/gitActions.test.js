@@ -3,6 +3,8 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openPullDialog } from "./overlays.js";
 import { CANCELED } from "./errors.js";
+import { draftFor } from "./drafts.js";
+import { agentCommand, setAgentCommand } from "./agents.js";
 import { useGitActions } from "./gitActions.js";
 
 // The backend answers nothing unless a test says otherwise; github.js asks it as it loads.
@@ -35,11 +37,11 @@ const branch = (name, more = {}) => ({ name, is_head: false, upstream: null, wor
 
 // The actions on `repo(parts)`, with what they run recorded. Each command succeeds
 // unless `fails` says what it fails with.
-function actionsOn(parts = {}, { fails = {} } = {}) {
+function actionsOn(parts = {}, { fails = {}, agentReady = async () => true } = {}) {
   const run = vi.fn(async (_titles, command) => fails[command] ?? null);
   const openWorktree = vi.fn();
   const compare = vi.fn();
-  const actions = useGitActions({ overview: ref(repo(parts)), run, compare, openWorktree, pullRequest: { available: () => false } });
+  const actions = useGitActions({ overview: ref(repo(parts)), run, compare, openWorktree, agentReady, pullRequest: { available: () => false } });
   // Each command run, as [command, args].
   const ran = () => run.mock.calls.map(([, command, args]) => [command, args]);
   return { actions, run, ran, openWorktree, compare };
@@ -227,6 +229,15 @@ describe("worktrees", () => {
     expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: ["window-2"], force: false }]]);
   });
 
+  test("removing one forgets the agent command New Task gave it", async () => {
+    const other = worktree("/code/palace-feature", { branch: "feature" });
+    setAgentCommand(other.path, "codex");
+    const { actions } = actionsOn({ worktrees: [main, other] });
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await item(actions.worktreeMenu(other.path), "Remove…").action();
+    expect(agentCommand(other.path)).not.toBe("codex");
+  });
+
   test("removing one with changes forces it, once that's been said", async () => {
     const other = worktree("/code/palace-feature", { branch: "feature" });
     const { actions, ran } = actionsOn({ worktrees: [main, other] });
@@ -282,6 +293,24 @@ describe("a new task", () => {
     await failing.actions.newTask();
     expect(failing.openWorktree).not.toHaveBeenCalled();
     expect(openWorktree).not.toHaveBeenCalled();
+    // What was typed waits for the next try.
+    expect(draftFor(`new-task:${repo().path}`)).toMatchObject({ task: "Anything" });
+  });
+
+  test("asks nothing, and makes nothing, when the agent can't start", async () => {
+    const { actions, run } = actionsOn({ worktrees: [main] }, { agentReady: async () => false });
+    await actions.newTask();
+    expect(openForm).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("gives the worktree the agent this repository runs", async () => {
+    setAgentCommand(repo().path, "codex --full-auto");
+    const { actions } = actionsOn({ worktrees: [main] });
+    vi.mocked(openForm).mockResolvedValue({ task: "Anything", name: "agent-task", location: "/code" });
+    await actions.newTask();
+    expect(agentCommand("/code/palace-agent-task")).toBe("codex --full-auto");
+    setAgentCommand(repo().path, "");
   });
 
   test("is offered in the + menu and on Worktrees", () => {

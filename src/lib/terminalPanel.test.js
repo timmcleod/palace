@@ -23,6 +23,8 @@ vi.mock("./terminals.js", () => ({
   missingAgent: vi.fn(async () => null),
   openTerminal: vi.fn((path, options) => tabsFor(path).tabs.push({ key: tabsFor(path).tabs.length + 1, ...options })),
   sendToAgent: vi.fn(async () => ({ key: 1 })),
+  startAgentOn: vi.fn(async () => "started"),
+  offerInstall: vi.fn(async () => false),
 }));
 
 // A window that events can be sent to, as from another window or the backend.
@@ -54,6 +56,8 @@ const opened = () => vi.mocked(terminals.openTerminal).mock.calls.map(([path, op
 const settle = () => new Promise((resolve) => setTimeout(resolve));
 
 beforeEach(() => {
+  vi.mocked(tell).mockClear();
+  vi.mocked(terminals.offerInstall).mockClear();
   for (const path of Object.keys(groups)) delete groups[path];
   vi.mocked(terminals.openTerminal).mockClear();
   vi.mocked(terminals.missingAgent).mockReset().mockResolvedValue(null);
@@ -197,4 +201,53 @@ test("stops listening once the window's page goes", async () => {
   await settle();
   expect(window.listening("notice")).toBe(false);
   expect(window.listening("show-terminal-tab")).toBe(false);
+});
+
+describe("a task", () => {
+  test("starts the agent on it, showing the panel", async () => {
+    const { startTask, open } = panelFor();
+    await startTask("Fix the login bug");
+    expect(terminals.startAgentOn).toHaveBeenLastCalledWith("/repo", "Fix the login bug");
+    expect(open.value).toBe(true);
+    expect(tell).not.toHaveBeenCalled();
+  });
+
+  test("put in the agent's prompt instead, for an agent Palace can't give one to, says to send it", async () => {
+    vi.mocked(terminals.startAgentOn).mockResolvedValueOnce("pasted");
+    await panelFor().startTask("Fix the login bug");
+    expect(tell).toHaveBeenCalledWith("Send the Task", expect.stringContaining("press Enter"));
+  });
+
+  test("with the agent not installed in its window, offers to install it, saying the task", async () => {
+    const claude = { name: "Claude", title: "Claude Code", program: "claude" };
+    vi.mocked(terminals.startAgentOn).mockResolvedValueOnce({ missing: claude });
+    await panelFor().startTask("Fix the login bug");
+    expect(terminals.offerInstall).toHaveBeenCalledWith("/repo", claude, { then: expect.stringContaining("Fix the login bug") });
+  });
+
+  test("gives the task back when the agent didn't start, so it isn't lost", async () => {
+    vi.mocked(terminals.startAgentOn).mockResolvedValueOnce(null);
+    await panelFor().startTask("Fix the login bug");
+    expect(tell).toHaveBeenCalledWith("Couldn't Reach the Agent", expect.stringContaining("Fix the login bug"));
+  });
+});
+
+describe("whether the agent can start", () => {
+  test("it can, where it's installed", async () => {
+    expect(await panelFor().agentReady()).toBe(true);
+    expect(terminals.offerInstall).not.toHaveBeenCalled();
+  });
+
+  test("not, where it isn't: installing it's offered, and the panel shows the installer typed", async () => {
+    const claude = { name: "Claude", title: "Claude Code", program: "claude" };
+    vi.mocked(terminals.missingAgent).mockResolvedValue(claude);
+    const { agentReady, open } = panelFor();
+    expect(await agentReady()).toBe(false);
+    expect(terminals.offerInstall).toHaveBeenCalledWith("/repo", claude, { then: "start the task again" });
+    expect(open.value).toBe(false);
+
+    vi.mocked(terminals.offerInstall).mockResolvedValueOnce(true);
+    expect(await agentReady()).toBe(false);
+    expect(open.value).toBe(true);
+  });
 });

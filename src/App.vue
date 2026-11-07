@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -101,6 +102,7 @@ import { useShortcuts } from "./lib/shortcuts.js";
 import { useTerminalPanel } from "./lib/terminalPanel.js";
 import { useRepository } from "./lib/repository.js";
 import { useGitRun } from "./lib/gitRun.js";
+import { allAgentStates } from "./lib/agentStates.js";
 import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
@@ -736,6 +738,8 @@ const actions = useGitActions({
     return r?.kind === "branch" && r.name !== overview.value?.head.branch ? r.name : null;
   },
   openWorktree,
+  // Looked up when it's called: the terminal panel, which makes it, comes later.
+  agentReady: () => agentReady(),
 });
 
 // Context menus for sidebar rows, keyed the same way the sidebar keys them.
@@ -834,6 +838,21 @@ const thisWindow = getCurrentWebviewWindow();
 const unlistenChanges = thisWindow.listen("repo-changed", () => refresh());
 onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 
+// What each repository's agents are doing, in every window, by path (see agentStates.js),
+// for Worktrees to show which is busy or wants you.
+const agentStates = ref({});
+// Listening first, then asking: a change sent meanwhile isn't overwritten by older news.
+let heardAgents = false;
+const unlistenAgents = listen("agent-states", ({ payload }) => {
+  heardAgents = true;
+  agentStates.value = allAgentStates(payload);
+});
+onBeforeUnmount(() => unlistenAgents.then((unlisten) => unlisten()));
+unlistenAgents
+  .then(() => invoke("agent_states"))
+  .then((byWindow) => heardAgents || (agentStates.value = allAgentStates(byWindow)))
+  .catch(() => {});
+
 const unlistenProgress = thisWindow.listen("remote-progress", (event) => {
   if (remoteOp.value?.state === "running") {
     remoteOp.value.line = event.payload.line;
@@ -903,6 +922,8 @@ const {
   toggle: toggleTerminal,
   show: showTerminal,
   pasteToAgent,
+  agentReady,
+  startTask,
   notices: terminalNotices,
   dismissNotice,
   openNotice,
@@ -1146,8 +1167,10 @@ async function checkGit() {
     const start = await invoke("window_start").catch(() => ({ repo: null, first: true }));
     const reopen = start.repo ?? (start.first ? recents.value[0]?.path : null);
     if (reopen) await loadRepository(reopen);
-    // Opened for a task (New Task): its agent starts on it.
-    if (start.task && overview.value?.path === reopen) pasteToAgent(start.task, { submit: true });
+    // Opened for a task (New Task): its agent starts on it, or, with the worktree not
+    // open after all, the task's given back, so it isn't lost.
+    if (start.task && overview.value) startTask(start.task);
+    else if (start.task) tell("Couldn't Start the Task", `Its worktree didn't open. The task was:\n\n${start.task}`);
   }
   starting.value = false;
 }
@@ -1287,6 +1310,7 @@ const breadcrumb = computed(() => {
       :compared="comparedKeys"
       :issues="showsIssues && hasIssues ? { count: openIssues, fresh: freshIssues } : null"
       :pulls="showsIssues && hasPulls ? { count: openPulls } : null"
+      :agents="agentStates"
       @compare="compareWith"
       @open-repository="chooseRepository"
       @menu="sidebarMenu"

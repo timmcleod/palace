@@ -70,14 +70,42 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
     panel.value?.focus();
   }
 
+  // Whether the repository's agent can be started, as before New Task makes a worktree
+  // for it. Where it isn't installed, that's said, with an offer to install it, shown in
+  // the panel.
+  async function agentReady() {
+    const path = overview.value?.path;
+    if (!path) return false;
+    const { agentCommand, missingAgent, offerInstall } = await terminals();
+    const agent = await missingAgent(agentCommand(path));
+    if (!agent) return true;
+    if (await offerInstall(path, agent, { then: "start the task again" })) reveal();
+    return false;
+  }
+
+  // Starts the repository's agent on `task`, showing the panel, as for a window opened
+  // by New Task. Where it can only be put in the agent's prompt, that's said; where the
+  // agent didn't start, the task's given back, so it isn't lost.
+  async function startTask(task) {
+    const path = overview.value?.path;
+    if (!path) return;
+    reveal();
+    const { offerInstall, startAgentOn } = await terminals();
+    const how = await startAgentOn(path, task);
+    if (how === "pasted") tell("Send the Task", "The task is in the agent's prompt. Check it, then press Enter to send it.");
+    else if (how?.missing) {
+      if (await offerInstall(path, how.missing, { then: `give it the task again: “${task}”` })) reveal();
+    } else if (!how) tell("Couldn't Reach the Agent", `The agent didn't start, so it hasn't the task. Check the agent tab for why. The task was:\n\n${task}`);
+  }
+
   // Puts `text` in the prompt of the repository's agent, showing the panel, and says
-  // whether it could. With `submit`, it's sent as well (see sendToAgent).
-  async function pasteToAgent(text, { submit = false } = {}) {
+  // whether it could.
+  async function pasteToAgent(text) {
     const path = overview.value?.path;
     if (!path) return false;
     reveal();
     const { sendToAgent } = await terminals();
-    const tab = await sendToAgent(path, text, { submit });
+    const tab = await sendToAgent(path, text);
     if (!tab) {
       tell("Couldn't Reach the Agent", "The agent tab's agent didn't start. Check the agent tab for why, then try again.");
       return false;
@@ -118,5 +146,5 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
     unlistenShowTab.then((unlisten) => unlisten());
   });
 
-  return { open, loaded, unseen, panel, toggle, show, showTab, pasteToAgent, notices, dismissNotice, openNotice };
+  return { open, loaded, unseen, panel, toggle, show, showTab, agentReady, startTask, pasteToAgent, notices, dismissNotice, openNotice };
 }

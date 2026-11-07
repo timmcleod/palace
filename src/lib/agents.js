@@ -26,9 +26,10 @@ export function setAgentCommand(path, command) {
 }
 
 // The agents Palace offers by name, in the terminal panel's ⋯ menu: Claude Code first,
-// the default. Each says how to install it, and what Shift+Enter types in its prompt to
-// start a new line rather than send: Esc then Enter for Claude Code, and Ctrl+J for
-// Codex and Gemini CLI.
+// the default. Each says how to install it, what Shift+Enter types in its prompt to
+// start a new line rather than send (Esc then Enter for Claude Code, and Ctrl+J for
+// Codex and Gemini CLI), and what its command line takes to start on a task, staying
+// open after, for New Task: "--" first, so a task can't be taken for an option.
 export const AGENTS = [
   {
     name: "Claude",
@@ -37,6 +38,8 @@ export const AGENTS = [
     install: "curl -fsSL https://claude.ai/install.sh | bash",
     setup: "https://code.claude.com/docs/en/setup",
     newline: "\x1b\r",
+    taskArgs: "--",
+    resumes: ["--resume", "-r", "--continue", "-c"],
   },
   {
     name: "Codex",
@@ -45,6 +48,8 @@ export const AGENTS = [
     install: "npm install -g @openai/codex",
     setup: "https://github.com/openai/codex",
     newline: "\n",
+    taskArgs: "--",
+    resumes: ["resume"],
   },
   {
     name: "Gemini",
@@ -53,8 +58,36 @@ export const AGENTS = [
     install: "npm install -g @google/gemini-cli",
     setup: "https://github.com/google-gemini/gemini-cli",
     newline: "\n",
+    // Without -i, Gemini CLI answers it and stops.
+    taskArgs: "-i",
   },
 ];
+
+/** The program a command runs: its first word, after any VAR=value settings. */
+export function programOf(command) {
+  return command.trim().split(/\s+/).find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? "";
+}
+
+// What would make the shell run the task's part of a command elsewhere, or not at all:
+// another command after it, a pipe, a redirect, a comment, a substitution.
+const SHELL_SYNTAX = /[;&|#<>`]|\$\(/;
+
+/**
+ * The agent `command`, as the repository's agent command, run to start on the task in
+ * $PALACE_TASK, for New Task (see terminal_open): given on its command line rather than
+ * typed into it, so it waits through whatever the agent asks first, such as whether to
+ * trust the new worktree's folder. The task itself isn't on the command line, where the
+ * shell would read it, only the variable, which it passes on as it is. Null for a command
+ * whose agent Palace doesn't know how to give one to, that resumes a session (each
+ * agent's `resumes`, after which a task would be taken for the session's name), or
+ * that's more than one command, where the task could go to another.
+ */
+export function taskCommand(command) {
+  const agent = AGENTS.find((a) => a.program === programOf(command));
+  if (!agent?.taskArgs || SHELL_SYNTAX.test(command)) return null;
+  if (command.trim().split(/\s+/).some((word) => agent.resumes?.includes(word))) return null;
+  return `${command.trim()} ${agent.taskArgs} "$PALACE_TASK"`;
+}
 
 /** The agent Palace offers by that name, such as "Codex", if it's one. */
 export const agentNamed = (name) => AGENTS.find((agent) => agent.name === name) ?? null;

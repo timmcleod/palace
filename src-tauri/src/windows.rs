@@ -42,6 +42,45 @@ pub fn window_start(window: WebviewWindow, windows: State<'_, Windows>) -> Start
     }
 }
 
+// --- Agents' states ---------------------------------------------------------------------
+// What each repository's agents are doing, as each window's terminals say (see
+// repositoryStates in terminals.js), kept by window and sent to every window as they
+// change, so each window's Worktrees can show which worktree's agent is working, needs
+// you, or finished while you were elsewhere. The page puts them together
+// (agentStates.js), so which state is most pressing is said in one place.
+
+/// Each window's agents' states, by repository.
+type AgentStates = HashMap<String, HashMap<String, String>>;
+static AGENT_STATES: std::sync::LazyLock<Mutex<AgentStates>> = std::sync::LazyLock::new(Default::default);
+
+fn send_agent_states(app: &AppHandle) {
+    let by_window = AGENT_STATES.lock().unwrap().clone();
+    let _ = app.emit("agent-states", by_window);
+}
+
+/// The window's agents' states, by repository, as they change: every window's are sent
+/// to all of them ("agent-states").
+#[tauri::command]
+pub fn set_agent_states(app: AppHandle, window: WebviewWindow, states: HashMap<String, String>) {
+    AGENT_STATES.lock().unwrap().insert(window.label().to_string(), states);
+    send_agent_states(&app);
+}
+
+/// Forgets the window's agents, as when it closes, or its page reloads and its terminals
+/// are hung up: their states go with them, from every window's Worktrees.
+pub fn forget_agent_states(app: &AppHandle, window: &str) {
+    if AGENT_STATES.lock().unwrap().remove(window).is_some() {
+        send_agent_states(app);
+    }
+}
+
+/// Every window's agents' states, by window and repository, for a window that's just
+/// started.
+#[tauri::command]
+pub fn agent_states() -> AgentStates {
+    AGENT_STATES.lock().unwrap().clone()
+}
+
 /// Notes the repository the window has open, or None for none.
 #[tauri::command]
 pub fn set_window_repo(window: WebviewWindow, windows: State<'_, Windows>, path: Option<String>) {
@@ -238,6 +277,7 @@ pub fn show_first(app: &AppHandle) {
 pub fn forget(app: &AppHandle, window: &str) {
     app.state::<Windows>().0.lock().unwrap().remove(window);
     TASKS.lock().unwrap().remove(window);
+    forget_agent_states(app, window);
     crate::terminal::close_window(window);
     app.state::<crate::watch::RepoWatcher>().forget(window);
     app.state::<crate::history::HistoryState>().forget(window);

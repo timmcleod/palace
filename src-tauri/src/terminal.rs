@@ -33,6 +33,9 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 /// would tell programs in its terminals they're in that one: Claude Code, say, takes
 /// itself to be in RustRover's terminal, connected to it, and reads keys as there.
 const INHERITED: &[&str] = &[
+    // A task for an agent in one of Palace's own terminals (see terminal_open), when
+    // Palace is started from there, as in development: not for every terminal of this one.
+    "PALACE_TASK",
     "TERMINAL_EMULATOR",
     "ENABLE_IDE_INTEGRATION",
     "CLAUDECODE",
@@ -62,7 +65,10 @@ fn size(cols: u16, rows: u16) -> PtySize {
 }
 
 /// Starts the user's login shell in `path`, `cols` by `rows`, and returns its id.
-/// `output` receives what it prints, and `exited` its exit code once it's gone.
+/// `output` receives what it prints, and `exited` its exit code once it's gone. With
+/// `task`, as for New Task, the shell has it as $PALACE_TASK, for the agent's command
+/// to give the agent: in the environment, it reaches the agent as it is, whatever it
+/// says, where typed on the command line, the shell would read it.
 #[tauri::command]
 pub async fn terminal_open(
     window: WebviewWindow,
@@ -71,11 +77,20 @@ pub async fn terminal_open(
     rows: u16,
     output: Channel<InvokeResponseBody>,
     exited: Channel<u32>,
+    task: Option<String>,
 ) -> Result<u32, String> {
-    open(window.label().to_string(), path, cols, rows, output, exited)
+    open(window.label().to_string(), path, cols, rows, output, exited, task)
 }
 
-fn open(window: String, path: String, cols: u16, rows: u16, output: Channel<InvokeResponseBody>, exited: Channel<u32>) -> Result<u32, String> {
+fn open(
+    window: String,
+    path: String,
+    cols: u16,
+    rows: u16,
+    output: Channel<InvokeResponseBody>,
+    exited: Channel<u32>,
+    task: Option<String>,
+) -> Result<u32, String> {
     let pair = native_pty_system().openpty(size(cols, rows)).map_err(|e| format!("Couldn't start a terminal: {e}"))?;
     let mut command = CommandBuilder::new_default_prog();
     command.cwd(&path);
@@ -101,6 +116,12 @@ fn open(window: String, path: String, cols: u16, rows: u16, output: Channel<Invo
             Some(value) => command.env(var, value),
             None => command.env_remove(var),
         }
+    }
+
+    // After what's inherited is let go, which includes a task of the terminal Palace
+    // was started from.
+    if let Some(task) = task {
+        command.env("PALACE_TASK", task);
     }
 
     let mut child = pair.slave.spawn_command(command).map_err(|e| format!("Couldn't start the shell: {e}"))?;
@@ -341,10 +362,12 @@ pub async fn terminal_close(id: u32) {
     }
 }
 
-/// Hangs up the window's terminals: those of a page that's since been reloaded.
+/// Hangs up the window's terminals: those of a page that's since been reloaded. What
+/// their agents were doing goes too (see windows.rs).
 #[tauri::command]
-pub async fn terminal_close_all(window: WebviewWindow) {
+pub async fn terminal_close_all(app: tauri::AppHandle, window: WebviewWindow) {
     close_window(window.label());
+    crate::windows::forget_agent_states(&app, window.label());
 }
 
 /// Hangs up the terminals in `window`, as when it closes.
@@ -460,7 +483,7 @@ mod tests {
             Ok(())
         });
         let path = dir.to_string_lossy().into_owned();
-        let id = open("test".into(), path, 80, 24, output, exited).unwrap();
+        let id = open("test".into(), path, 80, 24, output, exited, None).unwrap();
 
         // Run with TERMINAL_EMULATOR or CLAUDE_CODE_SSE_PORT set, the shell shouldn't see them.
         let typed = "echo \"in:$(pwd) from:${TERMINAL_EMULATOR-}${CLAUDE_CODE_SSE_PORT-}:\"; exit 3\n";
@@ -508,7 +531,7 @@ mod tests {
         let window = "test-close-and-wait";
         let output = Channel::new(|_| Ok(()));
         let exited = Channel::new(|_| Ok(()));
-        let id = open(window.into(), dir.to_string_lossy().into_owned(), 80, 24, output, exited).unwrap();
+        let id = open(window.into(), dir.to_string_lossy().into_owned(), 80, 24, output, exited, None).unwrap();
         tauri::async_runtime::block_on(terminal_write(id, "sleep 30\n".into())).unwrap();
         let started = Instant::now();
         let front = loop {
@@ -547,6 +570,41 @@ mod tests {
         assert!(available("./bin/claude"));
     }
 
+    #[test]
+    fn giving_a_task_to_the_shell_as_it_is() {
+        let dir = std::env::temp_dir().join(format!("palace-test-terminal-task-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // What a shell would read if it were typed: quotes, a trailing backslash,
+        // expansions, a second command and a line break.
+        let task = "Don't run `id`; echo $HOME \"x\" ; touch pwned #\nline two \\";
+        let (send, printed) = mpsc::channel();
+        let output = Channel::new(move |body| {
+            if let InvokeResponseBody::Raw(bytes) = body {
+                let _ = send.send(bytes);
+            }
+            Ok(())
+        });
+        let exited = Channel::new(|_| Ok(()));
+        let id = open("test".into(), dir.to_string_lossy().into_owned(), 200, 24, output, exited, Some(task.into())).unwrap();
+        tauri::async_runtime::block_on(terminal_write(id, "printf '<%s>' \"$PALACE_TASK\"\n".into())).unwrap();
+        let mut seen = String::new();
+        let started = std::time::Instant::now();
+        while !seen.contains(">") || !seen.contains(&format!("<{}>", task.replace('\n', "\r\n"))) {
+            if started.elapsed() > Duration::from_secs(10) {
+                break;
+            }
+            if let Ok(bytes) = printed.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+        tauri::async_runtime::block_on(terminal_close(id));
+        // The terminal shows a line break as CR LF.
+        assert!(seen.contains(&format!("<{}>", task.replace('\n', "\r\n"))), "printed: {seen:?}");
+        assert!(!dir.join("pwned").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// A terminal whose output is collected, and its id.
     fn open_collecting(path: &str) -> (u32, mpsc::Receiver<Vec<u8>>) {
         let (send, printed) = mpsc::channel();
@@ -557,7 +615,7 @@ mod tests {
             Ok(())
         });
         let exited = Channel::new(|_| Ok(()));
-        let id = open("test".into(), path.into(), 80, 24, output, exited).unwrap();
+        let id = open("test".into(), path.into(), 80, 24, output, exited, None).unwrap();
         (id, printed)
     }
 

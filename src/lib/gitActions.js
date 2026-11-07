@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { agentOfProgram } from "./agents.js";
+import { agentCommand, agentOfProgram, setAgentCommand } from "./agents.js";
 import { branchForTask } from "./tasks.js";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
@@ -31,8 +31,17 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
 // shown, when it isn't the current one. `openWorktree(path, { task })` opens a worktree
 // in a window of its own, or brings forward the one it's open in; with `task`, its agent
-// starts on that.
-export function useGitActions({ overview, run, compare, pullRequest, viewedBranch = () => null, openWorktree = () => {} }) {
+// starts on that. `agentReady()` says whether the repository's agent can start, offering
+// to install it where it can't.
+export function useGitActions({
+  overview,
+  run,
+  compare,
+  pullRequest,
+  viewedBranch = () => null,
+  openWorktree = () => {},
+  agentReady = async () => true,
+}) {
   const current = () => overview.value?.head.branch ?? null;
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
@@ -634,7 +643,11 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
   // in a worktree of its own, opened in a window of its own, where the agent starts on
   // what's said here. Several can go at once, each on its own branch.
   async function newTask() {
+    // Without the agent, there'd be a worktree and nothing to work in it.
+    if (!(await agentReady())) return;
     const from = current() ?? "HEAD";
+    // Canceled, or not started, what was typed waits for next time, in this repository.
+    const draft = `new-task:${overview.value.path}`;
     const values = await openForm({
       title: "New Task",
       message: `A new branch from ${from}, in a worktree of its own, opens in a window where the agent starts on the task.`,
@@ -644,8 +657,7 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
         { key: "location", label: "Location", type: "folder", value: besideRepository(), chooseTitle: "Choose Where the Worktree Goes" },
       ],
       confirmLabel: "Start Task",
-      // Canceled, what was typed waits for next time, in this repository.
-      draft: `new-task:${overview.value.path}`,
+      draft,
     });
     if (!values) return;
     const task = values.task.trim();
@@ -658,7 +670,13 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
       create: name,
       remote: false,
     });
-    if (!error) openWorktree(folder, { task });
+    if (error) {
+      keepDraft(draft, values);
+      return;
+    }
+    // The worktree runs the agent this repository does, as it was checked for.
+    setAgentCommand(folder, agentCommand(overview.value.path));
+    openWorktree(folder, { task });
   }
 
   async function removeWorktree(worktree) {
@@ -682,11 +700,13 @@ export function useGitActions({ overview, run, compare, pullRequest, viewedBranc
     if (!ok) return;
     // The other window closes first, as part of removing it, so what its terminals run is
     // stopped before the folder's deleted, rather than writing into it as it goes.
-    await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
+    const error = await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
       worktree: worktree.path,
       close: showing?.windows ?? [],
       force: changed || worktree.locked,
     });
+    // Its agent command, as New Task gives a worktree, goes with it.
+    if (!error) setAgentCommand(worktree.path, "");
   }
 
   // What closing the other window a worktree's open in loses: what its terminals are

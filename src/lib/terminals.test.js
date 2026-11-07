@@ -15,7 +15,8 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-const { missingAgent, sendToAgent, tabsFor } = await import("./terminals.js");
+const { missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor } = await import("./terminals.js");
+const { nextTick } = await import("vue");
 
 beforeEach(() => vi.mocked(invoke).mockReset());
 
@@ -55,11 +56,49 @@ describe("sendToAgent", () => {
     expect(tab.session.term.paste).toHaveBeenCalledWith("Review these");
     expect(typed()).toEqual([]);
   });
+});
 
-  test("sends it as well, for a task, with Enter after the paste rather than in it", async () => {
-    const tab = agentTab("/two");
-    await sendToAgent("/two", "Fix the login bug\nand add a test", { submit: true });
-    expect(tab.session.term.paste).toHaveBeenCalledWith("Fix the login bug\nand add a test");
-    expect(typed()).toEqual([{ id: 7, data: "\r" }]);
+describe("each repository's agents", () => {
+  beforeEach(() => vi.mocked(invoke).mockResolvedValue(null));
+
+  // A tab whose program last said `state`, and has or hasn't been looked at since.
+  const tab = (state, unseen = false) => ({ key: Math.random(), kind: "agent", status: state && { state }, unseen, session: {} });
+
+  test("say the most pressing of their tabs' states", () => {
+    tabsFor("/busy").tabs.push(tab("working"), tab(null));
+    tabsFor("/asking").tabs.push(tab("working"), tab("blocked"));
+    tabsFor("/finished").tabs.push(tab("done", true), tab("working"));
+    tabsFor("/failed").tabs.push(tab("done", true), tab("error", true));
+    expect(repositoryStates()).toMatchObject({ "/busy": "working", "/asking": "blocked", "/finished": "done", "/failed": "error" });
   });
+
+  test("leave out what's finished and been looked at, or idle", () => {
+    tabsFor("/seen").tabs.push(tab("done", false), tab("idle"));
+    expect(repositoryStates()).not.toHaveProperty("/seen");
+  });
+
+  test("are said to the backend as they change, and only then", async () => {
+    const reports = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "set_agent_states");
+    const watched = tab("working");
+    tabsFor("/watched").tabs.push(watched);
+    await nextTick();
+    const before = reports().length;
+    expect(reports().at(-1)[1].states["/watched"]).toBe("working");
+
+    // Another tab working too: the summary's read again, but it's the same.
+    tabsFor("/watched").tabs.push(tab("working"));
+    await nextTick();
+    expect(reports()).toHaveLength(before);
+
+    tabsFor("/watched").tabs[0].status = { state: "blocked" };
+    await nextTick();
+    expect(reports()).toHaveLength(before + 1);
+    expect(reports().at(-1)[1].states["/watched"]).toBe("blocked");
+  });
+});
+
+test("an agent that isn't installed isn't started on a task, to say only \"command not found\"", async () => {
+  vi.mocked(invoke).mockReset().mockImplementation(async (command) => (command === "program_available" ? false : null));
+  expect((await startAgentOn("/repo", "Fix it"))?.missing?.program).toBe("claude");
+  expect(invoke).not.toHaveBeenCalledWith("terminal_open", expect.anything());
 });

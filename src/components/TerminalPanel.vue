@@ -18,6 +18,7 @@ import {
   openTerminal,
   dropFiles,
   missingAgent,
+  offerInstall,
   paste,
   programOf,
   removeTab,
@@ -224,20 +225,7 @@ const agent = computed(() => agentName(command.value));
 async function newAgent(run = command.value) {
   const known = await missingAgent(run);
   if (known) {
-    const isDefault = run === command.value;
-    const install = await askConfirm({
-      title: `${known.title} Isn't Installed`,
-      message: [
-        `${known.name} tabs run ${known.title}, which isn't installed here yet. Its installer, for macOS and Linux, is:`,
-        known.install,
-        `Palace can type it into a terminal for you to run. Other ways to install it are at ${known.setup}. Once it's installed, open a ${known.name} tab again.`,
-        isDefault && "To use another agent instead, change the agent command in the terminal panel's ⋯ menu.",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      confirmLabel: "Install in Terminal",
-    });
-    if (install) openTerminal(props.path, { input: known.install });
+    await offerInstall(props.path, known, { repositoryCommand: run === command.value });
     return;
   }
   openTerminal(props.path, { command: run, kind: "agent" });
