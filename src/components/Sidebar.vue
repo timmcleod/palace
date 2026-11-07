@@ -2,30 +2,21 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   ChevronRight,
   ChevronsUpDown,
-  CircleDot,
-  GitPullRequest,
-  Cloud,
   Folder,
   FolderGit2,
   FolderOpen,
-  FolderTree,
-  GitBranch,
-  History,
   ListFilter,
   Lock,
-  Package,
   Plus,
   Github,
   Settings,
-  Tag,
   X,
 } from "lucide-vue-next";
-import { buildTree, flattenTree } from "../lib/tree.js";
+import { OLDER_TAGS, sidebarSections } from "../lib/sidebarRows.js";
 import Spinner from "./Spinner.vue";
 import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
@@ -72,194 +63,24 @@ const collapsedSections = reactive(new Set());
 const collapsedFolders = reactive(new Set());
 
 const query = computed(() => filter.value.trim().toLowerCase());
-const matches = (name) => !query.value || name.toLowerCase().includes(query.value);
-// While filtering, every folder opens so matches nested inside them stay visible.
-const isOpen = (key) => query.value !== "" || !collapsedFolders.has(key);
-
-// Issues and pull requests only for repositories on GitHub.
-const workspaceRows = computed(() =>
-  [
-    { key: "workspace:files", label: "Files", icon: FolderTree, depth: 0 },
-    {
-      key: "workspace:working-copy",
-      label: "Working Copy",
-      icon: Folder,
-      depth: 0,
-      count: props.overview.changes || null,
-    },
-    {
-      key: "workspace:stashes",
-      label: "Stashes",
-      icon: Archive,
-      depth: 0,
-      count: props.overview.stashes.length || null,
-    },
-    props.issues && {
-      key: "workspace:issues",
-      label: "Issues",
-      icon: CircleDot,
-      depth: 0,
-      count: props.issues.count || null,
-      fresh: props.issues.fresh > 0,
-      title: props.issues.fresh > 0 ? `${props.issues.fresh} new since you last looked` : null,
-    },
-    props.pulls && {
-      key: "workspace:pulls",
-      label: "Pull Requests",
-      icon: GitPullRequest,
-      depth: 0,
-      count: props.pulls.count || null,
-    },
-  ].filter(Boolean),
-);
-
-// In the order they've been dragged into, with their dividers, though those stay
-// hidden while filtering.
-const branchRows = computed(() =>
-  flattenTree(
-    buildTree(
-      props.overview.branches.filter((b) => matches(b.name)),
-      (b) => b.name,
-    ),
-    {
-      keyPrefix: "branch-folder:",
-      isOpen,
-      order: branchOrder(props.overview.path),
-      extraRows: query.value ? [] : dividerRows(props.overview.path),
-      leafRow: (b) => ({
-        key: `branch:${b.name}`,
-        icon: GitBranch,
-        current: b.is_head,
-        head: b.is_head,
-        ahead: b.ahead,
-        behind: b.behind,
-        // Checked out in another worktree: double-clicking it opens that.
-        elsewhere: b.worktree,
-        title: [b.upstream ? `${b.name} → ${b.upstream}` : b.name, b.worktree && `Checked out in the worktree at ${b.worktree}`]
-          .filter(Boolean)
-          .join("\n"),
-      }),
-    },
-  ),
-);
-
-// The newest tags show, and the rest wait in a folder of their own, "Older", closed until
-// it's opened: a repository that tags each release gathers many, a thousand or more,
-// and the old ones are rarely what's wanted. Filtering finds among them all.
-const RECENT_TAGS = 5;
-const OLDER_TAGS = "tags-older:";
+// Whether the Older tags are showing (see sidebarRows.js).
 const olderTagsOpen = ref(false);
-// Folders, for tags named with slashes as "release/1.0", inside Older have keys of their
-// own, as one can be among the newest too.
-const tagTree = (tags, depth = 0, keyPrefix = "tag-folder:") =>
-  flattenTree(buildTree(tags, (t) => t), {
-    depth,
-    keyPrefix,
-    isOpen,
-    leafRow: (t) => ({ key: `tag:${t}`, icon: Tag, title: t }),
-  });
-const tagRows = computed(() => {
-  const tags = props.overview.tags.filter(matches);
-  // A folder for only one or two more would save nothing.
-  if (query.value || tags.length <= RECENT_TAGS + 2) return tagTree(tags);
-  const older = tags.slice(RECENT_TAGS);
-  return [
-    ...tagTree(tags.slice(0, RECENT_TAGS)),
-    {
-      key: OLDER_TAGS,
-      label: "Older",
-      icon: History,
-      title: `${older.length} older tags`,
-      depth: 0,
-      parent: "",
-      folder: true,
-      open: olderTagsOpen.value,
-      count: older.length,
-      older: true,
-    },
-    ...(olderTagsOpen.value ? tagTree(older, 1, "tag-folder-older:") : []),
-  ];
-});
 
-const remoteRows = computed(() =>
-  props.overview.remotes.flatMap((remote) => {
-    const branches = remote.branches.filter(matches);
-    if (query.value && !branches.length && !matches(remote.name)) {
-      return [];
-    }
-
-    const key = `remote:${remote.name}/`;
-    const open = isOpen(key);
-    const rows = [
-      { key, label: remote.name, depth: 0, folder: true, open, icon: Cloud, title: remote.url },
-    ];
-    if (open) {
-      rows.push(
-        ...flattenTree(buildTree(branches, (b) => b), {
-          depth: 1,
-          keyPrefix: key,
-          isOpen,
-          leafRow: (b) => ({
-            key: `remote-branch:${remote.name}/${b}`,
-            icon: GitBranch,
-            title: `${remote.name}/${b}`,
-          }),
-        }),
-      );
-    }
-    return rows;
+// The sections and their rows, built from the repository's overview as the filter,
+// the folders opened and closed, and the branches' arrangement have them.
+const sections = computed(() =>
+  sidebarSections(props.overview, {
+    query: query.value,
+    collapsed: collapsedFolders,
+    olderTagsOpen: olderTagsOpen.value,
+    issues: props.issues,
+    pulls: props.pulls,
+    order: branchOrder(props.overview.path),
+    dividers: dividerRows(props.overview.path),
   }),
 );
-
-const stashRows = computed(() =>
-  props.overview.stashes
-    .filter((s) => matches(s.message))
-    .map((s) => ({
-      key: `stash:${s.index}`,
-      label: s.message,
-      icon: Archive,
-      depth: 0,
-      title: `stash@{${s.index}}: ${s.message}`,
-    })),
-);
-
-const submoduleRows = computed(() =>
-  props.overview.submodules
-    .filter((s) => matches(s.name))
-    .map((s) => ({ key: `submodule:${s.path}`, label: s.name, icon: Package, depth: 0, title: s.path })),
-);
-
-// The repository's worktrees, its own first: each named for its folder, beside the
-// branch checked out in it.
-const worktreeRows = computed(() =>
-  (props.overview.worktrees ?? [])
-    .filter((w) => matches(w.path) || (w.branch && matches(w.branch)))
-    .map((w) => ({
-      key: `worktree:${w.path}`,
-      label: w.path.split("/").at(-1),
-      detail: w.prunable ? "folder gone" : (w.branch ?? "detached"),
-      icon: FolderGit2,
-      depth: 0,
-      current: w.current,
-      locked: w.locked,
-      gone: w.prunable,
-      title: [w.path, w.main && "The repository's own working copy", w.locked && "Locked", w.prunable && "Its folder is gone: Prune Worktrees forgets it"]
-        .filter(Boolean)
-        .join("\n"),
-    })),
-);
-
-const sections = computed(() =>
-  [
-    { id: "workspace", title: "Workspace", rows: workspaceRows.value },
-    { id: "branches", title: "Branches", rows: branchRows.value },
-    { id: "worktrees", title: "Worktrees", rows: worktreeRows.value, optional: true },
-    { id: "tags", title: "Tags", rows: tagRows.value },
-    { id: "remotes", title: "Remotes", rows: remoteRows.value },
-    { id: "stashes", title: "Stashes", rows: stashRows.value, optional: true },
-    { id: "submodules", title: "Submodules", rows: submoduleRows.value, optional: true },
-  ].filter((s) => !s.optional || s.rows.length),
-);
+// Branches' rows, among which a dragged one moves.
+const branchRows = computed(() => sections.value.find((s) => s.id === "branches")?.rows ?? []);
 
 function toggleSection(id) {
   collapsedSections.has(id) ? collapsedSections.delete(id) : collapsedSections.add(id);
