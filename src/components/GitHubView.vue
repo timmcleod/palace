@@ -390,25 +390,13 @@ async function signIn() {
   letter-spacing: normal;
 }
 
+/* The shared segmented control (styles.css), its buttons a little taller. */
 .segmented {
-  display: flex;
   flex-shrink: 0;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: var(--toolbar-group-bg);
 }
 
 .segmented button {
   padding: 3px 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  font: inherit;
-  color: var(--text-primary);
-}
-
-.segmented button.active {
-  background: var(--row-selected);
 }
 
 .repo-list {

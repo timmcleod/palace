@@ -2084,26 +2084,6 @@ const breadcrumb = computed(() => {
   color: var(--text-tertiary);
 }
 
-.segmented {
-  display: flex;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: var(--toolbar-group-bg);
-}
-
-.segmented button {
-  padding: 2px 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  font: inherit;
-  color: var(--text-primary);
-}
-
-.segmented button.active {
-  background: var(--row-selected);
-}
-
 .empty-state {
   flex: 1;
   display: flex;

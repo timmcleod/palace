@@ -430,25 +430,10 @@ async function signIn() {
   min-width: 0;
 }
 
-.segmented {
-  display: flex;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: var(--toolbar-group-bg);
-}
-
+/* The shared segmented control (styles.css), compact beside the filter. */
 .segmented button {
   padding: 1px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  font: inherit;
   font-size: var(--font-md);
-  color: var(--text-primary);
-}
-
-.segmented button.active {
-  background: var(--row-selected);
 }
 
 .filter {

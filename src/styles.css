@@ -290,6 +290,28 @@ textarea,
   outline-offset: 1px;
 }
 
+/* Two or more choices side by side, one chosen, as a commit's Changeset and Browse.
+   A view can make its buttons larger or smaller, but not another kind of control. */
+.segmented {
+  display: flex;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--toolbar-group-bg);
+}
+
+.segmented button {
+  padding: 2px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.segmented button.active {
+  background: var(--row-selected);
+}
+
 /* While a pane's edge is dragged to resize it, nothing's selected as the pointer
    crosses text, and the resizing cursor stays wherever the pointer is. */
 body.resizing,

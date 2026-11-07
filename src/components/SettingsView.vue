@@ -954,6 +954,8 @@ h2 {
   box-shadow: var(--shadow-focus);
 }
 
+/* Settings' own look for the shared segmented control (styles.css): the choice raised
+   on a card, as in the system's settings. */
 .segmented {
   display: inline-flex;
   flex-shrink: 0;
