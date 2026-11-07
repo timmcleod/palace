@@ -61,6 +61,8 @@ pub fn run() {
                 }
             }
             windows::show_first(app.handle());
+            // Copies of files dropped on a terminal a day or more ago go.
+            drop::clear_old();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
