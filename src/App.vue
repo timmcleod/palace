@@ -94,13 +94,13 @@ import {
   tell,
 } from "./lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "./lib/clone.js";
-import { CANCELED, CONFLICT, STALE_STEP, errorDetail, isError } from "./lib/errors.js";
 import { loadAvatars } from "./lib/avatars.js";
 import { settings } from "./lib/settings.js";
 import { dragEdge } from "./lib/resize.js";
 import { useShortcuts } from "./lib/shortcuts.js";
 import { useTerminalPanel } from "./lib/terminalPanel.js";
 import { useRepository } from "./lib/repository.js";
+import { useGitRun } from "./lib/gitRun.js";
 import { fileManager, isMac, shortcut } from "./lib/platform.js";
 import { starRequest } from "./lib/star.js";
 import { githubAccount } from "./lib/github.js";
@@ -547,100 +547,40 @@ const {
   dismiss: dismissStatus,
 } = useStatusCard();
 
-// Only network operations report progress and can be canceled.
-const NETWORK = new Set([
-  "fetch",
-  "pull",
-  "checkout_pull",
-  "push",
-  "publish_branch",
-  "clone_repo",
-  "add_remote",
-  "delete_remote_tag",
-  "delete_remote_branch",
-  "rename_remote_branch",
-  "finish_remote_rename",
-]);
-
 // The current branch, for the toolbar's Pull and Push buttons: where they go, and how far
 // behind or ahead it is.
 const headBranch = computed(() => overview.value?.branches.find((b) => b.is_head) ?? null);
 
-/**
- * Runs a backend command against the open repository, showing it in the status card
- * and refreshing everything afterwards. Resolves to the error message, or null.
- *
- * titles: [while running, on success, on failure]. options.quietError(message)
- * returning true hides that failure, for callers that handle it themselves.
- * options.path runs it somewhere other than the open repository, or with none open.
- * Commands undo.js knows can be undone afterwards; options.undo names the step.
- */
-async function runGit([running, done, failed], command, args = {}, { quietError, path, undo: undoLabel } = {}) {
-  if (remoteBusy.value) return "Another operation is still running.";
-  if (!overview.value && !path) return "No repository is open.";
-  const op = showStatus({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
-
-  try {
-    await stopBackgroundFetch();
-    const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
-    // Only what's done in the open repository can be undone.
-    const step = path ? null : stepFor(command, args, undoLabel);
-    const newestBefore = newest();
-    const message = await (step ? undoable(step, work) : work());
-    if (newest() !== newestBefore) op.actions = [{ label: "Undo", run: undo }];
-    // Done, but changes set aside for it conflicted when put back.
-    if (isError(message, CONFLICT)) {
-      op.state = "conflict";
-      op.title = `${done}, with conflicts`;
-      op.message = errorDetail(message, CONFLICT);
-      selected.value = "workspace:working-copy";
-      return null;
-    }
-    op.message = message;
-    op.state = "done";
-    op.title = done;
+// Running git operations, one at a time, each shown in the status card: see gitRun.js.
+// What's passed in here is used only once an operation runs, so it's looked up then:
+// undo, the background fetch and refresh come later in this file, and undo runs its
+// own steps through runGit.
+const { runGit } = useGitRun({
+  overview,
+  status: { busy: remoteBusy, show: showStatus, dismissLater: dismissStatusLater, dismiss: dismissStatus },
+  undo: {
+    stepFor: (...args) => stepFor(...args),
+    newest: () => newest(),
+    undoable: (...args) => undoable(...args),
+    undo: () => undo(),
+  },
+  stopBackgroundFetch: () => stopBackgroundFetch(),
+  refresh: () => refresh(),
+  // Conflicts are resolved in the Working Copy.
+  onConflict() {
+    selected.value = "workspace:working-copy";
+  },
+  onDone(op, command, args) {
     if (command === "push" || command === "publish_branch") offerPullRequest(op, args.branch ?? overview.value.head.branch);
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") {
       loadAvatars(overview.value.path);
       markFetched(overview.value.path);
     }
-    // Successes get out of the way; failures stay until dismissed.
-    dismissStatusLater(op, 5000);
-    return null;
-  } catch (e) {
-    const message = String(e);
-    if (message === CANCELED) {
-      dismissStatus();
-    } else if (quietError?.(message)) {
-      dismissStatus();
-    } else if (isError(message, CONFLICT)) {
-      // The operation is under way and waiting on the user, not failed.
-      op.state = "conflict";
-      op.title = "Stopped for conflicts";
-      op.message = errorDetail(message, CONFLICT);
-      selected.value = "workspace:working-copy";
-    } else {
-      op.state = "failed";
-      op.title = failed;
-      op.message = isError(message, STALE_STEP) ? errorDetail(message, STALE_STEP) : message;
-      // A push rejected because the remote has commits this branch doesn't is usually
-      // fixed by pulling them in. If the branch was rewritten (amend, rebase) instead,
-      // force pushing publishes it.
-      if (command === "push") {
-        const fetchFirst = message.includes("(fetch first)");
-        const nonFastForward = message.includes("non-fast-forward");
-        if (fetchFirst || nonFastForward) {
-          op.actions = [{ label: "Pull…", run: () => actions.pull() }];
-          if (nonFastForward) op.actions.push({ label: "Force Push…", run: () => actions.forcePush() });
-        }
-      }
-    }
-    return message;
-  } finally {
-    refresh();
-  }
-}
+  },
+  pull: () => actions.pull(),
+  forcePush: () => actions.forcePush(),
+});
 
 const REMOTE_TITLES = {
   fetch: ["Fetching…", "Fetched", "Fetch failed"],
