@@ -1,0 +1,261 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { askConfirm, openForm, openPullDialog } from "./overlays.js";
+import { CANCELED } from "./errors.js";
+import { useGitActions } from "./gitActions.js";
+
+// The backend answers nothing unless a test says otherwise; github.js asks it as it loads.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
+// The dialogs answer as each test says.
+vi.mock("./overlays.js", () => ({
+  askConfirm: vi.fn(),
+  openForm: vi.fn(),
+  openMergeDialog: vi.fn(),
+  openPullDialog: vi.fn(),
+  openResetDialog: vi.fn(),
+  openTagDialog: vi.fn(),
+  tell: vi.fn(),
+}));
+
+// A repository's overview, with `main` checked out and nothing else unless asked for.
+function repo(parts = {}) {
+  return {
+    path: "/code/palace",
+    head: { branch: "main" },
+    branches: [{ name: "main", is_head: true, upstream: "origin/main", worktree: null }],
+    remotes: [{ name: "origin", url: "https://github.com/o/palace.git", branches: ["main"] }],
+    tags: [],
+    worktrees: [],
+    operation: null,
+    ...parts,
+  };
+}
+const branch = (name, more = {}) => ({ name, is_head: false, upstream: null, worktree: null, ...more });
+
+// The actions on `repo(parts)`, with what they run recorded. Each command succeeds
+// unless `fails` says what it fails with.
+function actionsOn(parts = {}, { fails = {} } = {}) {
+  const run = vi.fn(async (_titles, command) => fails[command] ?? null);
+  const openWorktree = vi.fn();
+  const compare = vi.fn();
+  const actions = useGitActions({ overview: ref(repo(parts)), run, compare, openWorktree, pullRequest: { available: () => false } });
+  // Each command run, as [command, args].
+  const ran = () => run.mock.calls.map(([, command, args]) => [command, args]);
+  return { actions, run, ran, openWorktree, compare };
+}
+
+// A menu's items by label, leaving out what it doesn't show.
+const menuItems = (menu) => menu.filter((item) => item && !item.separator);
+const labels = (menu) => menuItems(menu).map((item) => item.label);
+const item = (menu, label) => menuItems(menu).find((i) => i.label === label);
+
+beforeEach(() => {
+  vi.mocked(invoke).mockReset().mockResolvedValue(null);
+  vi.mocked(askConfirm).mockReset();
+  vi.mocked(openForm).mockReset();
+  vi.mocked(openPullDialog).mockReset();
+});
+
+describe("a branch's menu", () => {
+  test("for the current branch, offers neither merging it into itself nor deleting it", () => {
+    const { actions } = actionsOn();
+    const menu = actions.branchMenu("main");
+    expect(item(menu, "Check Out").disabled).toBe(true);
+    expect(labels(menu).some((l) => l.startsWith("Merge") || l.startsWith("Rebase"))).toBe(false);
+    expect(item(menu, "Delete…").disabled).toBe(true);
+    // Its upstream can be compared with and force pushed to.
+    expect(labels(menu)).toContain("Compare “main” with “origin/main”");
+    expect(labels(menu)).toContain("Force Push…");
+  });
+
+  test("for another, merges or rebases with the current one, except mid-operation", () => {
+    const { actions } = actionsOn({ branches: [branch("main", { is_head: true }), branch("feature")] });
+    const menu = actions.branchMenu("feature");
+    expect(item(menu, "Merge “feature” into “main”…").disabled).toBe(false);
+    expect(item(menu, "Rebase “main” onto “feature”…").disabled).toBe(false);
+    expect(labels(menu)).toContain("New Worktree…");
+    expect(item(menu, "Delete…").disabled).toBe(false);
+
+    const busy = actionsOn({ branches: [branch("main", { is_head: true }), branch("feature")], operation: "rebase" });
+    expect(item(busy.actions.branchMenu("feature"), "Merge “feature” into “main”…").disabled).toBe(true);
+  });
+
+  test("for one checked out in another worktree, opens that instead, and can't delete it", () => {
+    const { actions, openWorktree } = actionsOn({
+      branches: [branch("main", { is_head: true }), branch("feature", { worktree: "/code/palace-feature" })],
+    });
+    const menu = actions.branchMenu("feature");
+    expect(labels(menu)).not.toContain("Check Out");
+    expect(labels(menu)).not.toContain("New Worktree…");
+    expect(item(menu, "Delete…").disabled).toBe(true);
+    item(menu, "Open Worktree “palace-feature”").action();
+    expect(openWorktree).toHaveBeenCalledWith("/code/palace-feature");
+  });
+
+  test("offers to publish a branch without an upstream, where there's a remote to", () => {
+    const parts = { branches: [branch("main", { is_head: true }), branch("draft")] };
+    expect(item(actionsOn(parts).actions.branchMenu("draft"), "Publish “draft”…").disabled).toBe(false);
+    expect(item(actionsOn({ ...parts, remotes: [] }).actions.branchMenu("draft"), "Publish “draft”…").disabled).toBe(true);
+  });
+
+  test("adds dividers only beside top-level branches", () => {
+    const { actions } = actionsOn({ branches: [branch("main", { is_head: true }), branch("feature/a")] });
+    expect(labels(actions.branchMenu("main"))).toContain("Add Divider Below…");
+    expect(labels(actions.branchMenu("feature/a"))).not.toContain("Add Divider Below…");
+  });
+});
+
+describe("deleting a branch", () => {
+  const parts = { branches: [branch("main", { is_head: true }), branch("feature")] };
+
+  test("asks first, then deletes it", async () => {
+    const { actions, ran } = actionsOn(parts);
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await item(actions.branchMenu("feature"), "Delete…").action();
+    expect(ran()).toEqual([["delete_branch", { name: "feature", force: false }]]);
+  });
+
+  test("asks again before deleting one with commits merged nowhere, and forces it only then", async () => {
+    const { actions, ran } = actionsOn(parts, { fails: { delete_branch: "error: the branch 'feature' is not fully merged" } });
+    vi.mocked(askConfirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await item(actions.branchMenu("feature"), "Delete…").action();
+    // Said not to: only the first, unforced try.
+    expect(ran()).toEqual([["delete_branch", { name: "feature", force: false }]]);
+    expect(vi.mocked(askConfirm).mock.calls[1][0].title).toBe("Delete Unmerged Branch?");
+
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    const again = actionsOn(parts, { fails: { delete_branch: "error: the branch 'feature' is not fully merged" } });
+    await item(again.actions.branchMenu("feature"), "Delete…").action();
+    expect(again.ran().at(-1)).toEqual(["delete_branch", { name: "feature", force: true }]);
+  });
+
+  test("does nothing when canceled", async () => {
+    const { actions, run } = actionsOn(parts);
+    vi.mocked(askConfirm).mockResolvedValue(false);
+    await item(actions.branchMenu("feature"), "Delete…").action();
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("checking out", () => {
+  test("from a detached HEAD at commits nothing else has, asks first", async () => {
+    const { actions, run } = actionsOn({ head: { branch: null }, branches: [branch("main")] });
+    vi.mocked(invoke).mockResolvedValue(2);
+    vi.mocked(askConfirm).mockResolvedValue(false);
+    expect(await actions.checkout("branch", "main")).toBe(CANCELED);
+    expect(vi.mocked(askConfirm).mock.calls[0][0].message).toContain("2 commits that no branch or tag has");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("from a branch, just checks out", async () => {
+    const { actions, ran } = actionsOn();
+    await actions.checkout("tag", "v1.0");
+    expect(askConfirm).not.toHaveBeenCalled();
+    expect(ran()).toEqual([["checkout", { kind: "tag", name: "v1.0" }]]);
+  });
+});
+
+describe("pushing", () => {
+  test("pushes a branch that has an upstream", async () => {
+    const { actions, ran } = actionsOn();
+    await actions.push();
+    expect(ran()).toEqual([["push", undefined]]);
+  });
+
+  test("publishes one that hasn't, under the name chosen", async () => {
+    const { actions, ran } = actionsOn({ head: { branch: "draft" }, branches: [branch("draft", { is_head: true })] });
+    vi.mocked(openForm).mockResolvedValue({ name: " draft-2 " });
+    await actions.push();
+    expect(ran()).toEqual([["publish_branch", { branch: "draft", remote: "origin", name: "draft-2" }]]);
+  });
+});
+
+describe("pulling", () => {
+  test("with nothing to choose from, leaves it to the backend to say why", async () => {
+    const { actions, ran } = actionsOn({ head: { branch: null }, branches: [] });
+    await actions.pull();
+    expect(openPullDialog).not.toHaveBeenCalled();
+    expect(ran()).toEqual([["pull", undefined]]);
+  });
+
+  test("offers the branch asked for, or else the upstream", async () => {
+    const { actions } = actionsOn({ remotes: [{ name: "origin", branches: ["main", "next"] }] });
+    vi.mocked(invoke).mockResolvedValue("merge");
+    vi.mocked(openPullDialog).mockResolvedValue(null);
+    await actions.pull();
+    expect(vi.mocked(openPullDialog).mock.calls[0][0].from).toBe("origin/main");
+    await actions.pull("origin/next");
+    expect(vi.mocked(openPullDialog).mock.calls[1][0].from).toBe("origin/next");
+  });
+});
+
+describe("worktrees", () => {
+  // As the backend lists them (see worktree.rs), every field there.
+  const worktree = (path, more = {}) => ({ path, branch: null, main: false, current: false, locked: false, prunable: false, ...more });
+  const main = worktree("/code/palace", { branch: "main", main: true, current: true });
+
+  test("a new one goes beside the repository, named after it and the branch, and opens", async () => {
+    const { actions, ran, openWorktree } = actionsOn({ worktrees: [main] });
+    vi.mocked(openForm).mockResolvedValue({ name: " feature/login ", location: "/code/", open: true });
+    await actions.newWorktree();
+    expect(vi.mocked(openForm).mock.calls[0][0].fields.find((f) => f.key === "location").value).toBe("/code");
+    expect(ran()).toEqual([
+      ["add_worktree", { folder: "/code/palace-feature-login", branch: "main", create: "feature/login", remote: false }],
+    ]);
+    expect(openWorktree).toHaveBeenCalledWith("/code/palace-feature-login");
+  });
+
+  test("one for a remote branch with a local branch of its name uses the local one", async () => {
+    const { actions, ran } = actionsOn({ worktrees: [main], branches: [branch("main", { is_head: true }), branch("next")] });
+    vi.mocked(openForm).mockResolvedValue({ location: "/code", open: false });
+    await actions.newWorktree({ branch: "origin/next", remote: true });
+    expect(ran()).toEqual([["add_worktree", { folder: "/code/palace-next", branch: "next", create: null, remote: false }]]);
+  });
+
+  test("removing one open in another window says what stops there, and closes it", async () => {
+    const other = worktree("/code/palace-feature", { branch: "feature" });
+    const { actions, ran } = actionsOn({ worktrees: [main, other] });
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "worktree_has_changes" ? false : { windows: ["window-2"], programs: ["claude"], edits: [] },
+    );
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await item(actions.worktreeMenu(other.path), "Remove…").action();
+    const asked = vi.mocked(askConfirm).mock.calls[0][0];
+    expect(asked.message).toContain("Claude is still running in a terminal there, and is stopped.");
+    expect(asked.confirmLabel).toBe("Remove and Stop");
+    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: ["window-2"], force: false }]]);
+  });
+
+  test("removing one with changes forces it, once that's been said", async () => {
+    const other = worktree("/code/palace-feature", { branch: "feature" });
+    const { actions, ran } = actionsOn({ worktrees: [main, other] });
+    vi.mocked(invoke).mockImplementation(async (command) => (command === "worktree_has_changes" ? true : null));
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await item(actions.worktreeMenu(other.path), "Remove…").action();
+    expect(vi.mocked(askConfirm).mock.calls[0][0].confirmLabel).toBe("Remove and Lose Changes");
+    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: [], force: true }]]);
+  });
+
+  test("the repository's own, and the one showing, can't be removed", () => {
+    const other = worktree("/code/palace-feature", { branch: "feature", current: true });
+    const { actions } = actionsOn({ worktrees: [{ ...main, current: false }, other] });
+    expect(labels(actions.worktreeMenu(main.path))).not.toContain("Remove…");
+    expect(item(actions.worktreeMenu(other.path), "Remove…").disabled).toBe(true);
+  });
+
+  test("Prune shows only when a worktree's folder is gone", () => {
+    const gone = worktree("/code/palace-old", { prunable: true });
+    expect(labels(actionsOn({ worktrees: [main] }).actions.sectionMenu("worktrees"))).not.toContain("Prune Worktrees");
+    expect(labels(actionsOn({ worktrees: [main, gone] }).actions.sectionMenu("worktrees"))).toContain("Prune Worktrees");
+  });
+});
+
+test("a commit's menu resets the branch whose history is shown, and only rewrites what can be", () => {
+  const commit = { id: "abc1234def", short_id: "abc1234" };
+  const { actions } = actionsOn();
+  const menu = actions.commitMenu(commit, false);
+  expect(labels(menu)).toContain("Reset “main” to “abc1234”…");
+  expect(item(menu, "Edit Message…").disabled).toBe(true);
+  expect(item(actions.commitMenu(commit, true), "Edit Message…").disabled).toBe(false);
+});
