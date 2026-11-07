@@ -279,16 +279,58 @@ pub async fn rebase(path: String, onto: String, autostash: Option<bool>) -> Resu
     Ok(crate::stash::unless_left_behind(&path, stash, done))
 }
 
-/// Applies the changes commit `id` made on top of the current branch, as a new commit.
+/// Applies the changes the commits `ids` made on top of the current branch, each as a
+/// new commit, in the order given, oldest first. Several go in one cherry-pick, so a
+/// conflict stops it for the user, who continues it, the rest following, or aborts it
+/// all. A commit whose changes the branch already has is skipped.
 #[tauri::command]
-pub async fn cherry_pick(path: String, id: String) -> Result<String, String> {
-    apply_commit(&path, "cherry-pick", &id)?;
-    Ok(format!("Cherry-picked {}.", short(&id)))
+pub async fn cherry_pick(path: String, ids: Vec<String>) -> Result<String, String> {
+    not_under_way(&path)?;
+    match ids.as_slice() {
+        [] => Err("There's nothing to cherry-pick.".into()),
+        [id] => {
+            apply_commit(&path, "cherry-pick", id)?;
+            Ok(format!("Cherry-picked {}.", short(id)))
+        }
+        _ => pick_several(&path, &ids),
+    }
+}
+
+fn pick_several(path: &str, ids: &[String]) -> Result<String, String> {
+    // A merge commit's changes are those against one of its parents, which git is told
+    // for all the commits picked or none: each is picked on its own.
+    let repo = open(path)?;
+    for id in ids {
+        if is_merge(&repo, id)? {
+            return Err(format!("{} is a merge commit, which is cherry-picked on its own, not with others.", short(id)));
+        }
+    }
+    let mut args = vec!["cherry-pick", "--no-edit"];
+    args.extend(ids.iter().map(String::as_str));
+    let (skipped, done) = skip_empty(path, "cherry-pick", git(path, &args, None).map(drop));
+    if let Err(e) = done {
+        // Stopped by something other than a conflict, as by changes not committed that a
+        // commit would overwrite, git leaves a cherry-pick part done that nothing shows,
+        // and that every cherry-pick after would refuse to start beside: it's undone. It's
+        // this one's, as none was under way before (see not_under_way).
+        if !operation_in_progress(path) && left_part_done(&repo) {
+            let _ = git(path, &["cherry-pick", "--abort"], None);
+            return Err(format!("Nothing was cherry-picked. {}", e.trim()));
+        }
+        return Err(stopped_or(path, e));
+    }
+    let picked = ids.len() - skipped;
+    match (picked, skipped) {
+        (0, _) => Err("Nothing to cherry-pick: the changes from these commits are already on this branch.".into()),
+        (_, 0) => Ok(format!("Cherry-picked {picked} commits.")),
+        (_, _) => Ok(format!("Cherry-picked {picked} of {} commits; the changes from the rest were already on this branch.", ids.len())),
+    }
 }
 
 /// Adds a commit that undoes the changes commit `id` made.
 #[tauri::command]
 pub async fn revert(path: String, id: String) -> Result<String, String> {
+    not_under_way(&path)?;
     apply_commit(&path, "revert", &id)?;
     Ok(format!("Reverted {}.", short(&id)))
 }
@@ -296,13 +338,8 @@ pub async fn revert(path: String, id: String) -> Result<String, String> {
 /// Runs `git cherry-pick` or `git revert` for one commit. A merge commit's changes
 /// are taken relative to its first parent, the branch it was merged into.
 fn apply_commit(path: &str, operation: &str, id: &str) -> Result<(), String> {
-    let merge = open(path)?
-        .revparse_single(id)
-        .and_then(|o| o.peel_to_commit())
-        .map(|c| c.parent_count() > 1)
-        .map_err(|e| e.message().to_string())?;
     let mut args = vec![operation, "--no-edit"];
-    if merge {
+    if is_merge(&open(path)?, id)? {
         args.extend(["-m", "1"]);
     }
     args.push(id);
@@ -311,7 +348,7 @@ fn apply_commit(path: &str, operation: &str, id: &str) -> Result<(), String> {
         Ok(_) => Ok(()),
         // The branch already has these changes (or already lacks them, for a revert).
         // Git stops with nothing to commit; skip the empty commit and say so.
-        Err(e) if e.contains("is now empty") || e.contains("nothing to commit") => {
+        Err(e) if stopped_on_empty(path) || (!operation_in_progress(path) && says_empty(&e)) => {
             if operation_in_progress(path) {
                 let _ = git(path, &[operation, "--skip"], None);
             }
@@ -327,6 +364,88 @@ fn apply_commit(path: &str, operation: &str, id: &str) -> Result<(), String> {
 
 fn operation_in_progress(path: &str) -> bool {
     open(path).map(|repo| operation(&repo).is_some()).unwrap_or(false)
+}
+
+/// Whether a cherry-pick or revert of several commits was left part done, as git leaves
+/// one stopped other than for a conflict, or after `git reset` in the middle of one: the
+/// sequence it was going through is kept, though nothing else says it's under way.
+fn left_part_done(repo: &Repository) -> bool {
+    repo.path().join("sequencer").exists()
+}
+
+/// Refuses to start a cherry-pick or revert beside another, under way or left part done:
+/// git would refuse too, and what Palace does on its way out is for its own.
+fn not_under_way(path: &str) -> Result<(), String> {
+    let repo = open(path)?;
+    if let Some(operation) = operation(&repo) {
+        return Err(format!("A {operation} is under way here. Continue it or abort it first."));
+    }
+    if left_part_done(&repo) {
+        return Err(
+            "A cherry-pick or revert of several commits was left part done here. In a terminal, `git cherry-pick --abort` undoes what's left of it, or `git cherry-pick --quit` keeps what it did, and either lets another start.".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Whether commit `id` is a merge, whose changes are those against a parent git's told.
+fn is_merge(repo: &Repository, id: &str) -> Result<bool, String> {
+    repo.revparse_single(id)
+        .and_then(|o| o.peel_to_commit())
+        .map(|c| c.parent_count() > 1)
+        .map_err(|e| e.message().to_string())
+}
+
+/// Whether the cherry-pick or revert under way has stopped on a commit that changes
+/// nothing here, its changes being on the branch already (or, reverting, already not):
+/// nothing conflicts, and the index is as HEAD's commit has it. Told by the repository,
+/// not by git's message, which may be in another language.
+fn stopped_on_empty(path: &str) -> bool {
+    let Ok(repo) = open(path) else { return false };
+    if !matches!(operation(&repo), Some("cherry-pick" | "revert")) {
+        return false;
+    }
+    let Ok(mut index) = repo.index() else { return false };
+    if index.has_conflicts() {
+        return false;
+    }
+    let (Ok(staged), Ok(head)) = (index.write_tree(), repo.head().and_then(|h| h.peel_to_tree())) else { return false };
+    staged == head.id()
+}
+
+/// Git's English for a commit that changes nothing, where it's ended without leaving an
+/// operation for stopped_on_empty to tell by.
+fn says_empty(error: &str) -> bool {
+    error.contains("is now empty") || error.contains("nothing to commit")
+}
+
+/// Skips each commit that changes nothing here (see stopped_on_empty) that the cherry-pick
+/// or revert `operation` under way stops on, going on with the rest, as several commits
+/// are picked, first and as they're continued after a conflict. `step` is how the last
+/// step went. Resolves to how many were skipped, and how the last step went.
+fn skip_empty(path: &str, operation: &str, mut step: Result<(), String>) -> (usize, Result<(), String>) {
+    let mut skipped = 0;
+    // No more than there could be commits to skip, as a last stop.
+    while step.is_err() && stopped_on_empty(path) && skipped < 10_000 {
+        let before = where_stopped(path);
+        let skipping = git(path, &[operation, "--skip"], None).map(drop);
+        // A skip that failed and changed nothing, as with another git holding the index,
+        // would fail again: its failure is the answer.
+        if skipping.is_err() && where_stopped(path) == before {
+            return (skipped, skipping);
+        }
+        skipped += 1;
+        step = skipping;
+    }
+    (skipped, step)
+}
+
+/// Where a cherry-pick or revert under way stands: HEAD, and the commit it's stopped on.
+fn where_stopped(path: &str) -> Option<(git2::Oid, String)> {
+    let repo = open(path).ok()?;
+    let head = repo.head().ok()?.target()?;
+    let stopped = ["CHERRY_PICK_HEAD", "REVERT_HEAD"].iter().find_map(|file| std::fs::read_to_string(repo.path().join(file)).ok());
+    Some((head, stopped.unwrap_or_default()))
 }
 
 fn short(id: &str) -> &str {
@@ -352,11 +471,23 @@ pub async fn control_operation(path: String, action: String) -> Result<String, S
 
     // A rebase puts back changes it set aside when it ends, either way.
     let stash = crate::stash::newest(&path);
-    git(&path, &args, None).map_err(|e| stopped_or(&path, e))?;
+    let mut step = git(&path, &args, None).map(drop);
+    // Going on with several commits, those that change nothing here are skipped, as at
+    // the start: already here, or as a conflict was resolved, all the branch's own.
+    let mut skipped = 0;
+    if action == "continue" && matches!(operation, "cherry-pick" | "revert") {
+        (skipped, step) = skip_empty(&path, operation, step);
+    }
+    step.map_err(|e| stopped_or(&path, e))?;
+    let skipping = match skipped {
+        0 => String::new(),
+        1 => ", skipping a commit that changed nothing here".into(),
+        n => format!(", skipping {n} commits that changed nothing here"),
+    };
     let done = match action.as_str() {
         "abort" => format!("Aborted the {operation}."),
-        _ if self::operation(&open(&path)?).is_some() => return Ok(format!("The {operation} continued and stopped again.")),
-        _ => format!("Finished the {operation}."),
+        _ if self::operation(&open(&path)?).is_some() => return Ok(format!("The {operation} continued{skipping} and stopped again.")),
+        _ => format!("Finished the {operation}{skipping}."),
     };
     Ok(crate::stash::unless_left_behind(&path, stash, done))
 }
@@ -543,14 +674,14 @@ mod tests {
         let feature = t.commit(&[("f.txt", Some("f\n"))], "Feature").to_string();
         git(t.path(), &["switch", &main], None).unwrap();
 
-        let message = run(cherry_pick(t.path().into(), feature.clone())).unwrap();
+        let message = run(cherry_pick(t.path().into(), vec![feature.clone()])).unwrap();
         assert_eq!(message, format!("Cherry-picked {}.", &feature[..7]));
         assert!(t.dir.join("f.txt").exists());
         let head = t.repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head.summary().unwrap(), Some("Feature"));
 
         // Picking it again would change nothing.
-        let empty = run(cherry_pick(t.path().into(), feature)).unwrap_err();
+        let empty = run(cherry_pick(t.path().into(), vec![feature])).unwrap_err();
         assert!(empty.starts_with("Nothing to cherry-pick"), "{empty}");
         assert!(operation(&t.repo).is_none());
 
@@ -571,9 +702,173 @@ mod tests {
         git(t.path(), &["switch", &main], None).unwrap();
         t.commit(&[("a.txt", Some("ours\n"))], "Ours");
 
-        let stopped = run(cherry_pick(t.path().into(), feature)).unwrap_err();
+        let stopped = run(cherry_pick(t.path().into(), vec![feature])).unwrap_err();
         assert!(stopped.starts_with("CONFLICT: The cherry-pick stopped because 1 file conflicted"), "{stopped}");
         run(control_operation(t.path().into(), "abort".into())).unwrap();
+        assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn cherry_picking_several_in_one_go_skipping_those_already_here() {
+        let t = TempRepo::new("pick-several");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        let one = t.commit(&[("one.txt", Some("1\n"))], "One").to_string();
+        let two = t.commit(&[("two.txt", Some("2\n"))], "Two").to_string();
+        let three = t.commit(&[("three.txt", Some("3\n"))], "Three").to_string();
+        git(t.path(), &["switch", &main], None).unwrap();
+        // Two's changes are here already.
+        run(cherry_pick(t.path().into(), vec![two.clone()])).unwrap();
+
+        let message = run(cherry_pick(t.path().into(), vec![one, two, three])).unwrap();
+        assert_eq!(message, "Cherry-picked 2 of 3 commits; the changes from the rest were already on this branch.");
+        assert!(operation(&t.repo).is_none());
+        // Oldest first: One, then Three, on top of the Two picked before.
+        let summaries: Vec<String> = {
+            let mut walk = t.repo.revwalk().unwrap();
+            walk.push_head().unwrap();
+            walk.take(3).map(|id| t.repo.find_commit(id.unwrap()).unwrap().summary().unwrap().unwrap_or_default().to_string()).collect()
+        };
+        assert_eq!(summaries, ["Three", "One", "Two"]);
+    }
+
+    #[test]
+    fn several_cherry_picks_stop_for_a_conflict_and_go_on_after() {
+        let t = TempRepo::new("pick-several-conflict");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        let theirs = t.commit(&[("a.txt", Some("theirs\n"))], "Theirs").to_string();
+        let after = t.commit(&[("b.txt", Some("b\n"))], "After").to_string();
+        git(t.path(), &["switch", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours\n"))], "Ours");
+
+        let stopped = run(cherry_pick(t.path().into(), vec![theirs, after])).unwrap_err();
+        assert!(stopped.starts_with("CONFLICT: The cherry-pick stopped because 1 file conflicted"), "{stopped}");
+        // Resolved, and continued: the commit after it follows.
+        t.write(&[("a.txt", Some("both\n"))]);
+        git(t.path(), &["add", "a.txt"], None).unwrap();
+        run(control_operation(t.path().into(), "continue".into())).unwrap();
+        assert!(operation(&t.repo).is_none());
+        assert!(t.dir.join("b.txt").exists());
+    }
+
+    // main with a first commit, and feature from it with the commits `files` make, one
+    // each, in order; back on main. Their ids.
+    fn feature_commits(t: &TempRepo, files: &[(&str, &str)]) -> Vec<String> {
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "feature"], None).unwrap();
+        let ids = files.iter().map(|(file, text)| t.commit(&[(file, Some(text))], file).to_string()).collect();
+        git(t.path(), &["switch", &main], None).unwrap();
+        ids
+    }
+
+    #[test]
+    fn several_already_here_pick_nothing_and_the_last_one_already_here_is_skipped() {
+        let t = TempRepo::new("pick-several-empty");
+        let ids = feature_commits(&t, &[("one.txt", "1\n"), ("two.txt", "2\n")]);
+        run(cherry_pick(t.path().into(), ids.clone())).unwrap();
+        let all_here = run(cherry_pick(t.path().into(), ids.clone())).unwrap_err();
+        assert!(all_here.starts_with("Nothing to cherry-pick"), "{all_here}");
+        assert!(operation(&t.repo).is_none());
+
+        // The last one, alone, already here.
+        let t = TempRepo::new("pick-several-last-empty");
+        let ids = feature_commits(&t, &[("one.txt", "1\n"), ("two.txt", "2\n")]);
+        run(cherry_pick(t.path().into(), vec![ids[1].clone()])).unwrap();
+        let message = run(cherry_pick(t.path().into(), ids)).unwrap();
+        assert_eq!(message, "Cherry-picked 1 of 2 commits; the changes from the rest were already on this branch.");
+        assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn several_stopped_by_changes_not_committed_are_undone_not_left_half_done() {
+        let t = TempRepo::new("pick-several-dirty");
+        let ids = feature_commits(&t, &[("one.txt", "1\n"), ("a.txt", "theirs\n")]);
+        let before = t.head();
+        // Changes to a.txt, not committed, that the second would overwrite.
+        t.write(&[("a.txt", Some("mine\n"))]);
+        let refused = run(cherry_pick(t.path().into(), ids.clone())).unwrap_err();
+        assert!(refused.starts_with("Nothing was cherry-picked."), "{refused}");
+        assert_eq!(t.head(), before);
+        assert!(!t.repo.path().join("sequencer").exists());
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "mine\n");
+        // With them set aside, it goes.
+        git(t.path(), &["checkout", "--", "a.txt"], None).unwrap();
+        run(cherry_pick(t.path().into(), ids)).unwrap();
+    }
+
+    #[test]
+    fn continuing_after_a_conflict_skips_a_commit_already_here() {
+        let t = TempRepo::new("pick-several-conflict-empty");
+        let ids = feature_commits(&t, &[("a.txt", "theirs\n"), ("b.txt", "b\n")]);
+        // b's change is here already, and a.txt was changed here too.
+        run(cherry_pick(t.path().into(), vec![ids[1].clone()])).unwrap();
+        t.commit(&[("a.txt", Some("ours\n"))], "Ours");
+
+        let stopped = run(cherry_pick(t.path().into(), ids)).unwrap_err();
+        assert!(stopped.starts_with("CONFLICT:"), "{stopped}");
+        t.write(&[("a.txt", Some("both\n"))]);
+        git(t.path(), &["add", "a.txt"], None).unwrap();
+        let message = run(control_operation(t.path().into(), "continue".into())).unwrap();
+        assert_eq!(message, "Finished the cherry-pick, skipping a commit that changed nothing here.");
+        assert!(operation(&t.repo).is_none());
+    }
+
+    #[test]
+    fn not_starting_beside_a_sequence_left_part_done_nor_undoing_it() {
+        let t = TempRepo::new("pick-left-part-done");
+        let ids = feature_commits(&t, &[("one.txt", "1\n"), ("a.txt", "theirs\n")]);
+        // Started in a terminal, with changes to a.txt not committed: one's picked, and it
+        // stops before the next, which would overwrite them, leaving the sequence behind
+        // with nothing else to say so.
+        t.write(&[("a.txt", Some("mine\n"))]);
+        let _ = git(t.path(), &["cherry-pick", &ids[0], &ids[1]], None);
+        let kept = t.head();
+        assert!(operation(&t.repo).is_none());
+        assert!(t.repo.path().join("sequencer").exists());
+
+        let refused = run(cherry_pick(t.path().into(), vec![ids[0].clone(), ids[1].clone()])).unwrap_err();
+        assert!(refused.starts_with("A cherry-pick or revert of several commits was left part done here."), "{refused}");
+        // What the user's cherry-pick did stays.
+        assert_eq!(t.head(), kept);
+        assert!(t.repo.path().join("sequencer").exists());
+    }
+
+    #[test]
+    fn skipping_stops_when_a_skip_changes_nothing() {
+        let t = TempRepo::new("pick-skip-stuck");
+        let ids = feature_commits(&t, &[("one.txt", "1\n")]);
+        run(cherry_pick(t.path().into(), ids.clone())).unwrap();
+        // Picked again, from a terminal: it stops on it, changing nothing.
+        let stopped = git(t.path(), &["cherry-pick", &ids[0]], None).map(drop);
+        assert!(stopped.is_err() && stopped_on_empty(t.path()));
+        // Another git holds the index, so each skip fails without moving on.
+        let lock = t.repo.path().join("index.lock");
+        std::fs::write(&lock, "").unwrap();
+        let (skipped, step) = skip_empty(t.path(), "cherry-pick", stopped);
+        std::fs::remove_file(&lock).unwrap();
+        assert_eq!(skipped, 0);
+        assert!(step.is_err());
+    }
+
+    #[test]
+    fn a_merge_commit_is_cherry_picked_on_its_own() {
+        let t = TempRepo::new("pick-several-merge");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let main = t.branch();
+        git(t.path(), &["switch", "-c", "side"], None).unwrap();
+        let side = t.commit(&[("s.txt", Some("s\n"))], "Side").to_string();
+        git(t.path(), &["switch", &main], None).unwrap();
+        t.commit(&[("m.txt", Some("m\n"))], "Main");
+        git(t.path(), &["merge", "--no-edit", "side"], None).unwrap();
+        let merge = t.repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+        git(t.path(), &["switch", "-c", "other", "HEAD~1"], None).unwrap();
+
+        let refused = run(cherry_pick(t.path().into(), vec![side, merge.clone()])).unwrap_err();
+        assert_eq!(refused, format!("{} is a merge commit, which is cherry-picked on its own, not with others.", &merge[..7]));
         assert!(operation(&t.repo).is_none());
     }
 

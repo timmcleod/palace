@@ -503,21 +503,30 @@ export function useGitActions({
   }
 
   // The menu for several selected commits.
-  function commitsMenu(entries, rewritable) {
+  // `entries` are as listed, newest first. `pickable`: they're another branch's, a tag's
+  // or a remote branch's, to cherry-pick onto the current one.
+  function commitsMenu(entries, rewritable, pickable = false) {
     return [
       {
         label: `Squash ${entries.length} Commits…`,
         action: () => squashCommits(entries),
         disabled: !rewritable || midOperation(),
       },
+      pickable && {
+        label: `Cherry-Pick ${entries.length} Commits into “${current()}”`,
+        action: () => cherryPick(entries.map((e) => e.commit).reverse()),
+        disabled: midOperation(),
+      },
       { separator: true },
       { label: "Copy Commit Hashes", action: () => navigator.clipboard.writeText(entries.map((e) => e.commit.id).join("\n")) },
     ];
   }
 
-  // Copies a commit's changes onto the current branch as a new commit.
-  function cherryPick(commit) {
-    return run(["Cherry-picking…", "Cherry-picked", "Couldn't cherry-pick"], "cherry_pick", { id: commit.id });
+  // Copies the changes of a commit, or of several, oldest first, onto the current branch,
+  // each as a new commit (see cherry_pick in branch.rs).
+  function cherryPick(commits) {
+    const ids = (Array.isArray(commits) ? commits : [commits]).map((c) => c.id);
+    return run(["Cherry-picking…", "Cherry-picked", "Couldn't cherry-pick"], "cherry_pick", { ids });
   }
 
   // Adds a commit that undoes another's changes.

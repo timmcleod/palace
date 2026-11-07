@@ -22,7 +22,7 @@ import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { splitKey } from "../lib/sidebarKeys.js";
-import { draggedCommit, isCommitDrag } from "../lib/commitDrag.js";
+import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -323,17 +323,17 @@ const dropClass = (row) => {
   return at.merge ? "drop-target" : at.after ? "drop-after" : "drop-before";
 };
 
-// --- A commit dropped on the current branch -------------------------------------------
-// A commit dragged from another branch's history (see commitDrag.js) is cherry-picked
-// onto the current branch when it's dropped on its row. That drag is the web view's own,
+// --- Commits dropped on the current branch --------------------------------------------
+// Commits dragged from another branch's history (see commitDrag.js) are cherry-picked
+// onto the current branch when they're dropped on its row. That drag is the web view's own,
 // and its events are apart from the pointer events branches are dragged with above, so
 // the two don't meet. Not while a merge or rebase waits on the user, as the menu has it.
 
-// The row a commit's dragged over, ready to drop.
+// The row commits are dragged over, ready to drop.
 const commitOver = ref(null);
 const takesCommit = (row, event) => !!(row.head && isCommitDrag(event) && !props.overview.operation);
 // Let go of, the row's let go of too.
-watch(draggedCommit, (commit) => commit || (commitOver.value = null));
+watch(draggedCommits, (commits) => commits || (commitOver.value = null));
 
 function onCommitDragOver(row, event) {
   if (!takesCommit(row, event)) return;
@@ -349,9 +349,9 @@ function onCommitDragLeave(row, event) {
 function onCommitDrop(row, event) {
   if (!takesCommit(row, event)) return;
   event.preventDefault();
-  const commit = draggedCommit.value;
+  const commits = draggedCommits.value;
   commitOver.value = null;
-  emit("cherry-pick", commit);
+  emit("cherry-pick", commits);
 }
 
 // Where what dropping would do is told, as the drop target or Alt changes (see
@@ -484,8 +484,10 @@ function onRowClick(row, event) {
                   <template v-if="altHeld">Rebase <b>{{ row.label }}</b> onto <b>{{ dragging }}</b></template>
                   <template v-else>Merge <b>{{ dragging }}</b> into <b>{{ row.label }}</b></template>
                 </span>
-                <span v-else-if="commitOver === row.key && draggedCommit" class="drop-sentence" :class="{ above: sentenceAbove }">
-                  Cherry-pick <b>{{ draggedCommit.summary }}</b> into <b>{{ row.label }}</b>
+                <span v-else-if="commitOver === row.key && draggedCommits" class="drop-sentence" :class="{ above: sentenceAbove }">
+                  Cherry-pick
+                  <b>{{ draggedCommits.length > 1 ? `${draggedCommits.length} commits` : draggedCommits[0].summary }}</b>
+                  into <b>{{ row.label }}</b>
                 </span>
               </Transition>
             </template>

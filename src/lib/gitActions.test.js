@@ -320,6 +320,31 @@ describe("a new task", () => {
   });
 });
 
+describe("cherry-picking", () => {
+  const commit = (id) => ({ id: `${id}000000`, short_id: id });
+
+  test("picks one commit, or several, in the order given", async () => {
+    const { actions, ran } = actionsOn();
+    await actions.cherryPick(commit("aaa"));
+    await actions.cherryPick([commit("old"), commit("new")]);
+    expect(ran()).toEqual([
+      ["cherry_pick", { ids: ["aaa000000"] }],
+      ["cherry_pick", { ids: ["old000000", "new000000"] }],
+    ]);
+  });
+
+  test("several chosen in another branch's history, oldest first, from the menu", async () => {
+    const { actions, ran } = actionsOn();
+    // As the history lists them: newest first.
+    const entries = [{ commit: commit("new"), index: 0 }, { commit: commit("old"), index: 1 }];
+    const menu = actions.commitsMenu(entries, false, true);
+    await item(menu, "Cherry-Pick 2 Commits into “main”").action();
+    expect(ran()).toEqual([["cherry_pick", { ids: ["old000000", "new000000"] }]]);
+    // Not in the current branch's own history, where they're already.
+    expect(labels(actions.commitsMenu(entries, true, false))).not.toContain("Cherry-Pick 2 Commits into “main”");
+  });
+});
+
 test("a commit's menu resets the branch whose history is shown, and only rewrites what can be", () => {
   const commit = { id: "abc1234def", short_id: "abc1234" };
   const { actions } = actionsOn();

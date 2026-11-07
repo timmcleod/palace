@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick, ref } from "vue";
-import { COMMIT_TYPE, draggedCommit } from "../lib/commitDrag.js";
+import { COMMIT_TYPE, draggedCommits } from "../lib/commitDrag.js";
 import Sidebar from "./Sidebar.vue";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
@@ -30,7 +30,7 @@ const overview = (more = {}) => ({
 let app;
 afterEach(() => {
   app?.unmount();
-  draggedCommit.value = null;
+  draggedCommits.value = null;
   document.body.innerHTML = "";
 });
 
@@ -57,7 +57,7 @@ const commit = { id: "abc1234def", short_id: "abc1234", summary: "Fix the login 
 describe("a commit dragged from another branch's history", () => {
   test("drops on the current branch, said and shown, and is cherry-picked there", async () => {
     const { onCherryPick } = sidebar();
-    draggedCommit.value = commit;
+    draggedCommits.value = [commit];
     const over = dragEvent("dragover");
     row("branch:main").dispatchEvent(over);
     await nextTick();
@@ -68,13 +68,24 @@ describe("a commit dragged from another branch's history", () => {
 
     row("branch:main").dispatchEvent(dragEvent("drop"));
     await nextTick();
-    expect(onCherryPick).toHaveBeenCalledWith(commit);
+    expect(onCherryPick).toHaveBeenCalledWith([commit]);
     expect(row("branch:main").classList.contains("drop-target")).toBe(false);
+  });
+
+  test("several, oldest first, drop together, said as how many", async () => {
+    const { onCherryPick } = sidebar();
+    const older = { id: "0000001aaa", short_id: "0000001", summary: "Add the login form" };
+    draggedCommits.value = [older, commit];
+    row("branch:main").dispatchEvent(dragEvent("dragover"));
+    await nextTick();
+    expect(row("branch:main").textContent).toContain("Cherry-pick 2 commits into main");
+    row("branch:main").dispatchEvent(dragEvent("drop"));
+    expect(onCherryPick).toHaveBeenCalledWith([older, commit]);
   });
 
   test("doesn't drop on another branch", async () => {
     sidebar();
-    draggedCommit.value = commit;
+    draggedCommits.value = [commit];
     const over = dragEvent("dragover");
     row("branch:feature").dispatchEvent(over);
     await nextTick();
@@ -84,7 +95,7 @@ describe("a commit dragged from another branch's history", () => {
 
   test("doesn't drop while a merge or rebase waits on the user", async () => {
     const { onCherryPick } = sidebar({ operation: "rebase" });
-    draggedCommit.value = commit;
+    draggedCommits.value = [commit];
     const over = dragEvent("dragover");
     row("branch:main").dispatchEvent(over);
     row("branch:main").dispatchEvent(dragEvent("drop"));
@@ -95,17 +106,17 @@ describe("a commit dragged from another branch's history", () => {
 
   test("lets go of the row once the drag ends elsewhere", async () => {
     sidebar();
-    draggedCommit.value = commit;
+    draggedCommits.value = [commit];
     row("branch:main").dispatchEvent(dragEvent("dragover"));
     await nextTick();
-    draggedCommit.value = null;
+    draggedCommits.value = null;
     await nextTick();
     expect(row("branch:main").classList.contains("drop-target")).toBe(false);
   });
 
   test("isn't taken for a file, or another drag, even with a commit's left from a drag whose end went unheard", async () => {
     const { onCherryPick } = sidebar();
-    draggedCommit.value = commit;
+    draggedCommits.value = [commit];
     const over = dragEvent("dragover", ["Files"]);
     row("branch:main").dispatchEvent(over);
     row("branch:main").dispatchEvent(dragEvent("drop", ["Files"]));

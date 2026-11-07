@@ -1344,7 +1344,7 @@ const breadcrumb = computed(() => {
       @merge-into-head="(name) => actions.merge(name)"
       @rebase-head-onto="(name) => actions.rebase(name)"
       @new-branch-from="(name) => actions.newBranch(name, name)"
-      @cherry-pick="(commit) => actions.cherryPick(commit)"
+      @cherry-pick="(commits) => actions.cherryPick(commits)"
       @add-menu="(event) => openMenu(event, actions.addMenu())"
       @recent-menu="recentMenu"
     />
@@ -1558,7 +1558,7 @@ const breadcrumb = computed(() => {
           :pickable="pickable"
           @select="selectedCommit = $event"
           @menu="(commit, event) => openMenu(event, actions.commitMenu(commit, rewritable))"
-          @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable))"
+          @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable, pickable))"
           @move="actions.moveCommit"
           @count="historyCount = $event"
         />

@@ -6,7 +6,7 @@ import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
-import { COMMIT_TYPE, draggedCommit } from "../lib/commitDrag.js";
+import { COMMIT_TYPE, draggedCommits } from "../lib/commitDrag.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -272,15 +272,18 @@ function onDragStart(index, event) {
     event.preventDefault();
     return;
   }
+  // To cherry-pick: the commit, or the several chosen with it, oldest first, as they're
+  // picked. The list is newest first.
+  const picking = moving ? [] : chosen.size > 1 && chosen.has(commit.id) ? [...chosen.values()].sort((a, b) => b.index - a.index).map((c) => c.commit) : [commit];
   if (moving) dragged = { commit, index };
-  else draggedCommit.value = commit;
+  else draggedCommits.value = picking;
   event.dataTransfer.effectAllowed = moving ? "move" : "copy";
-  event.dataTransfer.setData("text/plain", commit.short_id);
-  if (!moving) event.dataTransfer.setData(COMMIT_TYPE, commit.id);
+  event.dataTransfer.setData("text/plain", picking.length > 1 ? picking.map((c) => c.short_id).join(" ") : commit.short_id);
+  if (!moving) event.dataTransfer.setData(COMMIT_TYPE, picking.map((c) => c.id).join(" "));
   // A compact image of what's being dragged, like a branch dragged in the sidebar.
   dragImage = document.createElement("div");
   dragImage.className = "drag-image";
-  dragImage.textContent = `${commit.short_id}  ${commit.summary}`;
+  dragImage.textContent = picking.length > 1 ? `${picking.length} commits` : `${commit.short_id}  ${commit.summary}`;
   document.body.append(dragImage);
   setDragImage(event, dragImage);
 }
@@ -323,7 +326,7 @@ function onDragEnd() {
   dragImage?.remove();
   dragImage = null;
   dragged = null;
-  draggedCommit.value = null;
+  draggedCommits.value = null;
   dropAt.value = null;
 }
 
