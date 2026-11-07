@@ -3,6 +3,7 @@ import { computed, h, markRaw, onBeforeUnmount, onMounted, ref, render, shallowR
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   asText,
   buffers,
@@ -97,6 +98,42 @@ function goToLine() {
 const TEXT = ["text", "read_only"];
 const isText = computed(() => TEXT.includes(contents.value?.kind));
 const isSvg = computed(() => /\.svg$/i.test(props.file ?? ""));
+
+// --- Previewing Markdown ------------------------------------------------------------
+// A Markdown file can be shown rendered, as on GitHub, in place of its text: what's in
+// the editor, edits not saved too, rendered by the backend (see markdown.rs). Each file
+// opens as text.
+
+const isMarkdown = computed(() => /\.(md|markdown|mdown|mkdn?)$/i.test(props.file ?? ""));
+const previewing = ref(false);
+const previewHtml = ref("");
+const rendering = ref(false);
+
+async function showPreview() {
+  if (!view) return;
+  const file = props.file;
+  previewing.value = true;
+  rendering.value = true;
+  const html = await invoke("render_markdown", { path: props.path, file, text: view.state.doc.toString() }).catch(() => "");
+  // Another file opened meanwhile, or back to editing.
+  if (props.file !== file || !previewing.value) return;
+  previewHtml.value = html;
+  rendering.value = false;
+}
+
+function showText() {
+  previewing.value = false;
+  previewHtml.value = "";
+  view?.focus();
+}
+
+// Links open in the browser rather than in Palace's window; others go nowhere.
+function onPreviewClick(event) {
+  const anchor = event.target.closest?.("a[href]");
+  if (!anchor) return;
+  event.preventDefault();
+  if (/^(https?|mailto):/.test(anchor.href)) openUrl(anchor.href);
+}
 
 function newState(text, readOnly = false) {
   return cm.createState(text, props.file, { ...settingsNow(), readOnly, ...hooks() });
@@ -210,6 +247,13 @@ async function showState(state, focus) {
 }
 
 watch(() => [props.path, props.file], open, { immediate: true });
+watch(
+  () => [props.path, props.file],
+  () => {
+    previewing.value = false;
+    previewHtml.value = "";
+  },
+);
 
 // The file as it is on disk now: followed if it has no edits here, otherwise noted.
 async function checkDisk() {
@@ -517,6 +561,10 @@ function showAs(text) {
       <button v-if="isSvg && isText && !dirty" class="secondary-button save" title="Show the image" @click="showAs(false)">
         <Image :size="13" /> Image
       </button>
+      <div v-if="isMarkdown && isText && !error" class="segmented">
+        <button :class="{ active: !previewing }" @click="previewing && showText()">Edit</button>
+        <button :class="{ active: previewing }" title="Show it as it reads, rendered" @click="previewing || showPreview()">Preview</button>
+      </div>
       <button v-if="file" class="icon-button small" title="Open in Your Editor" @click="openInEditor"><ExternalLink :size="14" /></button>
       <button
         v-if="contents?.kind === 'text' && (!settings.autoSave || saveError)"
@@ -557,8 +605,12 @@ function showAs(text) {
         @delete="deleteComment(path, c.id)"
       />
     </div>
-    <div v-show="isText && !error" ref="host" class="editor-host" @focusout="autosave" @contextmenu="editorMenu" />
-    <div v-if="isText && !error && status" class="status-bar">
+    <div v-show="isText && !error && !previewing" ref="host" class="editor-host" @focusout="autosave" @contextmenu="editorMenu" />
+    <div v-if="previewing && !error" class="markdown-preview" @click="onPreviewClick">
+      <p v-if="rendering" class="dim rendering"><Spinner :size="13" /> Rendering…</p>
+      <div v-else class="markdown selectable" v-html="previewHtml" />
+    </div>
+    <div v-if="isText && !error && status && !previewing" class="status-bar">
       <button class="status-item" :title="`Go to Line (${isMac ? '⌃G' : 'Ctrl+G'})`" @click="goToLine">
         Ln {{ status.line }}, Col {{ status.column }}
       </button>
@@ -671,6 +723,27 @@ function showAs(text) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* A Markdown file, rendered, in the editor's place. */
+.markdown-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.markdown-preview .markdown {
+  max-width: 880px;
+  padding: 20px 28px 40px;
+}
+
+.rendering {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 20px 28px;
+  font-size: var(--font-md);
 }
 
 .status-bar {
