@@ -1252,13 +1252,25 @@ watch(selected, (key) => {
 
 // Commits can be squashed and reordered in the current branch's own full, unsearched history,
 // while nothing else is in progress.
+// Whether the history shown is the current branch's own.
+const ownHistory = computed(() => {
+  const r = historyRef.value;
+  return !r || (r.kind === "branch" && r.name === overview.value?.head.branch);
+});
+
 const rewritable = computed(() => {
   const o = overview.value;
-  const r = historyRef.value;
-  const own = !r || (r.kind === "branch" && r.name === o?.head.branch);
   // Not in the mainline view, where commits next to each other in the list may not be.
   const whole = !fileFilter.value && !historySearch.value && !firstParent.value;
-  return !!(o?.head.branch && own && !isCompare.value && whole && !o.operation);
+  return !!(o?.head.branch && ownHistory.value && !isCompare.value && whole && !o.operation);
+});
+
+// Whether the history's commits can be dragged to the current branch, in the sidebar, to
+// cherry-pick them there: another branch's, a tag's or a remote branch's, while there's
+// a current branch and nothing waits on the user.
+const pickable = computed(() => {
+  const o = overview.value;
+  return !!(o?.head.branch && !ownHistory.value && !isCompare.value && !o.operation);
 });
 
 const historyRev = computed(() => {
@@ -1332,6 +1344,7 @@ const breadcrumb = computed(() => {
       @merge-into-head="(name) => actions.merge(name)"
       @rebase-head-onto="(name) => actions.rebase(name)"
       @new-branch-from="(name) => actions.newBranch(name, name)"
+      @cherry-pick="(commit) => actions.cherryPick(commit)"
       @add-menu="(event) => openMenu(event, actions.addMenu())"
       @recent-menu="recentMenu"
     />
@@ -1542,6 +1555,7 @@ const breadcrumb = computed(() => {
           :refresh-key="refreshKey"
           :selected-id="selectedCommit?.id"
           :editable="rewritable"
+          :pickable="pickable"
           @select="selectedCommit = $event"
           @menu="(commit, event) => openMenu(event, actions.commitMenu(commit, rewritable))"
           @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable))"

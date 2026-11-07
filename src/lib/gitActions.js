@@ -1026,6 +1026,7 @@ export function useGitActions({
     tagMenu,
     stashMenu,
     commitMenu,
+    cherryPick,
     revisionChoices,
   };
 }

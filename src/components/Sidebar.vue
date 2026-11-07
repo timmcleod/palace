@@ -22,6 +22,7 @@ import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { splitKey } from "../lib/sidebarKeys.js";
+import { draggedCommit, isCommitDrag } from "../lib/commitDrag.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -51,6 +52,7 @@ const emit = defineEmits([
   "merge-into-head",
   "rebase-head-onto",
   "new-branch-from",
+  "cherry-pick",
   "add-menu",
   "recent-menu",
 ]);
@@ -298,7 +300,6 @@ function placeSentence() {
   const below = sentence.parentElement.getBoundingClientRect().bottom + 4 + sentence.offsetHeight;
   sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
 }
-watch([dropAt, overBranches, altHeld], placeSentence, { flush: "post" });
 
 // Where a drop on `row` would land, from how far down the row the pointer is.
 function landing(row, rect, pointerY) {
@@ -316,10 +317,46 @@ function landing(row, rect, pointerY) {
 }
 
 const dropClass = (row) => {
+  if (commitOver.value === row.key) return "drop-target";
   const at = dropAt.value;
   if (at?.key !== row.key) return null;
   return at.merge ? "drop-target" : at.after ? "drop-after" : "drop-before";
 };
+
+// --- A commit dropped on the current branch -------------------------------------------
+// A commit dragged from another branch's history (see commitDrag.js) is cherry-picked
+// onto the current branch when it's dropped on its row. That drag is the web view's own,
+// and its events are apart from the pointer events branches are dragged with above, so
+// the two don't meet. Not while a merge or rebase waits on the user, as the menu has it.
+
+// The row a commit's dragged over, ready to drop.
+const commitOver = ref(null);
+const takesCommit = (row, event) => !!(row.head && isCommitDrag(event) && !props.overview.operation);
+// Let go of, the row's let go of too.
+watch(draggedCommit, (commit) => commit || (commitOver.value = null));
+
+function onCommitDragOver(row, event) {
+  if (!takesCommit(row, event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  commitOver.value = row.key;
+}
+
+function onCommitDragLeave(row, event) {
+  if (commitOver.value === row.key && !event.currentTarget.contains(event.relatedTarget)) commitOver.value = null;
+}
+
+function onCommitDrop(row, event) {
+  if (!takesCommit(row, event)) return;
+  event.preventDefault();
+  const commit = draggedCommit.value;
+  commitOver.value = null;
+  emit("cherry-pick", commit);
+}
+
+// Where what dropping would do is told, as the drop target or Alt changes (see
+// placeSentence): after the drop targets above, branches' and commits', are set up.
+watch([dropAt, overBranches, altHeld, commitOver], placeSentence, { flush: "post" });
 
 const COMPARABLE = ["branch", "remote-branch", "tag"];
 
@@ -399,6 +436,9 @@ function onRowClick(row, event) {
             :title="dragRow ? undefined : row.title"
             :data-row="row.key"
             @pointerdown="onPointerDown(row, $event)"
+            @dragover="onCommitDragOver(row, $event)"
+            @dragleave="onCommitDragLeave(row, $event)"
+            @drop="onCommitDrop(row, $event)"
             @click="onRowClick(row, $event)"
             @dblclick="row.older || emit('activate', row)"
             @contextmenu.prevent="
@@ -443,6 +483,9 @@ function onRowClick(row, event) {
                 <span v-if="dropAt?.merge && dropAt.key === row.key" class="drop-sentence" :class="{ above: sentenceAbove }">
                   <template v-if="altHeld">Rebase <b>{{ row.label }}</b> onto <b>{{ dragging }}</b></template>
                   <template v-else>Merge <b>{{ dragging }}</b> into <b>{{ row.label }}</b></template>
+                </span>
+                <span v-else-if="commitOver === row.key && draggedCommit" class="drop-sentence" :class="{ above: sentenceAbove }">
+                  Cherry-pick <b>{{ draggedCommit.summary }}</b> into <b>{{ row.label }}</b>
                 </span>
               </Transition>
             </template>

@@ -6,6 +6,7 @@ import Avatar from "./Avatar.vue";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
+import { COMMIT_TYPE, draggedCommit } from "../lib/commitDrag.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -23,6 +24,9 @@ const props = defineProps({
   // Whether commits can be dragged to reorder them: only in the current branch's own
   // history.
   editable: { type: Boolean, default: false },
+  // Whether commits can be dragged to the sidebar's current branch, to cherry-pick them
+  // there: in another branch's history, a tag's or a remote branch's.
+  pickable: { type: Boolean, default: false },
 });
 // "menu-many" is the context menu for several selected commits; "move" asks to move a
 // dragged commit above or below another; "count" reports how many commits are listed.
@@ -244,31 +248,41 @@ function onContextMenu(index, event) {
   emit("menu", commit, event);
 }
 
-// --- Dragging to reorder ---------------------------------------------------------
+// --- Dragging to reorder, or to cherry-pick ----------------------------------------
+// In the current branch's own history, a commit's dragged to another place in it, to
+// move it there. In another's, to the sidebar's current branch, to cherry-pick it there
+// (see commitDrag.js), which the list itself doesn't take.
 
 const DRAG_EDGE = 40;
+// The commit being moved: { commit, index }.
 let dragged = null;
+let dragImage = null;
 // Where a dropped commit would go: { index, above }.
 const dropAt = ref(null);
 
+// Reordering is only of the branch's own commits, not those its upstream has that it
+// hasn't pulled (`incoming`); any shown can be cherry-picked.
 const canDrag = (commit) => props.editable && commit && !commit.incoming;
+const canPick = (commit) => props.pickable && !!commit;
 
 function onDragStart(index, event) {
   const commit = commitAt(index);
-  if (!canDrag(commit)) {
+  const moving = canDrag(commit);
+  if (!moving && !canPick(commit)) {
     event.preventDefault();
     return;
   }
-  dragged = { commit, index };
-  event.dataTransfer.effectAllowed = "move";
+  if (moving) dragged = { commit, index };
+  else draggedCommit.value = commit;
+  event.dataTransfer.effectAllowed = moving ? "move" : "copy";
   event.dataTransfer.setData("text/plain", commit.short_id);
-  // A compact image of what's being moved, like a branch dragged in the sidebar.
-  const image = document.createElement("div");
-  image.className = "drag-image";
-  image.textContent = `${commit.short_id}  ${commit.summary}`;
-  document.body.append(image);
-  setDragImage(event, image);
-  dragged.image = image;
+  if (!moving) event.dataTransfer.setData(COMMIT_TYPE, commit.id);
+  // A compact image of what's being dragged, like a branch dragged in the sidebar.
+  dragImage = document.createElement("div");
+  dragImage.className = "drag-image";
+  dragImage.textContent = `${commit.short_id}  ${commit.summary}`;
+  document.body.append(dragImage);
+  setDragImage(event, dragImage);
 }
 
 function onDragOver(index, event) {
@@ -301,9 +315,15 @@ function onDrop(index, event) {
   emit("move", move, target, above ? "above" : "below");
 }
 
+// Gone mid-drag, its end isn't heard: what it was dragging is let go of now.
+onBeforeUnmount(() => onDragEnd());
+
+// Dropped anywhere, or let go of.
 function onDragEnd() {
-  dragged?.image?.remove();
+  dragImage?.remove();
+  dragImage = null;
   dragged = null;
+  draggedCommit.value = null;
   dropAt.value = null;
 }
 
@@ -484,7 +504,7 @@ const MAX_REFS = 3;
           :class="{ selected: isChosen(item.commit), incoming: item.commit?.incoming }"
           :title="item.commit?.incoming ? 'Fetched, not pulled yet' : null"
           :style="{ top: `${item.top}px`, height: `${ROW_HEIGHT}px` }"
-          :draggable="canDrag(item.commit)"
+          :draggable="canDrag(item.commit) || canPick(item.commit)"
           @click="onClick(item.index, $event)"
           @contextmenu.prevent="onContextMenu(item.index, $event)"
           @dragstart="onDragStart(item.index, $event)"
