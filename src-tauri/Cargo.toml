@@ -1,6 +1,6 @@
 [package]
 name = "palace"
-version = "0.30.1"
+version = "0.31.0"
 description = "Run your agent, review its work, ship it"
 authors = ["Tim McLeod"]
 license = "MIT"
