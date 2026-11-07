@@ -469,8 +469,8 @@ function startResize(event) {
   max-width: 220px;
   height: 26px;
   padding: 0 4px 0 9px;
-  border-radius: 6px;
-  font-size: 12.5px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-ui);
   color: var(--text-secondary);
   cursor: default;
   user-select: none;
@@ -488,7 +488,7 @@ function startResize(event) {
   top: 3px;
   bottom: 3px;
   width: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   pointer-events: none;
 }
@@ -553,7 +553,7 @@ function startResize(event) {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--icon);
   opacity: 0;
@@ -575,10 +575,10 @@ function startResize(event) {
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--content-bg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-primary);
 }
 
@@ -605,11 +605,11 @@ function startResize(event) {
   align-items: center;
   justify-content: center;
   border: 2px dashed var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   /* Mostly the panel's own background, so the terminal's text under it doesn't compete
      with what it says. */
   background: color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, var(--content-bg) 88%, transparent));
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 600;
   color: var(--accent);
   pointer-events: none;

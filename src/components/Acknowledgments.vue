@@ -159,7 +159,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   align-items: center;
   gap: 5px;
   padding: 4px 11px 4px 8px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .projects {
@@ -173,7 +173,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   margin-bottom: 16px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--content-bg);
   color: var(--icon);
 }
@@ -195,7 +195,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
 
 .group-name {
   margin: 0 0 6px 2px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -212,10 +212,10 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   padding: 1px 6px;
   overflow: hidden;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.6;
   text-align: left;
   text-overflow: ellipsis;
@@ -249,7 +249,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   margin-top: 10px;
   padding: 10px 12px 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--card-bg);
 }
 
@@ -259,7 +259,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .details-name {
@@ -284,10 +284,10 @@ const TITLES = { App: "The app", Backend: "Behind it" };
 .member {
   padding: 1px 7px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--text-secondary);
 }
@@ -312,10 +312,10 @@ const TITLES = { App: "The app", Backend: "Behind it" };
   margin: 0 0 8px;
   padding: 10px 12px;
   overflow: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--content-bg);
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   line-height: 1.5;
   white-space: pre-wrap;
   color: var(--text-secondary);
@@ -323,7 +323,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
 
 .none {
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 </style>

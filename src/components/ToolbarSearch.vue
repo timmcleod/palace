@@ -276,9 +276,9 @@ defineExpose({ focus });
   overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--content-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow-popover);
 }
 
 .result {
@@ -286,7 +286,7 @@ defineExpose({ focus });
   align-items: baseline;
   gap: 8px;
   padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 
@@ -307,7 +307,7 @@ defineExpose({ focus });
 
 h3 {
   margin: 6px 8px 3px;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -339,7 +339,7 @@ h3:not(:first-child) {
 .dir {
   flex-shrink: 100;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 

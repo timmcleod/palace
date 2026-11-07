@@ -50,9 +50,9 @@ const icons = { done: CircleCheck, blocked: MessageCircleQuestion, error: Circle
   gap: 10px;
   padding: 10px 8px 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--content-bg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
   cursor: pointer;
 }
 
@@ -72,7 +72,7 @@ const icons = { done: CircleCheck, blocked: MessageCircleQuestion, error: Circle
   flex-direction: column;
   gap: 3px;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .dim {
@@ -80,7 +80,7 @@ const icons = { done: CircleCheck, blocked: MessageCircleQuestion, error: Circle
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 

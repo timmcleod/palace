@@ -556,14 +556,14 @@ const MAX_REFS = 3;
 }
 
 .month-label {
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--text-secondary);
 }
 
 .commit {
-  border-radius: 7px;
+  border-radius: var(--radius-md);
 }
 
 .commit.selected {
@@ -581,7 +581,7 @@ const MAX_REFS = 3;
   left: 8px;
   right: 8px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   pointer-events: none;
 }
@@ -647,8 +647,8 @@ const MAX_REFS = 3;
   min-width: 2em;
   max-width: 14em;
   padding: 0 5px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
   line-height: 16px;
   text-overflow: ellipsis;
   color: white;
@@ -681,13 +681,13 @@ const MAX_REFS = 3;
   flex-shrink: 0;
   margin-left: auto;
   padding-left: 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
 .hash {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
@@ -699,7 +699,7 @@ const MAX_REFS = 3;
 .skeleton {
   height: 10px;
   margin: 3px 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--pill-bg);
 }
 

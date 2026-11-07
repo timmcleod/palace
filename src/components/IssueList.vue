@@ -433,17 +433,17 @@ async function signIn() {
 .segmented {
   display: flex;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
 }
 
 .segmented button {
   padding: 1px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-primary);
 }
 
@@ -460,10 +460,10 @@ async function signIn() {
   max-width: 160px;
   padding: 3px 7px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   white-space: nowrap;
   color: var(--text-secondary);
 }
@@ -496,7 +496,7 @@ async function signIn() {
 }
 
 .count {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 
@@ -516,7 +516,7 @@ async function signIn() {
 
 .issue.selected {
   border-bottom-color: transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--row-selected);
 }
 
@@ -575,14 +575,14 @@ async function signIn() {
 
 .label {
   padding: 0 7px;
-  border-radius: 10px;
-  font-size: 11.5px;
+  border-radius: var(--radius-xl);
+  font-size: var(--font-sm);
   font-weight: 500;
   line-height: 18px;
 }
 
 .meta {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 
@@ -598,7 +598,7 @@ async function signIn() {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 

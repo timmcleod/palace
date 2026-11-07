@@ -43,9 +43,9 @@ onMounted(markAsked);
   width: min(340px, calc(100vw - 32px));
   padding: 12px 10px 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--content-bg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
 }
 
 .icon {
@@ -63,7 +63,7 @@ onMounted(markAsked);
 }
 
 .dim {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -76,7 +76,7 @@ onMounted(markAsked);
 
 .actions .primary-button {
   padding: 4px 12px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .link-button {
@@ -84,7 +84,7 @@ onMounted(markAsked);
   border: 0;
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--accent);
   cursor: pointer;
 }

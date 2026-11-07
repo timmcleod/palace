@@ -65,9 +65,9 @@ function onKeydown(event) {
   gap: 22px;
   width: min(480px, calc(100vw - 32px));
   padding: 26px 26px 20px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   background: var(--content-bg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-dialog);
 }
 
 header {
@@ -83,7 +83,7 @@ header {
 
 h2 {
   margin: 4px 0 6px;
-  font-size: 16px;
+  font-size: var(--font-2xl);
   font-weight: 600;
 }
 

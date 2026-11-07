@@ -127,7 +127,7 @@ function openFirstRecent() {
   box-sizing: border-box;
   max-height: calc(100vh - 56px);
   padding: 36px 28px 24px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   background: var(--content-bg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 30px rgba(0, 0, 0, 0.08);
   text-align: center;
@@ -185,11 +185,11 @@ function openFirstRecent() {
   margin: 0 0 6px;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-primary);
 }
 
@@ -199,7 +199,7 @@ function openFirstRecent() {
 
 .recent-none {
   padding: 6px 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-tertiary);
 }
 
@@ -210,7 +210,7 @@ function openFirstRecent() {
 
 .recents-title {
   padding: 0 8px 4px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -220,7 +220,7 @@ function openFirstRecent() {
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
 }
 
 .recent:hover {
@@ -242,7 +242,7 @@ function openFirstRecent() {
 
 .recent-path {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;

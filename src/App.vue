@@ -1894,7 +1894,7 @@ const breadcrumb = computed(() => {
 }
 
 .repo-subtitle {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -1951,17 +1951,17 @@ const breadcrumb = computed(() => {
   right: 1px;
   min-width: 15px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--accent);
   color: white;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 15px;
 }
 
 .action-group {
   display: flex;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--toolbar-group-bg);
 }
 
@@ -1985,10 +1985,10 @@ const breadcrumb = computed(() => {
   gap: 4px;
   padding: 3px 7px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
@@ -2013,10 +2013,10 @@ const breadcrumb = computed(() => {
   margin-left: auto;
   padding: 3px 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -2042,9 +2042,9 @@ const breadcrumb = computed(() => {
   margin-right: auto;
   margin-left: 10px;
   padding: 1px 2px 1px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--pill-bg);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .file-filter > svg {
@@ -2060,7 +2060,7 @@ const breadcrumb = computed(() => {
 
 .match-count {
   margin-left: 4px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -2087,14 +2087,14 @@ const breadcrumb = computed(() => {
 .segmented {
   display: flex;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
 }
 
 .segmented button {
   padding: 2px 12px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
   color: var(--text-primary);

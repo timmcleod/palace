@@ -607,7 +607,7 @@ function showAs(text) {
   padding: 1px 7px;
   border-radius: 999px;
   background: var(--pill-bg);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 
@@ -622,7 +622,7 @@ function showAs(text) {
 
 .size {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .save {
@@ -630,7 +630,7 @@ function showAs(text) {
   align-items: center;
   gap: 5px;
   padding: 3px 11px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .lost-comments {
@@ -644,7 +644,7 @@ function showAs(text) {
 
 .lost-title {
   margin: 6px 12px 0;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -655,7 +655,7 @@ function showAs(text) {
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--banner-warning-bg);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .disk-banner span {
@@ -664,7 +664,7 @@ function showAs(text) {
 
 .disk-banner .secondary-button {
   padding: 3px 11px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .editor-host {
@@ -682,7 +682,7 @@ function showAs(text) {
   padding: 0 12px 0 6px;
   border-top: 1px solid var(--border);
   background: var(--sidebar-bg);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   white-space: nowrap;
   color: var(--text-secondary);
 }
@@ -690,7 +690,7 @@ function showAs(text) {
 .status-item {
   padding: 1px 6px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
   color: inherit;

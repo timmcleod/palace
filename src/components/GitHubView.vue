@@ -273,14 +273,14 @@ async function signIn() {
   gap: 6px;
   height: 44px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
 
 .group-label {
   margin: 14px 8px 4px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -290,7 +290,7 @@ async function signIn() {
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .owner:hover {
@@ -375,7 +375,7 @@ async function signIn() {
   gap: 14px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
@@ -394,14 +394,14 @@ async function signIn() {
   display: flex;
   flex-shrink: 0;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
 }
 
 .segmented button {
   padding: 3px 12px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
   color: var(--text-primary);
@@ -467,12 +467,12 @@ async function signIn() {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
 .small {
-  font-size: 12px;
+  font-size: var(--font-sm);
   white-space: nowrap;
 }
 
@@ -544,7 +544,7 @@ async function signIn() {
 }
 
 .sign-in .dim {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 

@@ -183,7 +183,7 @@ async function run(command, args) {
 .intro {
   margin: 0 0 10px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .actions {
@@ -198,16 +198,16 @@ async function run(command, args) {
 
 .actions button {
   padding: 5px 12px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .error {
   margin: 10px 0 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--error-bg);
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   white-space: pre-wrap;
 }
 
@@ -217,14 +217,14 @@ async function run(command, args) {
   gap: 6px;
   margin: 14px 0 6px;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .swatch {
   width: 10px;
   height: 10px;
   margin-left: 6px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .swatch.current {
@@ -238,13 +238,13 @@ async function run(command, args) {
 .scroller {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 
 table {
   min-width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 18px;
 }
 
@@ -305,20 +305,20 @@ tr.block-row:first-child td {
 }
 
 .use {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
 .block-label {
   margin-right: 6px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .block-bar button {
   padding: 2px 10px;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .marker .text {

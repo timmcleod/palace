@@ -40,6 +40,6 @@ p {
 
 button {
   padding: 4px 12px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 </style>

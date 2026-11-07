@@ -274,7 +274,7 @@ async function markReady() {
   margin: 4px 0 18px;
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
 }
 
 .line {
@@ -282,7 +282,7 @@ async function markReady() {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--font-md);
 }
 
 .line > svg {
@@ -330,25 +330,25 @@ async function markReady() {
 
 .confirm p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .field {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--font-md);
   color: var(--text-primary);
   resize: vertical;
 }
 
 textarea.field {
   font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .field:focus {
@@ -359,7 +359,7 @@ textarea.field {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .checkbox input {

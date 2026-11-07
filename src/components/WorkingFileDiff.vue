@@ -173,10 +173,10 @@ const SECTIONS = [
 .note {
   margin: 8px 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   white-space: pre-wrap;
 }
 
@@ -198,7 +198,7 @@ header {
 
 h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -208,7 +208,7 @@ h3 {
   border: 0;
   background: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--accent);
   cursor: pointer;
 }

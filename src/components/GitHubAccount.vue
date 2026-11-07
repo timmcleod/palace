@@ -113,7 +113,7 @@ h2 {
 
 h3 {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--font-lg);
   font-weight: 600;
 }
 

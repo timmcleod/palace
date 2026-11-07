@@ -119,21 +119,21 @@ onMounted(async () => {
   gap: 12px;
   width: min(440px, calc(100vw - 32px));
   padding: 18px 20px 16px;
-  border-radius: 12px;
+  border-radius: var(--radius-2xl);
   background: var(--content-bg);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-dialog);
 }
 
 h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--font-xl);
   font-weight: 600;
 }
 
 .message {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-md);
   white-space: pre-wrap;
 }
 
@@ -141,7 +141,7 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -150,11 +150,11 @@ h2 {
 .field select {
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-lg);
   color: var(--text-primary);
 }
 
@@ -176,7 +176,7 @@ h2 {
 }
 
 .hint {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -190,7 +190,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .checkbox input {
@@ -210,7 +210,7 @@ h2 {
 
 .field textarea {
   font-family: ui-monospace, "Ubuntu Mono", monospace;
-  font-size: 13px;
+  font-size: var(--font-md);
   resize: vertical;
 }
 </style>

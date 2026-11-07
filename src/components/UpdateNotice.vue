@@ -52,9 +52,9 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
   width: min(340px, calc(100vw - 32px));
   padding: 12px 10px 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--content-bg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
 }
 
 .icon {
@@ -72,12 +72,12 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
 }
 
 .dim {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
 .error {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--danger);
   overflow-wrap: anywhere;
 }
@@ -92,7 +92,7 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
 .actions .primary-button,
 .actions .secondary-button {
   padding: 4px 12px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .link-button {
@@ -100,7 +100,7 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
   border: 0;
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--accent);
   cursor: pointer;
 }
@@ -113,13 +113,13 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
   height: 4px;
   margin: 4px 0;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--pill-bg);
 }
 
 .fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   transition: width 0.2s;
 }

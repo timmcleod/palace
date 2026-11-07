@@ -82,7 +82,7 @@ onBeforeUnmount(() => observer?.disconnect());
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--text-tertiary);
 }
 

@@ -54,9 +54,9 @@ const percent = computed(() => {
   width: min(420px, calc(100vw - 32px));
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--content-bg);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--shadow-popover);
 }
 
 .heading {
@@ -87,7 +87,7 @@ const percent = computed(() => {
 
 .actions button {
   padding: 4px 12px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .icon-conflict {
@@ -97,10 +97,10 @@ const percent = computed(() => {
 .text-button {
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-primary);
 }
 
@@ -112,7 +112,7 @@ const percent = computed(() => {
 .bar {
   height: 4px;
   margin: 10px 0 6px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--pill-bg);
   overflow: hidden;
 }
@@ -125,7 +125,7 @@ const percent = computed(() => {
 
 .line {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -136,14 +136,14 @@ const percent = computed(() => {
   margin: 8px 0 0;
   overflow: auto;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
 
 .failed .message {
   font-family: ui-monospace, "Ubuntu Mono", monospace;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .spinning {

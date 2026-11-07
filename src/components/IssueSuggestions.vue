@@ -36,9 +36,9 @@ defineProps({
   max-width: 480px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--content-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
 }
 
 .suggestion {
@@ -46,8 +46,8 @@ defineProps({
   align-items: center;
   gap: 7px;
   padding: 5px 8px;
-  border-radius: 5px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
   white-space: nowrap;
 }
 

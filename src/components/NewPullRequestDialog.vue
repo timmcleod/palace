@@ -238,20 +238,20 @@ function onTitleKeydown(event) {
   max-height: 84vh;
   overflow-y: auto;
   padding: 22px 24px 20px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   background: var(--content-bg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-dialog);
 }
 
 h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--font-2xl);
   font-weight: 600;
 }
 
 .dim {
   margin: -8px 0 2px;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-tertiary);
 }
 
@@ -267,7 +267,7 @@ h2 {
   min-width: 0;
   flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -276,10 +276,10 @@ h2 {
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--input-bg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-lg);
   color: var(--text-primary);
 }
 
@@ -305,7 +305,7 @@ h2 {
 .summary,
 .notice {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
@@ -333,24 +333,24 @@ h2 {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
-  font-size: 15px;
+  font-size: var(--font-xl);
   color: var(--text-primary);
 }
 
 .title:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .checkbox input {

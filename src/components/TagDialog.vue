@@ -160,9 +160,9 @@ function onKeydown(event) {
   gap: 22px;
   width: min(540px, calc(100vw - 32px));
   padding: 26px 26px 20px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   background: var(--content-bg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-dialog);
 }
 
 header {
@@ -178,7 +178,7 @@ header {
 
 h2 {
   margin: 4px 0 6px;
-  font-size: 16px;
+  font-size: var(--font-2xl);
   font-weight: 600;
 }
 
@@ -205,7 +205,7 @@ textarea {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
@@ -215,7 +215,7 @@ textarea {
 input[type="text"]:focus,
 textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 textarea {
@@ -225,7 +225,7 @@ textarea {
 .hint {
   margin: 5px 2px 0;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;

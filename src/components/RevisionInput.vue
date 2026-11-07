@@ -99,7 +99,7 @@ input {
   width: 100%;
   padding: 7px 40px 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
@@ -108,7 +108,7 @@ input {
 
 input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .combo-button {
@@ -122,7 +122,7 @@ input:focus {
   height: 24px;
   transform: translateY(-50%);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--toolbar-group-bg);
   color: var(--text-secondary);
 }
@@ -143,14 +143,14 @@ input:focus {
   overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--content-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow-popover);
 }
 
 .group-label {
   padding: 6px 8px 2px;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -158,7 +158,7 @@ input:focus {
 .option {
   padding: 4px 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
   text-align: left;

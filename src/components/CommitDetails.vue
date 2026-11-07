@@ -346,7 +346,7 @@ dl {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 dt {
@@ -360,7 +360,7 @@ dd {
 }
 
 dd.mono {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .refs {
@@ -371,8 +371,8 @@ dd.mono {
 
 .ref {
   padding: 0 5px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
   line-height: 17px;
   color: white;
 }
@@ -413,7 +413,7 @@ dd.mono {
   gap: 12px;
   padding: 6px 16px 6px 24px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -421,7 +421,7 @@ dd.mono {
   margin: 0;
   padding: 8px 24px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 
@@ -457,7 +457,7 @@ dd.mono {
   gap: 8px;
   height: 34px;
   padding: 0 16px;
-  font-size: 13px;
+  font-size: var(--font-md);
   white-space: nowrap;
 }
 
@@ -484,8 +484,8 @@ dd.mono {
 .badge {
   flex-shrink: 0;
   width: 17px;
-  border-radius: 3px;
-  font-size: 11px;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 17px;
   text-align: center;
@@ -528,7 +528,7 @@ dd.mono {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .plus {

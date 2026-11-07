@@ -137,7 +137,7 @@ const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 
 .field {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .field :deep(input) {
@@ -147,14 +147,14 @@ const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 
 
 .with {
   padding: 0 2px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 
 .counts,
 .error {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -176,10 +176,10 @@ const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 
   gap: 8px;
   padding: 7px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   text-align: left;
   color: var(--text-primary);
   cursor: default;
@@ -206,7 +206,7 @@ const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 
   gap: 6px;
   margin-left: auto;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .plus {

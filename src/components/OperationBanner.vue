@@ -43,7 +43,7 @@ const status = computed(() =>
   gap: 10px;
   margin: 8px 8px 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--banner-warning-bg);
   flex-shrink: 0;
 }
@@ -62,7 +62,7 @@ const status = computed(() =>
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   line-height: 1.35;
 }
 
@@ -72,6 +72,6 @@ const status = computed(() =>
 
 button {
   padding: 4px 12px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 </style>

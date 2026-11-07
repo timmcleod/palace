@@ -551,7 +551,7 @@ h2 {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .summary strong {
@@ -564,7 +564,7 @@ h2 {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   font-weight: 500;
   color: #fff;
 }
@@ -590,8 +590,8 @@ h2 {
 
 .label {
   padding: 0 8px;
-  border-radius: 10px;
-  font-size: 12px;
+  border-radius: var(--radius-xl);
+  font-size: var(--font-sm);
   font-weight: 500;
   line-height: 20px;
 }
@@ -600,12 +600,12 @@ h2 {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
 .none {
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .edit-title {
@@ -621,10 +621,10 @@ h2 {
   min-width: 96px;
   padding: 2px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 
@@ -646,7 +646,7 @@ h2 {
 
 .mentions h3 {
   margin: 0 0 6px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -657,10 +657,10 @@ h2 {
   gap: 8px;
   padding: 5px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   text-align: left;
   color: var(--text-primary);
 }
@@ -671,7 +671,7 @@ h2 {
 
 .mention .mono {
   font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .mention-summary {
@@ -684,7 +684,7 @@ h2 {
 
 .mention-when {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .editor,
@@ -700,7 +700,7 @@ h2 {
 
 .attach-hint {
   margin: -2px 0 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .attach-hint a {
@@ -718,7 +718,7 @@ h2 {
 .editor-buttons button,
 .composer-buttons button {
   padding: 5px 14px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .with-menu {
@@ -748,7 +748,7 @@ h2 {
 .post {
   margin-bottom: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .post-header {
@@ -757,9 +757,9 @@ h2 {
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--diff-gutter-bg);
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .when {
@@ -774,8 +774,8 @@ h2 {
 .role {
   padding: 0 7px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 11.5px;
+  border-radius: var(--radius-xl);
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 

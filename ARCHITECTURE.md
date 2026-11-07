@@ -96,7 +96,9 @@ never on an error's wording.
   function or module rather than a second copy.
 - **Look before adding.** Palace already has helpers for most common needs: dialogs and
   menus (`overlays.js`), the status card, platform differences (`platform.js`), saved
-  data. Use them, so things look and behave the same everywhere.
+  data. Use them, so things look and behave the same everywhere. The same goes for
+  styles: text sizes, corners and shadows come from the variables at the top of
+  `styles.css`, and colors from the theme's.
 
 ## Checks
 

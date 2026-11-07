@@ -447,7 +447,7 @@ function onKeydown(event) {
   flex-shrink: 0;
   width: 14px;
   font-family: ui-monospace, "Ubuntu Mono", monospace;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   font-weight: 700;
   text-align: center;
   color: var(--text-tertiary);

@@ -758,7 +758,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -824,10 +824,10 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   gap: 8px;
   margin: 0 12px 8px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--error-bg);
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   white-space: pre-wrap;
 }
 
@@ -848,7 +848,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   gap: 8px;
   height: 30px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
 }
 
@@ -889,8 +889,8 @@ input[type="checkbox"] {
 .badge {
   flex-shrink: 0;
   width: 17px;
-  border-radius: 3px;
-  font-size: 11px;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 17px;
   text-align: center;
@@ -947,10 +947,10 @@ input[type="checkbox"] {
   max-height: 120px;
   overflow-y: auto;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--error-bg);
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   white-space: pre-wrap;
 }
 
@@ -963,7 +963,7 @@ textarea {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
@@ -991,7 +991,7 @@ textarea {
   top: 50%;
   right: 10px;
   transform: translateY(-50%);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -1011,21 +1011,21 @@ textarea {
   align-items: center;
   gap: 6px;
   margin-right: auto;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
 .amend-warning {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
   color: var(--ref-tag);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .hint {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 </style>

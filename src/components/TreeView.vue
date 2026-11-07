@@ -318,7 +318,7 @@ watch(
   gap: 12px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .viewer-header .dim {
@@ -331,10 +331,10 @@ watch(
   gap: 5px;
   padding: 2px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 
@@ -350,7 +350,7 @@ watch(
   padding: 6px 0;
   border-right: 1px solid var(--border);
   font-family: system-ui, "Ubuntu", sans-serif;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* A run of lines from one commit. The bar on its left is stronger the newer the
@@ -409,7 +409,7 @@ watch(
   flex: 1;
   display: flex;
   overflow: auto;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 18px;
 }
 

@@ -100,10 +100,10 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--content-bg);
   font-family: system-ui, "Ubuntu", sans-serif;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   line-height: 1.45;
   white-space: normal;
   color: var(--text-primary);
@@ -117,7 +117,7 @@ const SIGN = { "+": "+", "-": "−", " ": " " };
 }
 
 .label {
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -140,7 +140,7 @@ textarea {
   min-height: 60px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--content-bg);
   font: inherit;
   color: var(--text-primary);
@@ -161,7 +161,7 @@ textarea:focus {
 
 .buttons button {
   padding: 3px 11px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .key {
@@ -172,9 +172,9 @@ textarea:focus {
 .quote {
   margin-bottom: 6px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--diff-gutter-bg);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   white-space: pre;
   overflow: hidden;
   color: var(--text-secondary);

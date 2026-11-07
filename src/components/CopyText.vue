@@ -54,7 +54,7 @@ function onKeydown(event) {
   position: relative;
   margin: -1px -3px;
   padding: 1px 3px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* Tinted in the accent color, as something that does something when clicked, without
@@ -78,11 +78,11 @@ function onKeydown(event) {
   align-items: center;
   gap: 3px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   transform: translateY(-50%);
   background: var(--accent);
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   white-space: nowrap;
   color: white;

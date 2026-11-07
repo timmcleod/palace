@@ -459,7 +459,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 <style scoped>
 .diff-table {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -486,7 +486,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 table {
   min-width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 18px;
 }
 
@@ -564,7 +564,7 @@ td {
 .hunk-action {
   padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--content-bg);
   font: inherit;
   font-family: system-ui, "Ubuntu", sans-serif;
@@ -605,7 +605,7 @@ td {
 }
 
 .word {
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .added .word {
@@ -757,7 +757,7 @@ td {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
   cursor: pointer;
@@ -781,7 +781,7 @@ tr:hover > .sign > .comment-button,
 
 .unplaced-title {
   margin: 4px 12px 0;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 

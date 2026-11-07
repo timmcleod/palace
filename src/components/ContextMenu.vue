@@ -150,9 +150,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--content-bg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
 }
 
 .single {
@@ -173,10 +173,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   flex-shrink: 0;
   padding: 5px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   text-align: left;
   color: var(--text-primary);
   white-space: nowrap;
@@ -205,7 +205,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 }
 
 .detail {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -239,11 +239,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   margin: 2px 2px 4px;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-primary);
 }
 
@@ -253,7 +253,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
 .none {
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-tertiary);
 }
 </style>

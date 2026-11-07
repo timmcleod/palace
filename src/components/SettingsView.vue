@@ -656,7 +656,7 @@ const SAMPLE = {
   gap: 9px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
   text-align: left;
@@ -693,7 +693,7 @@ const SAMPLE = {
   padding: 26px 28px;
   overflow: hidden;
   border: 1px solid rgba(95, 134, 201, 0.35);
-  border-radius: 16px;
+  border-radius: var(--radius-2xl);
   background:
     radial-gradient(50% 90% at 82% 100%, rgba(59, 143, 246, 0.42), transparent 70%),
     linear-gradient(160deg, #2a4775 0%, #1b3053 55%, #111f38 100%);
@@ -736,7 +736,7 @@ h1 {
 
 .hero-version {
   color: #b9c8e2;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .hero-version .fresh {
@@ -761,7 +761,7 @@ h1 {
   gap: 6px;
   padding: 6px 13px;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.1);
   font: inherit;
   white-space: nowrap;
@@ -811,7 +811,7 @@ section {
 
 h2 {
   margin: 0 0 8px 4px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -821,7 +821,7 @@ h2 {
 .card {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-2xl);
   background: var(--card-bg);
 }
 
@@ -863,7 +863,7 @@ h2 {
 }
 
 .desc {
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   line-height: 1.45;
   color: var(--text-secondary);
 }
@@ -888,7 +888,7 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-primary);
 }
 
@@ -924,7 +924,7 @@ h2 {
 .switch span {
   position: absolute;
   inset: 0;
-  border-radius: 11px;
+  border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--text-primary) 22%, transparent);
   transition: background 0.18s;
 }
@@ -951,14 +951,14 @@ h2 {
 }
 
 .switch input:focus-visible + span {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .segmented {
   display: inline-flex;
   flex-shrink: 0;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--toolbar-group-bg);
 }
 
@@ -966,7 +966,7 @@ h2 {
   min-width: 52px;
   padding: 4px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
   color: var(--text-primary);
@@ -1002,7 +1002,7 @@ input[type="text"] {
   width: 100%;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--input-bg);
   font: inherit;
@@ -1011,7 +1011,7 @@ input[type="text"] {
 
 input[type="text"]:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 /* --- Theme previews: small windows in each theme's colors, whatever the current
@@ -1045,7 +1045,7 @@ input[type="text"]:focus {
   width: 100%;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 0 0 1px var(--border);
   transition: box-shadow 0.15s;
 }
@@ -1098,14 +1098,14 @@ input[type="text"]:focus {
   left: 34%;
   width: 40%;
   height: 8%;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: #1f7cf2;
 }
 
 .mini-window .stripe {
   left: 34%;
   height: 6%;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--w-line);
 }
 
@@ -1148,7 +1148,7 @@ input[type="text"]:focus {
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--content-bg);
   font: inherit;
   text-align: left;
@@ -1156,7 +1156,7 @@ input[type="text"]:focus {
 
 .color-choice.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .swatches {
@@ -1170,7 +1170,7 @@ input[type="text"]:focus {
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-style: normal;
   font-weight: 700;
   color: #fff;
@@ -1200,7 +1200,7 @@ input[type="text"]:focus {
   overflow-x: auto;
   background: var(--content-bg);
   font-family: ui-monospace, "SF Mono", Menlo, "Ubuntu Mono", monospace;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.7;
   tab-size: var(--tab-size);
 }
@@ -1280,10 +1280,10 @@ input[type="text"]:focus {
 .error {
   margin: 10px 0 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--error-bg);
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   white-space: pre-wrap;
 }
 </style>

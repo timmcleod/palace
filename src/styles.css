@@ -1,3 +1,30 @@
+/* The sizes Palace's styles choose from, so a new one fits with the rest rather than
+   picking its own. Text: --font-ui is most of the interface, the steps around it
+   captions and labels below, titles above; a heading bigger than these is a one-off,
+   set where it's used. Corners: rounder for bigger things, and a little less round
+   inside a container than the container, so the curves nest. Shadows: popovers float
+   just above the page, dialogs well above it, and focus rings around a field. */
+:root {
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-ui: 12.5px;
+  --font-md: 13px;
+  --font-lg: 14px;
+  --font-xl: 15px;
+  --font-2xl: 16px;
+
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 14px;
+
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.28);
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
 :root {
   --toolbar-height: 56px;
 
@@ -58,7 +85,7 @@
   --syntax-tag: #116329;
 
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
-  font-size: 14px;
+  font-size: var(--font-lg);
   line-height: 1.4;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -290,7 +317,7 @@ body.resizing-rows * {
 .primary-button {
   padding: 7px 18px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--accent);
   color: white;
   font: inherit;
@@ -308,7 +335,7 @@ body.resizing-rows * {
 .secondary-button {
   padding: 7px 14px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
   color: var(--text-primary);
@@ -326,7 +353,7 @@ body.resizing-rows * {
   height: 32px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--icon);
 }
@@ -351,7 +378,7 @@ body.resizing-rows * {
   gap: 6px;
   height: 32px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--toolbar-group-bg);
   color: var(--text-tertiary);
 }
@@ -392,9 +419,9 @@ body.resizing-rows * {
   min-width: 16px;
   padding: 0 4px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   line-height: 15px;
   text-align: center;
 }
@@ -415,9 +442,9 @@ body.resizing-rows * {
   height: 26px;
   padding: 0 10px 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--content-bg);
-  font-size: 14px;
+  font-size: var(--font-lg);
   white-space: nowrap;
   color: var(--text-primary);
 }
@@ -433,7 +460,7 @@ body.resizing-rows * {
 
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--pill-bg) padding-box;
 }
 
@@ -513,7 +540,7 @@ body.resizing-rows * {
 
 .markdown code {
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--pill-bg);
   font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
   font-size: 0.88em;
@@ -522,7 +549,7 @@ body.resizing-rows * {
 .markdown pre {
   padding: 10px 12px;
   overflow-x: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--diff-gutter-bg);
   border: 1px solid var(--border);
   line-height: 1.45;
@@ -531,7 +558,7 @@ body.resizing-rows * {
 .markdown pre code {
   padding: 0;
   background: none;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .markdown .highlight {
@@ -548,7 +575,7 @@ body.resizing-rows * {
 .markdown video {
   max-width: 100%;
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .markdown table {

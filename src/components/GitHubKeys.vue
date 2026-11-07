@@ -159,7 +159,7 @@ async function remove(key) {
   gap: 10px;
   margin: 16px 18px 4px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--banner-warning-bg);
   color: var(--text-primary);
 }
@@ -180,7 +180,7 @@ async function remove(key) {
   gap: 14px;
   padding: 18px 18px 8px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
@@ -219,14 +219,14 @@ async function remove(key) {
   align-items: center;
   gap: 4px;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--pill-bg);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 
 .small {
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .key .secondary-button {

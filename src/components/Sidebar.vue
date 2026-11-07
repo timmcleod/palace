@@ -488,10 +488,10 @@ function onRowClick(row, event) {
   padding: 4px 8px;
   overflow: hidden;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 15px;
+  font-size: var(--font-xl);
   font-weight: 600;
   text-align: left;
   text-overflow: ellipsis;
@@ -555,7 +555,7 @@ function onRowClick(row, event) {
   border: 0;
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
   cursor: default;
@@ -573,7 +573,7 @@ function onRowClick(row, event) {
 /* A branch dragged onto Branches, to create a branch from it. */
 .section-header.drop-target {
   position: relative;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -602,7 +602,7 @@ function onRowClick(row, event) {
   gap: 6px;
   height: 28px;
   padding-right: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--text-primary);
   white-space: nowrap;
   cursor: default;
@@ -624,7 +624,7 @@ function onRowClick(row, event) {
   right: 4px;
   left: 4px;
   height: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   pointer-events: none;
 }
@@ -660,7 +660,7 @@ function onRowClick(row, event) {
   max-width: 75%;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -682,10 +682,10 @@ function onRowClick(row, event) {
   width: max-content;
   max-width: calc(100% - 16px);
   padding: 4px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--accent);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 500;
   line-height: 1.35;
   text-align: left;
@@ -778,7 +778,7 @@ function onRowClick(row, event) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
 
@@ -804,10 +804,10 @@ function onRowClick(row, event) {
   align-items: center;
   gap: 5px;
   padding: 1px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--pill-bg);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 600;
 }
 
@@ -824,13 +824,13 @@ function onRowClick(row, event) {
 
 .count {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* New issues are waiting. */
 .count.fresh {
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--accent);
   font-weight: 600;
   color: #fff;
@@ -865,7 +865,7 @@ function onRowClick(row, event) {
   min-width: 0;
   height: 28px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--text-tertiary);
 }
 

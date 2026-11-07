@@ -83,7 +83,7 @@ function onKeydown(event) {
 
 .stash.selected {
   border-bottom-color: transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--row-selected);
 }
 
@@ -99,23 +99,23 @@ function onKeydown(event) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-tertiary);
 }
 
 .ref {
   margin-left: 2px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--ref-remote);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 17px;
   color: white;
 }
 
 .date {
   flex-shrink: 0;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
   color: var(--text-tertiary);
 }
 

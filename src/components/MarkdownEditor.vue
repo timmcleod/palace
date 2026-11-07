@@ -215,13 +215,13 @@ function onPreviewClick(event) {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--input-bg);
 }
 
 .markdown-editor:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-focus);
 }
 
 .disabled {
@@ -236,7 +236,7 @@ function onPreviewClick(event) {
   gap: 6px;
   padding: 5px 6px;
   border-bottom: 1px solid var(--border);
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--diff-gutter-bg);
 }
 
@@ -248,10 +248,10 @@ function onPreviewClick(event) {
 .tabs button {
   padding: 3px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   color: var(--text-secondary);
 }
 
@@ -271,7 +271,7 @@ function onPreviewClick(event) {
   display: flex;
   padding: 4px 5px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--icon);
 }
@@ -293,11 +293,11 @@ textarea {
   padding: 8px 10px;
   resize: vertical;
   border: 0;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   outline: none;
   background: none;
   font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.5;
   color: var(--text-primary);
 }
@@ -316,7 +316,7 @@ textarea {
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .dim {

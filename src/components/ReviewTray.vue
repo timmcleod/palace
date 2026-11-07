@@ -45,7 +45,7 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
   padding: 7px 12px 7px 14px;
   border-top: 1px solid var(--border);
   background: var(--sidebar-bg);
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 
 .icon {
@@ -61,6 +61,6 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
   align-items: center;
   gap: 5px;
   padding: 3px 11px;
-  font-size: 12.5px;
+  font-size: var(--font-ui);
 }
 </style>

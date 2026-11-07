@@ -65,7 +65,7 @@ figcaption {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .label {
@@ -92,7 +92,7 @@ figcaption {
   min-height: 80px;
   padding: 8px;
   border: 2px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: repeating-conic-gradient(var(--toolbar-group-bg) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
 }
 
