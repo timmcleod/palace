@@ -2,7 +2,7 @@
 import { computed, h, markRaw, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from "vue";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleAlert, ExternalLink, Image, Save } from "lucide-vue-next";
+import { CircleAlert, ExternalLink, Save } from "lucide-vue-next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   asText,
@@ -546,6 +546,25 @@ function showAs(text) {
   if (text) focusOnOpen();
   open();
 }
+
+// --- Edit and Preview -------------------------------------------------------------
+// A file that's meant to be seen some other way than its text has Edit and Preview tabs:
+// Markdown rendered (see "Previewing Markdown"), an SVG as its image. An SVG opens as its
+// image, and Markdown as its text. An SVG with edits not saved can't be previewed, as
+// its image is read from the file as saved.
+
+const hasPreview = computed(() => (isMarkdown.value || isSvg.value) && !error.value && (isText.value || contents.value?.kind === "image"));
+const showingPreview = computed(() => (isSvg.value ? contents.value?.kind === "image" : previewing.value));
+
+function showEdit() {
+  if (isSvg.value) showAs(true);
+  else showText();
+}
+
+function showPreviewTab() {
+  if (isSvg.value) showAs(false);
+  else showPreview();
+}
 </script>
 
 <template>
@@ -558,12 +577,16 @@ function showAs(text) {
       <span class="spacer" />
       <Spinner v-if="loading || saving" :size="13" class="dim" />
       <span v-else-if="contents" class="dim size">{{ formatSize(contents.size) }}</span>
-      <button v-if="isSvg && isText && !dirty" class="secondary-button save" title="Show the image" @click="showAs(false)">
-        <Image :size="13" /> Image
-      </button>
-      <div v-if="isMarkdown && isText && !error" class="segmented">
-        <button :class="{ active: !previewing }" @click="previewing && showText()">Edit</button>
-        <button :class="{ active: previewing }" title="Show it as it reads, rendered" @click="previewing || showPreview()">Preview</button>
+      <div v-if="hasPreview" class="segmented">
+        <button :class="{ active: !showingPreview }" @click="showingPreview && showEdit()">Edit</button>
+        <button
+          :class="{ active: showingPreview }"
+          :disabled="isSvg && dirty"
+          :title="isSvg && dirty ? 'Save your edits to see them' : isSvg ? 'Show the image' : 'Show it as it reads, rendered'"
+          @click="showingPreview || showPreviewTab()"
+        >
+          Preview
+        </button>
       </div>
       <button v-if="file" class="icon-button small" title="Open in Your Editor" @click="openInEditor"><ExternalLink :size="14" /></button>
       <button
@@ -588,7 +611,6 @@ function showAs(text) {
     <div v-else-if="!file" class="empty-state"><p>Select a file to see and edit it.</p></div>
     <div v-else-if="contents?.kind === 'image'" class="image-view">
       <img :src="contents.image" alt="" />
-      <button v-if="isSvg" class="secondary-button edit-text" @click="showAs(true)">Edit as Text</button>
     </div>
     <div v-else-if="contents && NOT_EDITABLE[contents.kind]" class="empty-state">
       <p>{{ NOT_EDITABLE[contents.kind] }}</p>
@@ -775,7 +797,6 @@ function showAs(text) {
 }
 
 .image-view {
-  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
@@ -784,14 +805,6 @@ function showAs(text) {
   padding: 20px;
   overflow: auto;
   background: repeating-conic-gradient(var(--row-hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
-}
-
-.edit-text {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  padding: 4px 12px;
-  background: var(--content-bg);
 }
 
 .image-view img {

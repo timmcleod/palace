@@ -312,6 +312,10 @@ textarea,
   background: var(--row-selected);
 }
 
+.segmented button:disabled {
+  color: var(--text-tertiary);
+}
+
 /* A tree of files and folders, as the Files view's and a commit's Files tab: its rows
    in a list with the class "tree", which the arrow keys move through (see treeKeys.js).
    While the list has the keys, the row they're on has a bar down its edge, and a tint
