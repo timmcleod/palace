@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, ref } from "vue";
+import { nextTick, onBeforeUnmount, ref } from "vue";
 import { Check } from "lucide-vue-next";
 
 // Text, such as a commit's hash, that a click copies: `value`, which may be more than
@@ -12,6 +12,10 @@ const props = defineProps({
 });
 
 const copied = ref(false);
+// Whether the note goes on its left, as there's no room on its right before the
+// window's edge.
+const noteLeft = ref(false);
+const note = ref(null);
 let timer;
 
 async function copy() {
@@ -25,6 +29,9 @@ async function copy() {
   copied.value = true;
   clearTimeout(timer);
   timer = setTimeout(() => (copied.value = false), 1200);
+  noteLeft.value = false;
+  await nextTick();
+  noteLeft.value = !!note.value && note.value.getBoundingClientRect().right > window.innerWidth - 4;
 }
 onBeforeUnmount(() => clearTimeout(timer));
 
@@ -45,7 +52,7 @@ function onKeydown(event) {
     @click="copy"
     @keydown="onKeydown"
     ><slot>{{ value }}</slot
-    ><span v-if="copied" class="copied-note" aria-live="polite"><Check :size="11" :stroke-width="2.5" />Copied</span></span
+    ><span v-if="copied" ref="note" class="copied-note" :class="{ left: noteLeft }" aria-live="polite"><Check :size="11" :stroke-width="2.5" />Copied</span></span
   >
 </template>
 
@@ -91,5 +98,10 @@ function onKeydown(event) {
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.copied-note.left {
+  right: calc(100% + 6px);
+  left: auto;
 }
 </style>
