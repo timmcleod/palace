@@ -6,8 +6,11 @@ import Avatar from "./Avatar.vue";
 import CopyText from "./CopyText.vue";
 import FileDiff from "./FileDiff.vue";
 import FileIcon from "./FileIcon.vue";
+import LinkedText from "./LinkedText.vue";
 import RefName from "./RefName.vue";
-import { splitIssueRefs } from "../lib/issues.js";
+import { howCommitted, readMessage } from "../lib/commitMessage.js";
+import { agentIconOf } from "../lib/agents.js";
+import { shortHash } from "../lib/format.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -35,9 +38,12 @@ provide("diffScroller", scroller);
 
 let loadSeq = 0;
 
-const messagePieces = computed(() =>
-  props.issueLinks ? splitIssueRefs(details.value?.message ?? "") : [{ text: details.value?.message ?? "" }],
-);
+// The message as a headline, a body and who it was made with (see commitMessage.js).
+const message = computed(() => readMessage(details.value?.message ?? ""));
+// "together", "later" or "by-other": how the byline tells it (see howCommitted).
+const committed = computed(() => details.value && howCommitted(details.value));
+// A person as git writes them, which a click on their name copies: "Ada <ada@example.com>".
+const signature = (person) => `${person.name} <${person.email}>`;
 
 async function load() {
   const seq = ++loadSeq;
@@ -183,8 +189,11 @@ function measure(el, i) {
 }
 onBeforeUnmount(() => sizes.disconnect());
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "long" });
+// When it was written, or committed: to the minute in the byline, in full on hover.
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
+const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "long" });
 const formatDate = (seconds) => dateFormat.format(seconds * 1000);
+const formatFullDate = (seconds) => fullDateFormat.format(seconds * 1000);
 
 const STATUS_LETTER = { added: "A", deleted: "D", modified: "M", renamed: "R", copied: "C", typechange: "T" };
 
@@ -236,37 +245,52 @@ function splitPath(path) {
     </div>
 
     <template v-else-if="details">
-      <section v-if="!comparison" class="meta">
-        <dl>
-          <dt>Author</dt>
-          <dd>{{ details.author.name }} &lt;{{ details.author.email }}&gt;</dd>
-          <dt>Author Date</dt>
-          <dd>{{ formatDate(details.author.time) }}</dd>
-          <dt>Committer</dt>
-          <dd>{{ details.committer.name }} &lt;{{ details.committer.email }}&gt;</dd>
-          <dt>Committer Date</dt>
-          <dd>{{ formatDate(details.committer.time) }}</dd>
-          <template v-if="commit.refs.length">
-            <dt>Refs</dt>
-            <dd class="refs">
-              <RefName v-for="label in commit.refs" :key="label.kind + label.name" :kind="label.kind" :name="label.name" />
-            </dd>
+      <!-- The message's subject as the headline, who wrote it and when, and where it is. -->
+      <section v-if="!comparison" class="heading">
+        <h2 class="subject"><LinkedText :text="message.subject" :issue-links="issueLinks" @show-issue="emit('show-issue', $event)" /></h2>
+        <div class="byline">
+          <Avatar :name="details.author.name" :email="details.author.email" :size="28" />
+          <CopyText :value="signature(details.author)" label="Copy the name and email" class="person">{{ details.author.name }}</CopyText>
+          <template v-if="committed === 'by-other'">
+            <span class="dim" :title="formatFullDate(details.author.time)">authored on {{ formatDate(details.author.time) }}</span>
+            <span class="dim">·</span>
+            <span class="dim">committed by</span>
+            <CopyText :value="signature(details.committer)" label="Copy the name and email" class="person">{{ details.committer.name }}</CopyText>
+            <span class="dim" :title="formatFullDate(details.committer.time)">on {{ formatDate(details.committer.time) }}</span>
           </template>
-          <dt>Commit Hash</dt>
-          <dd class="mono"><CopyText :value="details.id" label="Copy the commit hash" /></dd>
-          <dt>{{ details.parents.length > 1 ? "Parent Hashes" : "Parent Hash" }}</dt>
-          <dd class="mono">
-            <div v-for="parent in details.parents" :key="parent"><CopyText :value="parent" label="Copy the parent's hash" /></div>
-            <span v-if="!details.parents.length" class="dim">None (root commit)</span>
-          </dd>
-          <dt>Tree Hash</dt>
-          <dd class="mono"><CopyText :value="details.tree_id" label="Copy the tree hash" /></dd>
-        </dl>
-        <Avatar :name="details.author.name" :email="details.author.email" :size="72" />
+          <template v-else>
+            <span class="dim" :title="formatFullDate(details.committer.time)">committed on {{ formatDate(details.committer.time) }}</span>
+            <span v-if="committed === 'later'" class="dim" :title="formatFullDate(details.author.time)">(authored {{ formatDate(details.author.time) }})</span>
+          </template>
+          <template v-if="message.coAuthors.length">
+            <span class="dim">· with</span>
+            <!-- By where it's listed: two can share an email, as Claude's models do. -->
+            <span v-for="(person, i) in message.coAuthors" :key="i" class="co-author">
+              <img v-if="agentIconOf(person)" :src="agentIconOf(person)" alt="" class="agent-icon" />
+              <Avatar v-else :name="person.name" :email="person.email" :size="18" />
+              <CopyText :value="signature(person)" label="Copy the name and email">{{ person.name }}</CopyText>
+            </span>
+          </template>
+        </div>
+        <div v-if="commit.refs.length" class="refs">
+          <RefName v-for="label in commit.refs" :key="label.kind + label.name" :kind="label.kind" :name="label.name" />
+        </div>
       </section>
 
-      <!-- One line, as the section keeps its whitespace. -->
-      <section v-if="!comparison" class="commit-message"><template v-for="(piece, i) in messagePieces" :key="i"><a v-if="piece.issue" href="#" class="issue-ref" :title="`Show issue ${piece.text}`" @click.prevent="emit('show-issue', piece.issue)">{{ piece.text }}</a><template v-else>{{ piece.text }}</template></template></section>
+      <!-- The rest of the message, and the hashes to copy. -->
+      <section v-if="!comparison" class="body">
+        <!-- One line, as it keeps its whitespace. -->
+        <p v-if="message.body" class="message-body"><LinkedText :text="message.body" :issue-links="issueLinks" @show-issue="emit('show-issue', $event)" /></p>
+        <div class="hashes">
+          <CopyText :value="details.id" label="Copy the commit hash" class="hash"><span class="kind">commit</span> <span class="mono">{{ shortHash(details.id) }}</span></CopyText>
+          <!-- A merge's parents numbered, in git's order: the first is the branch merged into. -->
+          <CopyText v-for="(parent, i) in details.parents" :key="parent" :value="parent" label="Copy the parent's hash" class="hash"
+            ><span class="kind">{{ details.parents.length > 1 ? `parent ${i + 1}` : "parent" }}</span> <span class="mono">{{ shortHash(parent) }}</span></CopyText
+          >
+          <span v-if="!details.parents.length" class="hash root">root commit</span>
+          <CopyText :value="details.tree_id" label="Copy the tree hash" class="hash"><span class="kind">tree</span> <span class="mono">{{ shortHash(details.tree_id) }}</span></CopyText>
+        </div>
+      </section>
 
       <div class="changes-bar">
         <button v-if="details.files.length" class="link-button" @click="toggleAll">
@@ -331,35 +355,44 @@ function splitPath(path) {
   overflow-y: auto;
 }
 
-.meta {
+.heading {
   display: flex;
-  gap: 16px;
-  padding: 14px 16px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 24px 18px;
   border-bottom: 1px solid var(--border);
 }
 
-dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 3px 10px;
-  flex: 1;
-  min-width: 0;
+.subject {
   margin: 0;
-  font-size: var(--font-md);
-}
-
-dt {
-  text-align: right;
-  color: var(--text-tertiary);
-}
-
-dd {
-  margin: 0;
+  font-size: var(--font-2xl);
+  font-weight: 600;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
-dd.mono {
-  font-size: var(--font-ui);
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+}
+
+.person {
+  font-weight: 600;
+}
+
+.co-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+}
+
+/* An agent's own icon in place of an avatar, the size of one. */
+.agent-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .refs {
@@ -369,20 +402,42 @@ dd.mono {
   gap: 4px 6px;
 }
 
-.commit-message {
-  padding: 18px 24px;
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.message-body {
+  max-width: 76ch;
+  margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.6;
+  color: var(--text-secondary);
 }
 
-.issue-ref {
-  color: var(--accent);
-  text-decoration: none;
+/* The hashes, short, each copied in full with a click. */
+.hashes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.issue-ref:hover {
-  text-decoration: underline;
+.hashes .hash {
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+.hash .kind,
+.hash.root {
+  color: var(--text-tertiary);
 }
 
 .changes-bar {

@@ -69,9 +69,11 @@ function onKeydown(event) {
   outline-offset: 0;
 }
 
-/* Beside it, over whatever follows, so nothing moves. */
+/* Beside it, over whatever follows, so nothing moves; above a positioned sibling too,
+   such as the next hash chip. */
 .copied-note {
   position: absolute;
+  z-index: 1;
   top: 50%;
   left: calc(100% + 6px);
   display: inline-flex;

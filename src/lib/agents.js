@@ -113,6 +113,17 @@ const AGENT_NAMES = {
 /** The agent a program is, by its name, such as "Codex" for "codex", or null. */
 export const agentOfProgram = (program) => AGENT_NAMES[program?.toLowerCase()] ?? null;
 
+// Agents' own icons, where Palace has one: Material Icon Theme's, kept with the file
+// icons (public/file-icons) as CLAUDE.md files use it too.
+const AGENT_ICONS = { Claude: "/file-icons/claude.svg" };
+
+/**
+ * The icon of the agent a commit's author or co-author is, by their email, or null for
+ * a person. Claude Code signs with Anthropic's no-reply address; its name alone isn't
+ * enough, as people are called Claude too.
+ */
+export const agentIconOf = ({ email }) => (email?.trim().toLowerCase() === "noreply@anthropic.com" ? AGENT_ICONS.Claude : null);
+
 // Commands that run another, which isn't what to call the tab.
 const LAUNCHERS = new Set(["cd", "env", "exec", "npx", "bunx", "pnpx", "uvx", "nice", "time", "&&", ";"]);
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { programOf, taskCommand } from "./agents.js";
+import { agentIconOf, programOf, taskCommand } from "./agents.js";
 
 test("the program a command runs is its first word after any settings", () => {
   expect(programOf("claude --resume")).toBe("claude");
@@ -37,4 +37,9 @@ test("a command that resumes a session, or that Palace doesn't know, takes no ta
   expect(taskCommand("codex resume")).toBeNull();
   expect(taskCommand("aider")).toBeNull();
   expect(taskCommand("cd api && claude")).toBeNull();
+});
+
+test("Claude, as a co-author, is known by Anthropic's no-reply address, not by name", () => {
+  expect(agentIconOf({ name: "Claude Opus 5.5", email: "noreply@anthropic.com" })).toBe("/file-icons/claude.svg");
+  expect(agentIconOf({ name: "Claude Debussy", email: "claude@example.com" })).toBeNull();
 });

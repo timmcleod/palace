@@ -1,3 +1,6 @@
+/** A commit's hash, short, as git.rs's short_id: "95d90e0". */
+export const shortHash = (id) => id.slice(0, 7);
+
 /** The name of the folder or file at `path`, its last part: "palace" for "/code/palace/". */
 export const folderName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
