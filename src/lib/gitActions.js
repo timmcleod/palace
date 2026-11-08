@@ -4,6 +4,7 @@ import { branchForTask } from "./tasks.js";
 import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetDialog, openTagDialog } from "./overlays.js";
 import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
+import { folderName } from "./format.js";
 import { undoHint } from "./confirm.js";
 import { keepDraft } from "./drafts.js";
 import { CANCELED, CONFLICT, PULL_REWRITTEN, errorDetail, isError } from "./errors.js";
@@ -604,7 +605,6 @@ export function useGitActions({
 
   const worktrees = () => overview.value?.worktrees ?? [];
   const worktreeOf = (branch) => overview.value?.branches.find((b) => b.name === branch)?.worktree ?? null;
-  const folderName = (path) => path.replace(/\/+$/, "").split("/").at(-1);
   // A new worktree's folder is named after the repository and the branch, as
   // "palace-feature-login", and goes beside the repository's own unless another place
   // is chosen.

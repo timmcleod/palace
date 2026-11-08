@@ -62,13 +62,11 @@ import WorkingCopy from "./components/WorkingCopy.vue";
 import WorkingFileDiff from "./components/WorkingFileDiff.vue";
 import ReviewTray from "./components/ReviewTray.vue";
 import { clearComments, commentsIn, deleteComments, reviewMessage } from "./lib/review.js";
+import { folderName } from "./lib/format.js";
+import { FILTER_RECENTS, RECENTS_KEY, forgetGoneRepositories, forgetRepositories, lastRepository, recentRepositories, rememberRepository } from "./lib/recents.js";
 import {
-  FILTER_RECENTS,
-  forgetRepository,
   onSavedElsewhere,
   readJson,
-  recentRepositories,
-  rememberRepository,
   setStoreAside,
   storeProblem,
   writeJson,
@@ -819,7 +817,7 @@ watch(
     // Other windows show this one instead of opening the repository again, and the
     // window's title names it, to tell windows apart when switching between them.
     invoke("set_window_repo", { path: path ?? null }).catch(() => {});
-    thisWindow.setTitle(path ? `${repositoryName(path)} — Palace` : "Palace").catch(() => {});
+    thisWindow.setTitle(path ? `${folderName(path)} — Palace` : "Palace").catch(() => {});
     if (!path) return;
     invoke("watch_repo", { path }).catch(() => {});
     loadAvatars(path);
@@ -827,7 +825,7 @@ watch(
 );
 
 // Recent repositories opened in other windows join the list here too.
-onBeforeUnmount(onSavedElsewhere((key) => key === "palace.recentRepositories" && (recents.value = recentRepositories())));
+onBeforeUnmount(onSavedElsewhere((key) => key === RECENTS_KEY && (recents.value = recentRepositories())));
 
 // Opens the worktree at `path` in a window of its own, or
 // brings forward the window it's open in.
@@ -843,7 +841,6 @@ const newWindow = () =>
   invoke("new_window", { dark: document.documentElement.dataset.theme === "dark" }).catch((e) =>
     tell("Couldn't Open a Window", String(e)),
   );
-const repositoryName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 // Events for this window only: each window watches its own repository.
 const thisWindow = getCurrentWebviewWindow();
@@ -958,7 +955,7 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
   if (settings.autoSave) await finishSaving();
   const doing = quitting ? "Quitting" : "Closing the window";
   const lines = [];
-  const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${repositoryName(f.path)}`);
+  const edited = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${folderName(f.path)}`);
   if (edited.length) {
     lines.push(`Edits to ${edited.join(", ")} aren't saved. ${doing} loses them.`);
   }
@@ -1151,7 +1148,7 @@ function recentMenu(anchor) {
 }
 
 function removeRecent(path) {
-  forgetRepository(path);
+  forgetRepositories([path]);
   recents.value = recentRepositories();
 }
 
@@ -1177,8 +1174,11 @@ async function checkGit() {
     // The repository this window had, as when its page reloads, or in the first window
     // at startup, the last one opened. A new window starts with none, to choose one.
     const start = await invoke("window_start").catch(() => ({ repo: null, first: true }));
-    const reopen = start.repo ?? (start.first ? recents.value[0]?.path : null);
+    const reopen = start.repo ?? (start.first ? await lastRepository() : null);
     if (reopen) await loadRepository(reopen);
+    // Repositories deleted since Palace last ran are taken off the list, once, by the
+    // first window, without holding up what it opens.
+    if (start.first) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
     // Opened for a task (New Task): its agent starts on it, or, with the worktree not
     // open after all, the task's given back, so it isn't lost.
     if (start.task && overview.value) startTask(start.task);

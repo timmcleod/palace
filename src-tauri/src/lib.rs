@@ -236,6 +236,7 @@ pub fn run() {
             windows::set_agent_states,
             windows::agent_states,
             windows::folder_exists,
+            windows::folders_gone,
             windows::new_window,
 
             working::working_status,

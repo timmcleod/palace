@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { folderName } from "./format.js";
 
 // What the Files view is editing: the file open in each repository, and edits that
 // aren't saved yet, kept while moving between files, views and repositories, the way
@@ -55,7 +56,7 @@ export function markUnsaved(path, file, dirty) {
   if (dirty === unsaved.has(key)) return;
   if (dirty) unsaved.add(key);
   else unsaved.delete(key);
-  const files = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${f.path.split(/[\\/]/).filter(Boolean).pop() ?? f.path}`);
+  const files = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${folderName(f.path)}`);
   invoke("set_unsaved_edits", { files }).catch(() => {});
 }
 

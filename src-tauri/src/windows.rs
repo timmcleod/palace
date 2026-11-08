@@ -167,6 +167,24 @@ pub fn folder_exists(path: String) -> bool {
     std::path::Path::new(&path).is_dir()
 }
 
+/// Of `paths`, the recent repositories' folders, those that are gone: not found, though
+/// the folder each was in is. One that can't be read, as when access to it was taken
+/// away, isn't counted gone, nor one on a drive that isn't connected (a drive's own
+/// folder in /Volumes, or one whose folder above it is missing too), so it's there
+/// again when the drive is.
+#[tauri::command]
+pub async fn folders_gone(paths: Vec<String>) -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(move || paths.into_iter().filter(|p| gone(std::path::Path::new(p))).collect())
+        .await
+        .unwrap_or_default()
+}
+
+fn gone(path: &std::path::Path) -> bool {
+    let not_found = matches!(std::fs::metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound);
+    let above = path.parent().filter(|above| *above != std::path::Path::new("/Volumes"));
+    not_found && above.is_some_and(|above| above.is_dir())
+}
+
 /// Shows `notice`, that a terminal in `window` finished or needs the user, in the Palace
 /// window the user is in, which may be `window` itself, and says whether there was one.
 /// There isn't when another app is in front: then the system's notification says it.
@@ -284,4 +302,21 @@ pub fn forget(app: &AppHandle, window: &str) {
     app.state::<crate::cli::Runnings>().forget(window);
     crate::quit::forget(window);
     crate::notify::forget(window);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TempRepo;
+
+    #[test]
+    fn telling_a_deleted_folder_from_one_on_a_drive_not_connected() {
+        let t = TempRepo::new("folders-gone");
+        let here = t.dir.to_string_lossy().into_owned();
+        let deleted = t.dir.join("deleted").to_string_lossy().into_owned();
+        let on_a_drive = t.dir.join("drive").join("project").to_string_lossy().into_owned();
+        let a_drive = "/Volumes/Palace Test Drive Not Connected".to_string();
+        let gone = tauri::async_runtime::block_on(folders_gone(vec![here, deleted.clone(), on_a_drive, a_drive]));
+        assert_eq!(gone, [deleted]);
+    }
 }

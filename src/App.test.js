@@ -53,6 +53,7 @@ const repository = {
 const answers = {
   git_check: { supported: true, version: "2.50.0" },
   window_start: { repo: repository.path, first: true },
+  folders_gone: [],
   repo_overview: repository,
 };
 vi.mock("@tauri-apps/api/core", () => ({

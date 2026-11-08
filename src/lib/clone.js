@@ -1,5 +1,5 @@
 import { homeDir } from "@tauri-apps/api/path";
-import { recentRepositories } from "./storage.js";
+import { recentRepositories } from "./recents.js";
 import { settings } from "./settings.js";
 
 /**

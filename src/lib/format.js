@@ -1,3 +1,6 @@
+/** The name of the folder or file at `path`, its last part: "palace" for "/code/palace/". */
+export const folderName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
 // A file size for people to read, such as "12.3 KB".
 export function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} bytes`;

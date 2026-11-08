@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { CircleAlert, FolderGit2, X } from "lucide-vue-next";
 import Spinner from "./Spinner.vue";
-import { FILTER_RECENTS } from "../lib/storage.js";
+import { FILTER_RECENTS } from "../lib/recents.js";
 
 // The screen with no repository open: opening or cloning one, or one of the recent
 // repositories. While the last repository reopens at startup, only a spinner.

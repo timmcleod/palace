@@ -96,23 +96,3 @@ export function writeJson(key, value) {
   save({ [key]: copy });
 }
 
-const RECENTS_KEY = "palace.recentRepositories";
-const MAX_RECENTS = 30;
-// A list of more recent repositories than this, on the welcome screen or in the
-// sidebar's menu, has a field to find one in, and shows this many at a time.
-export const FILTER_RECENTS = 5;
-
-export function recentRepositories() {
-  const recents = readJson(RECENTS_KEY, []);
-  return Array.isArray(recents) ? recents : [];
-}
-
-export function rememberRepository(repo) {
-  const recents = recentRepositories().filter((r) => r.path !== repo.path);
-  recents.unshift({ name: repo.name, path: repo.path });
-  writeJson(RECENTS_KEY, recents.slice(0, MAX_RECENTS));
-}
-
-export function forgetRepository(path) {
-  writeJson(RECENTS_KEY, recentRepositories().filter((r) => r.path !== path));
-}

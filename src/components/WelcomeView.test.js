@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick } from "vue";
-import { FILTER_RECENTS } from "../lib/storage.js";
+import { FILTER_RECENTS } from "../lib/recents.js";
 import WelcomeView from "./WelcomeView.vue";
 
-// storage.js, for FILTER_RECENTS, listens for Palace's other windows as it loads.
+// recents.js, for FILTER_RECENTS, reads storage.js, which listens for Palace's other windows as it loads.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({ getCurrentWebviewWindow: () => ({ label: "main" }) }));
