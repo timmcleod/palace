@@ -11,7 +11,8 @@ import LinkedText from "./LinkedText.vue";
 import RefName from "./RefName.vue";
 import { howCommitted, readMessage } from "../lib/commitMessage.js";
 import { signingAgent } from "../lib/agents.js";
-import { shortHash } from "../lib/format.js";
+import { formatBeside, shortHash } from "../lib/format.js";
+import { handoff } from "../lib/scrollHandoff.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -35,6 +36,9 @@ const error = ref("");
 const expanded = reactive(new Set());
 // File diffs load as they scroll into view within this element.
 const scroller = ref(null);
+// The height of the bar pinned once the heading's scrolled away (see "The pinned bar"):
+// a file scrolled to lands below it, not under it. .pinned-bar's height in the styles.
+const PINNED_HEIGHT = 36;
 provide("diffScroller", scroller);
 
 let loadSeq = 0;
@@ -82,7 +86,7 @@ async function focus(file) {
   expanded.add(index);
   await nextTick();
   if (windowed.value) {
-    scroller.value.scrollTop = listEl.value.offsetTop + offsets.value[index];
+    scroller.value.scrollTop = listEl.value.offsetTop + offsets.value[index] - PINNED_HEIGHT;
   } else {
     scroller.value?.querySelectorAll(".file")[index]?.scrollIntoView({ block: "start" });
   }
@@ -143,6 +147,7 @@ const shownFiles = computed(() => {
 
 function onScroll() {
   if (windowed.value) scrollTop.value = scroller.value.scrollTop;
+  followHeading();
 }
 
 const sizes = new ResizeObserver((entries) => {
@@ -233,6 +238,24 @@ const changeSummary = computed(() => {
   return `Showing ${files} with ${plural(d.additions, "addition")} and ${plural(d.deletions, "deletion")}`;
 });
 
+// --- The pinned bar ------------------------------------------------------------------
+// As the heading scrolls away, a slim bar at the top takes its place, saying which
+// commit this is, its subject and hash, while its files are read: in step with the
+// scrolling, as the heading's last stretch passes under the top edge (see handoff).
+
+const heading = ref(null);
+// How far the bar has come in, 0 to 1. Set only as it changes: most scrolling, past the
+// heading or well within it, leaves it as it is.
+const pinned = ref(0);
+
+function followHeading() {
+  const element = heading.value;
+  const next = element ? handoff(scroller.value.scrollTop, element.offsetTop + element.offsetHeight) : 0;
+  if (next !== pinned.value) pinned.value = next;
+}
+// Another commit starts at its top, the bar gone.
+watch(details, () => (pinned.value = 0));
+
 function splitPath(path) {
   const slash = path.lastIndexOf("/");
   return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) };
@@ -247,8 +270,20 @@ function splitPath(path) {
     </div>
 
     <template v-else-if="details">
+      <!-- Over what scrolls, taking no room of its own (see "The pinned bar"). -->
+      <div v-if="!comparison" class="pinned">
+        <div
+          v-if="pinned > 0"
+          class="pinned-bar"
+          :style="{ opacity: pinned, transform: `translateY(${(pinned - 1) * 8}px)` }"
+        >
+          <Avatar :name="details.author.name" :email="details.author.email" :size="18" />
+          <span class="pinned-subject">{{ message.subject }}</span>
+          <span class="dim mono">{{ shortHash(details.id) }}</span>
+        </div>
+      </div>
       <!-- The message's subject as the headline, who wrote it and when, and where it is. -->
-      <section v-if="!comparison" class="heading">
+      <section v-if="!comparison" ref="heading" class="heading">
         <h2 class="subject"><LinkedText :text="message.subject" :issue-links="issueLinks" @show-issue="emit('show-issue', $event)" /></h2>
         <div class="byline">
           <Avatar :name="details.author.name" :email="details.author.email" :size="28" />
@@ -262,7 +297,7 @@ function splitPath(path) {
           </template>
           <template v-else>
             <span class="dim" :title="formatFullDate(details.committer.time)">committed on {{ formatDate(details.committer.time) }}</span>
-            <span v-if="committed === 'later'" class="dim" :title="formatFullDate(details.author.time)">(authored {{ formatDate(details.author.time) }})</span>
+            <span v-if="committed === 'later'" class="dim" :title="formatFullDate(details.author.time)">(authored {{ formatBeside(details.author.time * 1000, details.committer.time * 1000) }})</span>
           </template>
           <template v-if="message.coAuthors.length">
             <span class="dim">· with</span>
@@ -356,6 +391,38 @@ function splitPath(path) {
   position: relative;
   flex: 1;
   overflow-y: auto;
+  /* What's scrolled to lands below the pinned bar (see PINNED_HEIGHT). */
+  scroll-padding-top: 36px;
+}
+
+/* At the top, the height of nothing, so the bar in it lies over what scrolls. */
+.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+}
+
+.pinned-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sunken-bg);
+  white-space: nowrap;
+}
+
+.pinned-subject {
+  overflow: hidden;
+  min-width: 0;
+  font-weight: 600;
+  text-overflow: ellipsis;
 }
 
 .heading {

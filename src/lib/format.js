@@ -46,6 +46,16 @@ export function formatWhen(time, now = Date.now()) {
   return (sameYear ? monthDay : monthDayYear).format(time);
 }
 
+const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
+const timeOfDay = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+
+/**
+ * When `time` was, said beside `other` and its date (both in ms): "at 12:26 PM" on the
+ * same day, as its date would only be said again, else "October 25, 2026 at 12:26 PM".
+ */
+export const formatBeside = (time, other) => (sameDay(time, other) ? `at ${timeOfDay.format(time)}` : dayAndTime.format(time));
+
 /** The text color, dark or light, that reads well on a background color ("d73a4a"). */
 export function textColorOn(hex) {
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));

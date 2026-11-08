@@ -414,7 +414,7 @@ function startResize(event) {
   min-height: 0;
   border-top: 1px solid var(--border);
   border-left: 1px solid var(--border);
-  background: var(--content-bg);
+  background: var(--sunken-bg);
 }
 
 .resize-edge {
@@ -503,7 +503,8 @@ function startResize(event) {
 }
 
 .tab.active {
-  background: var(--content-bg);
+  /* Of a piece with the terminal below it. */
+  background: var(--sunken-bg);
   color: var(--text-primary);
   box-shadow: 0 0 0 1px var(--border);
 }

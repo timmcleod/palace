@@ -111,3 +111,28 @@ test("copies a name with its email, as git writes them", async () => {
   await nextTick();
   expect(writeText).toHaveBeenCalledWith("jonathanbriehl <jonathan@briehl.com>");
 });
+
+test("hands off to a bar pinned at the top, in step, as the heading scrolls away", async () => {
+  await mount(details());
+  const heading = document.querySelector(".heading");
+  Object.defineProperty(heading, "offsetTop", { value: 0 });
+  Object.defineProperty(heading, "offsetHeight", { value: 140 });
+  const scroller = document.querySelector(".details");
+  const scrollTo = async (top) => {
+    scroller.scrollTop = top;
+    scroller.dispatchEvent(new Event("scroll"));
+    await nextTick();
+  };
+  await scrollTo(40);
+  expect(document.querySelector(".pinned-bar")).toBeNull();
+  // Halfway through the heading's last 60px.
+  await scrollTo(110);
+  const bar = document.querySelector(".pinned-bar");
+  expect(bar.style.opacity).toBe("0.5");
+  expect(bar.textContent).toContain("Update atlas-pkg to 0.8.2");
+  expect(bar.textContent).toContain("95d90e0");
+  await scrollTo(400);
+  expect(document.querySelector(".pinned-bar").style.opacity).toBe("1");
+  await scrollTo(0);
+  expect(document.querySelector(".pinned-bar")).toBeNull();
+});

@@ -8,9 +8,9 @@ describe("a commit's branches and tags as badges", () => {
     const { head, badges } = refBadges([ref("head", "HEAD"), ref("local", "main"), ref("remote", "origin/main"), ref("remote", "upstream/main"), ref("tag", "v1.0")]);
     expect(head).toBe(true);
     expect(badges).toEqual([
-      { kind: "local", title: "Branches", names: ["main"], count: 1, head: true, shown: ["main"], more: 0 },
-      { kind: "remote", title: "Remote branches", names: ["origin/main", "upstream/main"], count: 2, head: false, shown: ["origin/main", "upstream/main"], more: 0 },
-      { kind: "tag", title: "Tags", names: ["v1.0"], count: 1, head: false, shown: ["v1.0"], more: 0 },
+      { kind: "local", title: "Branches", names: ["main"], count: 1, shown: ["main"], more: 0 },
+      { kind: "remote", title: "Remote branches", names: ["origin/main", "upstream/main"], count: 2, shown: ["origin/main", "upstream/main"], more: 0 },
+      { kind: "tag", title: "Tags", names: ["v1.0"], count: 1, shown: ["v1.0"], more: 0 },
     ]);
   });
 
@@ -18,11 +18,8 @@ describe("a commit's branches and tags as badges", () => {
     expect(refBadges([])).toEqual({ head: false, badges: [] });
   });
 
-  test("a branch badge for a detached HEAD, so where you are shows", () => {
-    expect(refBadges([ref("head", "HEAD"), ref("tag", "v2.0")]).badges.map((b) => [b.kind, b.count])).toEqual([
-      ["local", 0],
-      ["tag", 1],
-    ]);
+  test("HEAD is said apart from the badges, a detached one with none", () => {
+    expect(refBadges([ref("head", "HEAD"), ref("tag", "v2.0")])).toMatchObject({ head: true, badges: [{ kind: "tag", count: 1 }] });
   });
 });
 

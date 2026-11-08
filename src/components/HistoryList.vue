@@ -46,8 +46,8 @@ const error = ref("");
 const viewport = ref(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(0);
-// The card of a commit's branches and tags, while its badges are pointed at: { head,
-// badges, style }, or null (see "Branches and tags" below).
+// The card of a commit's branches and tags, while its badges are pointed at: { badges,
+// style }, or null (see "Branches and tags" below).
 const refsCard = shallowRef(null);
 
 // Index of the selected commit in the list, used for keyboard navigation.
@@ -483,7 +483,7 @@ function showRefs(commit, event) {
     maxHeight: `${below ? roomBelow : roomAbove}px`,
     ...(below ? { top: `${rect.bottom + 6}px` } : { bottom: `${window.innerHeight - rect.top + 6}px` }),
   };
-  refsCard.value = { ...refBadges(commit.refs), style };
+  refsCard.value = { badges: refBadges(commit.refs).badges, style };
 }
 </script>
 
@@ -551,22 +551,21 @@ function showRefs(commit, event) {
             <div class="body">
               <div class="line">
                 <span class="summary" :title="item.commit.incoming ? `${item.commit.summary}\n\nFetched, not pulled yet` : item.commit.summary">{{ item.commit.summary }}</span>
-                <span
-                  v-if="item.commit.refs.length"
-                  class="badges"
-                  role="img"
-                  :aria-label="item.commit.refs.map((r) => r.name).join(', ')"
-                  @mouseenter="showRefs(item.commit, $event)"
-                  @mouseleave="refsCard = null"
-                >
+                <span v-if="item.commit.refs.length" class="ref-marks">
+                  <!-- Where it's checked out, said outright; its branches and tags as badges. -->
+                  <RefName v-if="refBadges(item.commit.refs).head" kind="head" name="HEAD" />
                   <span
-                    v-for="badge in refBadges(item.commit.refs).badges"
-                    :key="badge.kind"
-                    class="badge"
-                    :class="[badge.kind, { head: badge.head }]"
+                    v-if="refBadges(item.commit.refs).badges.length"
+                    class="badges"
+                    role="img"
+                    :aria-label="item.commit.refs.filter((r) => r.kind !== 'head').map((r) => r.name).join(', ')"
+                    @mouseenter="showRefs(item.commit, $event)"
+                    @mouseleave="refsCard = null"
                   >
-                    <component :is="REF_ICONS[badge.kind]" :size="12" :stroke-width="2.25" />
-                    <span v-if="badge.count > 1">{{ badge.count }}</span>
+                    <span v-for="badge in refBadges(item.commit.refs).badges" :key="badge.kind" class="badge" :class="badge.kind">
+                      <component :is="REF_ICONS[badge.kind]" :size="12" :stroke-width="2.25" />
+                      <span v-if="badge.count > 1">{{ badge.count }}</span>
+                    </span>
                   </span>
                 </span>
               </div>
@@ -596,8 +595,7 @@ function showRefs(commit, event) {
   <Teleport to="body">
     <Transition name="refs-card">
       <div v-if="refsCard" class="refs-card" :style="refsCard.style">
-        <p v-if="refsCard.head" class="here"><RefName kind="head" name="HEAD" /> Checked out here</p>
-        <section v-for="badge in refsCard.badges.filter((b) => b.count)" :key="badge.kind">
+        <section v-for="badge in refsCard.badges" :key="badge.kind">
           <h4>{{ badge.title }}</h4>
           <p v-for="name in badge.shown" :key="name"><RefName :kind="badge.kind" :name="name" /></p>
           <p v-if="badge.more" class="more">and {{ badge.more }} more</p>
@@ -736,14 +734,20 @@ function showRefs(commit, event) {
   color: var(--text-secondary);
 }
 
-/* Beside the message, a badge for each kind of branch or tag at the commit, tinted in
-   its color; filled where the commit is checked out. */
-.badges {
+/* Beside the message: HEAD where the commit is checked out, and a badge for each kind
+   of branch or tag at it, tinted in its color. */
+.ref-marks {
   display: flex;
   flex-shrink: 0;
+  align-items: center;
   gap: 4px;
   margin-left: auto;
   padding-left: 6px;
+}
+
+.badges {
+  display: flex;
+  gap: 4px;
 }
 
 .badge {
@@ -770,12 +774,7 @@ function showRefs(commit, event) {
   --tint: var(--ref-tag);
 }
 
-.badge.head {
-  background: var(--accent);
-  color: white;
-}
-
-.badges:hover .badge:not(.head) {
+.badges:hover .badge {
   background: color-mix(in srgb, var(--tint) 30%, transparent);
 }
 
@@ -788,7 +787,7 @@ function showRefs(commit, event) {
   padding: 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--popover-bg);
+  background: var(--sunken-bg);
   box-shadow: var(--shadow-popover);
   overflow: hidden;
   pointer-events: none;
@@ -805,12 +804,6 @@ function showRefs(commit, event) {
   align-items: center;
   gap: 7px;
   margin: 0;
-}
-
-.refs-card .here {
-  margin-bottom: 6px;
-  font-size: var(--font-sm);
-  color: var(--text-secondary);
 }
 
 .refs-card h4 {

@@ -134,10 +134,11 @@ function theme() {
   const color = (name) => style.getPropertyValue(name).trim();
   return {
     ...ANSI[root.dataset.theme === "dark" ? "dark" : "light"],
-    background: color("--content-bg"),
+    // A shade below the page, as the panel around it is (see TerminalPanel.vue).
+    background: color("--sunken-bg"),
     foreground: color("--text-primary"),
     cursor: color("--accent"),
-    cursorAccent: color("--content-bg"),
+    cursorAccent: color("--sunken-bg"),
   };
 }
 

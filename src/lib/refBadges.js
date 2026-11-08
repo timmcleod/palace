@@ -1,6 +1,7 @@
 // A commit's branches and tags in the history, as badges: one for each kind it has, with
 // how many, and every name in full on hover (see HistoryList.vue). Names can be long, and
-// several can point at one commit, so they never crowd out the message.
+// several can point at one commit, so they never crowd out the message. HEAD, where the
+// commit is checked out, is a pill of its own beside them.
 
 import { Cloud, GitBranch, Tag } from "lucide-vue-next";
 
@@ -19,10 +20,8 @@ export const CARD_NAMES = 8;
 
 /**
  * `refs` ({ name, kind } as history.rs gives them: "head", "local", "remote", "tag") as
- * badges: [{ kind, title, names, count, head }], one for each kind it has; the branches'
- * badge has `head` where the commit is checked out. And `head`, whether it is. A
- * detached HEAD, with no branch here, still gets a branch badge, with no names, so
- * where you are shows.
+ * badges: [{ kind, title, names, count, shown, more }], one for each kind of branch or
+ * tag it has; and `head`, whether the commit is checked out.
  */
 export function refBadges(refs) {
   const head = refs.some((r) => r.kind === "head");
@@ -33,11 +32,10 @@ export function refBadges(refs) {
       title,
       names,
       count: names.length,
-      head: head && kind === "local",
       // What the card lists, and how many it leaves out.
       shown: names.slice(0, CARD_NAMES),
       more: Math.max(0, names.length - CARD_NAMES),
     };
-  }).filter((badge) => badge.count || (badge.kind === "local" && head));
+  }).filter((badge) => badge.count);
   return { head, badges };
 }
