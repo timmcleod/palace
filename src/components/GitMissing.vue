@@ -102,7 +102,7 @@ async function copy() {
 
 h1 {
   margin: 10px 0 8px;
-  font-size: 20px;
+  font-size: var(--font-3xl);
   font-weight: 600;
 }
 

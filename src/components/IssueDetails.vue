@@ -535,7 +535,7 @@ header {
 
 h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--font-3xl);
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;

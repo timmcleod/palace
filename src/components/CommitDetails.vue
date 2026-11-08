@@ -371,7 +371,7 @@ function splitPath(path) {
 
 .subject {
   margin: 0;
-  font-size: var(--font-2xl);
+  font-size: var(--font-3xl);
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;

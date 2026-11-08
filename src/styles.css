@@ -12,6 +12,8 @@
   --font-lg: 14px;
   --font-xl: 15px;
   --font-2xl: 16px;
+  /* A page's title: a commit's subject, an issue's. */
+  --font-3xl: 20px;
 
   --radius-xs: 2px;
   --radius-sm: 4px;
