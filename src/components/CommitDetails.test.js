@@ -50,7 +50,7 @@ test("leads with the subject, then who committed it and when, with whom, and whe
   expect(parts.slice(1, 3)).toEqual(["jonathanbriehl", expect.stringMatching(/^committed on /)]);
   expect(parts.slice(-2)).toEqual(["· with", "Claude Opus 5.5"]);
   // Claude, by its own icon rather than an avatar.
-  expect(document.querySelector(".co-author img.agent-icon").getAttribute("src")).toBe("/file-icons/claude.svg");
+  expect(document.querySelector(".co-author .agent-icon").style.getPropertyValue("--shape")).toBe("url(/file-icons/claude.svg)");
   expect(document.querySelector(".refs").textContent).toContain("main");
 });
 

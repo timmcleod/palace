@@ -1,8 +1,9 @@
 <script setup>
 import { computed } from "vue";
-import { MessageSquare, Sparkle } from "lucide-vue-next";
+import { MessageSquare } from "lucide-vue-next";
 import { reviews } from "../lib/review.js";
 import { agentCommand, agentName } from "../lib/agents.js";
+import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
 
 // Below the diffs: the review comments waiting to go to the repository's agent.
@@ -31,7 +32,7 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
       :title="`Put the comments in ${agent}'s prompt, for you to add to and send`"
       @click="emit('send')"
     >
-      <Spinner v-if="sending" :size="12" /><Sparkle v-else :size="13" /> Send to {{ agent }}
+      <Spinner v-if="sending" :size="12" /><AgentIcon v-else :name="agent" /> Send to {{ agent }}
     </button>
   </div>
 </template>

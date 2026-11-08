@@ -113,26 +113,29 @@ const AGENT_NAMES = {
 /** The agent a program is, by its name, such as "Codex" for "codex", or null. */
 export const agentOfProgram = (program) => AGENT_NAMES[program?.toLowerCase()] ?? null;
 
-// The agents that sign commits they co-author, by the address each signs with, and its
-// icon among the file icons (Material Icon Theme's, see fileIcons.js), with whether that
-// has a version for the light theme. By address, not name: people are called Claude too.
-// Codex signs too (noreply@openai.com), but has no icon there, so it shows as a person.
+// Agents' own icons, by their names, among the file icons (Material Icon Theme's, see
+// fileIcons.js); AgentIcon.vue draws their shapes in one color. Codex has none there,
+// so it keeps the icon an agent without one gets.
+const AGENT_ICONS = { Claude: "claude", Copilot: "copilot", Cursor: "cursor", Gemini: "gemini-ai" };
+
+/** An agent's own icon's name among the file icons, by the agent's, such as "claude" for "Claude", or null. */
+export const agentIcon = (name) => AGENT_ICONS[name] ?? null;
+
+// The agents that sign commits they co-author, by the address each signs with. By
+// address, not name: people are called Claude too. Codex signs too (noreply@openai.com),
+// but with no icon to show, it shows as a person.
 const SIGNING_AGENTS = [
-  { name: "Claude", icon: "claude", light: false, signs: (email) => email === "noreply@anthropic.com" },
+  { name: "Claude", signs: (email) => email === "noreply@anthropic.com" },
   // As VS Code writes it, or as GitHub's noreply address for its Copilot account.
-  { name: "Copilot", icon: "copilot", light: true, signs: (email) => email === "copilot@github.com" || /^\d+\+copilot@users\.noreply\.github\.com$/.test(email) },
+  { name: "Copilot", signs: (email) => email === "copilot@github.com" || /^\d+\+copilot@users\.noreply\.github\.com$/.test(email) },
   // Its agent, at cursor.com, or cursor.sh as it was.
-  { name: "Cursor", icon: "cursor", light: true, signs: (email) => /^cursoragent@cursor\.(com|sh)$/.test(email) },
+  { name: "Cursor", signs: (email) => /^cursoragent@cursor\.(com|sh)$/.test(email) },
 ];
 
-/**
- * The agent a commit's author or co-author is, by their email: { name, icon, light },
- * or null for a person.
- */
+/** The agent a commit's author or co-author is, by their email, such as "Claude", or null for a person. */
 export function signingAgent({ email }) {
   const address = email?.trim().toLowerCase() ?? "";
-  const agent = SIGNING_AGENTS.find((a) => a.signs(address));
-  return agent ? { name: agent.name, icon: agent.icon, light: agent.light } : null;
+  return SIGNING_AGENTS.find((a) => a.signs(address))?.name ?? null;
 }
 
 // Commands that run another, which isn't what to call the tab.

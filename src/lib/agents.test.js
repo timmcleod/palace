@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { programOf, signingAgent, taskCommand } from "./agents.js";
+import { agentIcon, programOf, signingAgent, taskCommand } from "./agents.js";
 
 test("the program a command runs is its first word after any settings", () => {
   expect(programOf("claude --resume")).toBe("claude");
@@ -40,7 +40,7 @@ test("a command that resumes a session, or that Palace doesn't know, takes no ta
 });
 
 test("an agent that co-authored a commit is known by the address it signs with, not by name", () => {
-  const agent = (email) => signingAgent({ email })?.name ?? null;
+  const agent = (email) => signingAgent({ email });
   expect(agent("noreply@anthropic.com")).toBe("Claude");
   expect(agent("copilot@github.com")).toBe("Copilot");
   expect(agent("223556219+Copilot@users.noreply.github.com")).toBe("Copilot");
@@ -49,5 +49,10 @@ test("an agent that co-authored a commit is known by the address it signs with, 
   // People, whatever they're called, and agents without an icon.
   expect(signingAgent({ name: "Claude Debussy", email: "claude@example.com" })).toBeNull();
   expect(agent("noreply@openai.com")).toBeNull();
-  expect(signingAgent({ email: "copilot@github.com" })).toEqual({ name: "Copilot", icon: "copilot", light: true });
+});
+
+test("an agent's own icon, by its name, where it has one", () => {
+  expect(agentIcon("Claude")).toBe("claude");
+  expect(agentIcon("Copilot")).toBe("copilot");
+  expect(agentIcon("Codex")).toBeNull();
 });

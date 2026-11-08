@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, provide, reactive, ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleAlert } from "lucide-vue-next";
+import AgentIcon from "./AgentIcon.vue";
 import Avatar from "./Avatar.vue";
 import CopyText from "./CopyText.vue";
 import FileDiff from "./FileDiff.vue";
@@ -10,7 +11,6 @@ import LinkedText from "./LinkedText.vue";
 import RefName from "./RefName.vue";
 import { howCommitted, readMessage } from "../lib/commitMessage.js";
 import { signingAgent } from "../lib/agents.js";
-import { namedIconUrl } from "../lib/fileIcons.js";
 import { shortHash } from "../lib/format.js";
 
 const props = defineProps({
@@ -45,11 +45,7 @@ const message = computed(() => readMessage(details.value?.message ?? ""));
 const committed = computed(() => details.value && howCommitted(details.value));
 // A person as git writes them, which a click on their name copies: "Ada <ada@example.com>".
 const signature = (person) => `${person.name} <${person.email}>`;
-// The icon of an agent that co-authored it, as Claude, in place of an avatar, or null.
-const agentIcon = (person) => {
-  const agent = signingAgent(person);
-  return agent && namedIconUrl(agent.icon, agent.light);
-};
+
 
 async function load() {
   const seq = ++loadSeq;
@@ -272,7 +268,8 @@ function splitPath(path) {
             <span class="dim">· with</span>
             <!-- By where it's listed: two can share an email, as Claude's models do. -->
             <span v-for="(person, i) in message.coAuthors" :key="i" class="co-author">
-              <img v-if="agentIcon(person)" :src="agentIcon(person)" alt="" class="agent-icon" />
+              <!-- An agent that co-authored it, as Claude, by its own icon. -->
+              <AgentIcon v-if="signingAgent(person)" :name="signingAgent(person)" :size="18" />
               <Avatar v-else :name="person.name" :email="person.email" :size="18" />
               <CopyText :value="signature(person)" label="Copy the name and email">{{ person.name }}</CopyText>
             </span>
@@ -395,11 +392,6 @@ function splitPath(path) {
   color: var(--text-secondary);
 }
 
-/* An agent's own icon in place of an avatar, the size of one. */
-.agent-icon {
-  width: 18px;
-  height: 18px;
-}
 
 .refs {
   display: flex;

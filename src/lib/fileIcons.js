@@ -21,11 +21,8 @@ new MutationObserver(() => (isLight.value = document.documentElement.dataset.the
   { attributes: true, attributeFilter: ["data-theme"] },
 );
 
-/**
- * The URL of one of the icons by its own name, such as "copilot", in its version for the
- * light theme where it has one (`light`), as a dark one would be lost there.
- */
-export const namedIconUrl = (icon, light = false) => `/file-icons/${icon}${light && isLight.value ? "_light" : ""}.svg`;
+/** The URL of one of the icons by its own name, such as "claude". */
+export const namedIconUrl = (icon) => `/file-icons/${icon}.svg`;
 
 /**
  * The URL of the icon for `name` (a file or folder's name, or its path), or null until

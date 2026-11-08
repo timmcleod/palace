@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, Ellipsis, Plus, Sparkle, SquareTerminal, X } from "lucide-vue-next";
+import { ChevronDown, Ellipsis, Plus, SquareTerminal, X } from "lucide-vue-next";
 import { askConfirm, openForm, openMenu } from "../lib/overlays.js";
 import { isMac, NEW_TERMINAL_KEYS, shortcut } from "../lib/platform.js";
 import { dragEdge } from "../lib/resize.js";
@@ -28,6 +28,7 @@ import {
   tabsFor,
 } from "../lib/terminals.js";
 import { setDragImage } from "../lib/dragImage.js";
+import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
 
 // The panel below the history and details: the repository's terminals, in tabs. An
@@ -374,7 +375,7 @@ function startResize(event) {
           @contextmenu.prevent="tabMenu($event, tab)"
         >
           <Spinner v-if="tab.status?.state === 'working'" :size="13" />
-          <Sparkle v-else-if="tab.kind === 'agent'" :size="13" :stroke-width="1.75" />
+          <AgentIcon v-else-if="tab.kind === 'agent'" :name="tab.agent" />
           <SquareTerminal v-else :size="13" :stroke-width="1.75" />
           <span class="tab-label">{{ label(tab) }}</span>
           <span v-if="tab.unseen" class="tab-mark" :class="tab.status?.state" />
@@ -383,7 +384,7 @@ function startResize(event) {
       </div>
       <button class="icon-button small" :title="`New Terminal (${NEW_TERMINAL_KEYS})`" @click="newTerminal"><Plus :size="15" /></button>
       <button class="agent-button" :title="`New ${agent} tab: ${command}`" @click="newAgent()">
-        <Sparkle :size="13" :stroke-width="1.75" /> {{ agent }}
+        <AgentIcon :name="agent" /> {{ agent }}
       </button>
       <button class="icon-button small" title="More" @click="moreMenu"><Ellipsis :size="15" /></button>
       <button class="icon-button small" :title="`Hide (${shortcut('Ctrl+\'')})`" @click="emit('hide')"><ChevronDown :size="15" /></button>
@@ -400,7 +401,7 @@ function startResize(event) {
     />
     <div v-if="!group.tabs.length" class="terminal-empty">
       <button class="secondary-button" @click="newTerminal"><SquareTerminal :size="14" /> New Terminal</button>
-      <button class="secondary-button" @click="newAgent()"><Sparkle :size="14" /> {{ agent }}</button>
+      <button class="secondary-button" @click="newAgent()"><AgentIcon :name="agent" :size="14" /> {{ agent }}</button>
     </div>
   </section>
 </template>
