@@ -1,14 +1,16 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
+import { File, GitCommitHorizontal, ListFilter, Search } from "lucide-vue-next";
 import FileIcon from "./FileIcon.vue";
 import SearchHint from "./SearchHint.vue";
 import { shortcut } from "../lib/platform.js";
 
 // The toolbar's search: files by name or path, and commits in the history being shown
 // by message, author or hash. Picking a file shows its history, picking a commit shows
-// the commit, and the last row narrows the history to every matching commit.
+// the commit, and the last row narrows the history to every matching commit. Focused
+// with nothing typed yet, as by pressing /, it says what can be searched, so it's plain
+// that typing goes there.
 const props = defineProps({
   path: { type: String, required: true },
   // The history to search for commits; HEAD when null.
@@ -211,7 +213,12 @@ defineExpose({ focus });
       <SearchHint />
     </label>
     <Teleport to="body">
-      <div v-if="open && query.trim()" ref="list" class="results" :style="position" @mousedown.prevent>
+      <div v-if="open && !query.trim()" class="results intro" :style="position" @mousedown.prevent>
+        <p><File :size="15" :stroke-width="1.5" class="icon" /> Files, by name or folder</p>
+        <p><GitCommitHorizontal :size="15" :stroke-width="1.5" class="icon" /> Commits, by message, author or hash</p>
+        <p class="keys"><kbd>↑</kbd> <kbd>↓</kbd> to choose · <kbd>Enter</kbd> to open · <kbd>Esc</kbd> to close</p>
+      </div>
+      <div v-else-if="open" ref="list" class="results" :style="position" @mousedown.prevent>
         <h3>Files</h3>
         <div
           v-for="(item, i) in fileItems"
@@ -346,5 +353,36 @@ h3:not(:first-child) {
 .none {
   margin: 4px 8px 6px;
   color: var(--text-tertiary);
+}
+
+.intro {
+  width: 340px;
+  padding: 8px 10px;
+}
+
+.intro p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+}
+
+.intro .keys {
+  gap: 4px;
+  margin: 10px 0 0;
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+}
+
+kbd {
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  line-height: 16px;
+  text-align: center;
 }
 </style>

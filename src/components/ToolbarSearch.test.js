@@ -32,10 +32,13 @@ describe("the toolbar search", () => {
     app.mount(root);
     search.focus();
     await settle();
+    // Focused, before anything's typed, it says what's searched.
+    expect(document.querySelector(".results.intro")?.textContent).toContain("Commits, by message, author or hash");
     const input = document.querySelector(".toolbar-search input");
     input.value = "vue";
     input.dispatchEvent(new Event("input"));
     await settle();
+    expect(document.querySelector(".results.intro")).toBeNull();
     expect(document.querySelector(".results")?.textContent).toContain("App.vue");
     expect(document.querySelector(".results img")?.getAttribute("src")).toBe("/icons/App.vue.svg");
   });
