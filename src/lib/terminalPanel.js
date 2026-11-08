@@ -70,7 +70,7 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
     panel.value?.focus();
   }
 
-  // Whether the repository's agent can be started, as before New Task makes a worktree
+  // Whether the repository's agent can be started, as before New Agent Task makes a worktree
   // for it. Where it isn't installed, that's said, with an offer to install it, shown in
   // the panel.
   async function agentReady() {
@@ -84,7 +84,7 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
   }
 
   // Starts the repository's agent on `task`, showing the panel, as for a window opened
-  // by New Task. Where it can only be put in the agent's prompt, that's said; where the
+  // by New Agent Task. Where it can only be put in the agent's prompt, that's said; where the
   // agent didn't start, the task's given back, so it isn't lost.
   async function startTask(task) {
     const path = overview.value?.path;

@@ -29,7 +29,7 @@ export function setAgentCommand(path, command) {
 // the default. Each says how to install it, what Shift+Enter types in its prompt to
 // start a new line rather than send (Esc then Enter for Claude Code, and Ctrl+J for
 // Codex and Gemini CLI), and what its command line takes to start on a task, staying
-// open after, for New Task: "--" first, so a task can't be taken for an option.
+// open after, for New Agent Task: "--" first, so a task can't be taken for an option.
 export const AGENTS = [
   {
     name: "Claude",
@@ -74,7 +74,7 @@ const SHELL_SYNTAX = /[;&|#<>`]|\$\(/;
 
 /**
  * The agent `command`, as the repository's agent command, run to start on the task in
- * $PALACE_TASK, for New Task (see terminal_open): given on its command line rather than
+ * $PALACE_TASK, for New Agent Task (see terminal_open): given on its command line rather than
  * typed into it, so it waits through whatever the agent asks first, such as whether to
  * trust the new worktree's folder. The task itself isn't on the command line, where the
  * shell would read it, only the variable, which it passes on as it is. Null for a command

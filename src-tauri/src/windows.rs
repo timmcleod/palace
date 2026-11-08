@@ -16,7 +16,7 @@ pub struct Windows(Mutex<HashMap<String, String>>);
 static NEXT: AtomicU32 = AtomicU32::new(2);
 
 /// What each new window's agent is to start on, by window, as for a worktree made for a
-/// task (New Task), until the window's page takes it as it starts.
+/// task (New Agent Task), until the window's page takes it as it starts.
 static TASKS: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
 
 /// How far each new window sits from the one it was opened from, so it doesn't hide it.

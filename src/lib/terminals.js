@@ -53,7 +53,7 @@ export { programOf };
  * into a new terminal in the repository at `path`, for the user to run; `then` is what
  * to do once it's installed. `repositoryCommand`: the agent is the repository's agent
  * command's, which can be changed, rather than one picked for a tab. Resolves to whether
- * the installer was typed. As for an agent tab, or New Task, wanting an agent that isn't
+ * the installer was typed. As for an agent tab, or New Agent Task, wanting an agent that isn't
  * here.
  */
 export async function offerInstall(path, agent, { then, repositoryCommand = true } = {}) {
@@ -271,7 +271,7 @@ export async function sendToAgent(path, text) {
 }
 
 /**
- * Starts the repository's agent on `task`, as New Task does, and resolves to how:
+ * Starts the repository's agent on `task`, as New Agent Task does, and resolves to how:
  * "started", given it as it starts (see taskCommand), so it's working at once; "pasted",
  * put in its prompt for the user to send, for an agent Palace can't give one to that way;
  * { missing: agent }, not installed here; or null, when that agent never started.

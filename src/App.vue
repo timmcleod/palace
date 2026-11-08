@@ -1179,7 +1179,7 @@ async function checkGit() {
     // Repositories deleted since Palace last ran are taken off the list, once, by the
     // first window, without holding up what it opens.
     if (start.first) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
-    // Opened for a task (New Task): its agent starts on it, or, with the worktree not
+    // Opened for a task (New Agent Task): its agent starts on it, or, with the worktree not
     // open after all, the task's given back, so it isn't lost.
     if (start.task && overview.value) startTask(start.task);
     else if (start.task) tell("Couldn't Start the Task", `Its worktree didn't open. The task was:\n\n${start.task}`);

@@ -66,7 +66,7 @@ fn size(cols: u16, rows: u16) -> PtySize {
 
 /// Starts the user's login shell in `path`, `cols` by `rows`, and returns its id.
 /// `output` receives what it prints, and `exited` its exit code once it's gone. With
-/// `task`, as for New Task, the shell has it as $PALACE_TASK, for the agent's command
+/// `task`, as for New Agent Task, the shell has it as $PALACE_TASK, for the agent's command
 /// to give the agent: in the environment, it reaches the agent as it is, whatever it
 /// says, where typed on the command line, the shell would read it.
 #[tauri::command]

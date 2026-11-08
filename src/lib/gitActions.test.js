@@ -229,7 +229,7 @@ describe("worktrees", () => {
     expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: ["window-2"], force: false }]]);
   });
 
-  test("removing one forgets the agent command New Task gave it", async () => {
+  test("removing one forgets the agent command New Agent Task gave it", async () => {
     const other = worktree("/code/palace-feature", { branch: "feature" });
     setAgentCommand(other.path, "codex");
     const { actions } = actionsOn({ worktrees: [main, other] });
@@ -315,8 +315,8 @@ describe("a new task", () => {
 
   test("is offered in the + menu and on Worktrees", () => {
     const { actions } = actionsOn();
-    expect(labels(actions.addMenu())).toContain("New Task…");
-    expect(labels(actions.sectionMenu("worktrees"))).toContain("New Task…");
+    expect(labels(actions.addMenu())).toContain("New Agent Task…");
+    expect(labels(actions.sectionMenu("worktrees"))).toContain("New Agent Task…");
   });
 });
 

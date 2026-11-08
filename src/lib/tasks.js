@@ -1,6 +1,6 @@
 import { untakenName } from "./names.js";
 
-// New Task: a worktree with a branch of its own, made for a task an agent starts on in a
+// New Agent Task: a worktree with a branch of its own, made for a task an agent starts on in a
 // window of its own (see newTask in gitActions.js).
 
 /**

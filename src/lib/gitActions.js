@@ -658,7 +658,7 @@ export function useGitActions({
     // Canceled, or not started, what was typed waits for next time, in this repository.
     const draft = `new-task:${overview.value.path}`;
     const values = await openForm({
-      title: "New Task",
+      title: "New Agent Task",
       message: `A new branch from ${from}, in a worktree of its own, opens in a window where the agent starts on the task.`,
       fields: [
         { key: "task", label: "What should the agent do?", type: "textarea" },
@@ -714,7 +714,7 @@ export function useGitActions({
       close: showing?.windows ?? [],
       force: changed || worktree.locked,
     });
-    // Its agent command, as New Task gives a worktree, goes with it.
+    // Its agent command, as New Agent Task gives a worktree, goes with it.
     if (!error) setAgentCommand(worktree.path, "");
   }
 
@@ -987,7 +987,7 @@ export function useGitActions({
     if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];
     if (section === "worktrees") {
       return [
-        { label: "New Task…", action: newTask },
+        { label: "New Agent Task…", action: newTask },
         { label: "New Worktree…", action: () => newWorktree() },
         worktrees().some((w) => w.prunable) && { label: "Prune Worktrees", action: pruneWorktrees },
       ];
@@ -1000,7 +1000,7 @@ export function useGitActions({
       { label: "Create New Branch…", action: () => newBranch() },
       { label: "Create New Tag…", action: () => createTag() },
       { label: "New Worktree…", action: () => newWorktree() },
-      { label: "New Task…", action: newTask },
+      { label: "New Agent Task…", action: newTask },
       { separator: true },
       { label: "Add Remote Repository…", action: addRemote },
     ];
