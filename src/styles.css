@@ -38,6 +38,8 @@
 
   --sidebar-bg: #f4f4f4;
   --content-bg: #ffffff;
+  /* What floats over the page (menus, cards, notices), raised from it. */
+  --popover-bg: #ffffff;
   --input-bg: #ffffff;
   --border: #e3e3e3;
   --row-hover: rgba(0, 0, 0, 0.04);
@@ -46,7 +48,6 @@
   --toolbar-group-bg: rgba(0, 0, 0, 0.045);
   --button-hover: rgba(0, 0, 0, 0.07);
 
-  --ref-remote: #9a9a9a;
   --ref-tag: #b7862b;
   --lane-1: #1f7cf2;
   --lane-2: #8e4ec6;
@@ -105,6 +106,7 @@
 
   --sidebar-bg: #212a3a;
   --content-bg: #131a26;
+  --popover-bg: #1f2838;
   --input-bg: #313c50;
   --border: #364257;
   --row-hover: rgba(255, 255, 255, 0.06);
@@ -113,7 +115,6 @@
   --toolbar-group-bg: rgba(255, 255, 255, 0.06);
   --button-hover: rgba(255, 255, 255, 0.09);
 
-  --ref-remote: #5c677b;
   --ref-tag: #a07524;
   --lane-1: #3b8ff6;
   --lane-2: #a875e0;
@@ -746,30 +747,4 @@ kbd {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-}
-
-/* A branch or tag, flown as a pennant: in the history, a commit's details and a stash's
-   branch. Its kind colors it: "head" and "local" branches, "remote" ones, "tag"s. */
-.ref-flag {
-  display: inline-block;
-  overflow: hidden;
-  max-width: 14em;
-  padding: 0 13px 0 6px;
-  clip-path: polygon(0 0, 100% 0, calc(100% - 6px) 50%, 100% 100%, 0 100%);
-  background: var(--ref-remote);
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 17px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: white;
-}
-
-.ref-flag.head,
-.ref-flag.local {
-  background: var(--accent);
-}
-
-.ref-flag.tag {
-  background: var(--ref-tag);
 }

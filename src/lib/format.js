@@ -18,13 +18,29 @@ const UNITS = [
   ["minute", 60],
 ];
 
-/** How long ago a time (an ISO string) was, such as "3 days ago" or "yesterday". */
-export function formatAgo(time) {
-  const seconds = (Date.parse(time) - Date.now()) / 1000;
+/** How long ago a time (an ISO string) was, as of `now` (ms), such as "3 days ago" or "yesterday". */
+export function formatAgo(time, now = Date.now()) {
+  const seconds = (Date.parse(time) - now) / 1000;
   for (const [unit, size] of UNITS) {
     if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit);
   }
   return "just now";
+}
+
+const WEEK = 7 * 24 * 3600 * 1000;
+const monthDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const monthDayYear = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+/**
+ * When something was, for a list of them: how long ago within the last week ("3 days
+ * ago"), else its date ("Oct 22", with the year if it isn't this one), as a run of "2
+ * weeks ago" would tell older ones apart no better than not at all. `time` in ms.
+ */
+export function formatWhen(time, now = Date.now()) {
+  // A time ahead of now, as from a clock that's wrong, says how far ahead: "in 2 hours".
+  if (now - time < WEEK) return formatAgo(new Date(time).toISOString(), now);
+  const sameYear = new Date(time).getFullYear() === new Date(now).getFullYear();
+  return (sameYear ? monthDay : monthDayYear).format(time);
 }
 
 /** The text color, dark or light, that reads well on a background color ("d73a4a"). */

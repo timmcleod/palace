@@ -1,0 +1,64 @@
+<script setup>
+import { computed } from "vue";
+import { REF_ICONS } from "../lib/refBadges.js";
+
+// A branch or tag spelled out in a pill, with an icon and tint for its kind, as in a commit's
+// details, the history's card of a commit's branches and tags, and a stash's branch.
+// HEAD, where the commit is checked out, shows as a pill.
+const props = defineProps({
+  // "head", "local", "remote" or "tag", as history.rs gives them.
+  kind: { type: String, required: true },
+  name: { type: String, required: true },
+});
+
+const icon = computed(() => REF_ICONS[props.kind]);
+</script>
+
+<template>
+  <span v-if="kind === 'head'" class="head-pill">HEAD</span>
+  <span v-else class="ref-name" :class="kind">
+    <component :is="icon" :size="13" :stroke-width="2" class="icon" />
+    <span>{{ name }}</span>
+  </span>
+</template>
+
+<style scoped>
+.ref-name {
+  --tint: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 1px 8px 1px 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tint) 18%, transparent);
+  overflow-wrap: anywhere;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.ref-name.remote {
+  --tint: var(--text-secondary);
+}
+
+.ref-name.tag {
+  --tint: var(--ref-tag);
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--tint);
+}
+
+.head-pill {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--accent);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  line-height: 16px;
+  color: white;
+}
+</style>

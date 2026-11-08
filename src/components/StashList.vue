@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { Archive } from "lucide-vue-next";
+import RefName from "./RefName.vue";
 
 // Every stash: the branch it was made on, when, and its message.
 const props = defineProps({
@@ -46,7 +47,7 @@ function onKeydown(event) {
     >
       <div class="line">
         <span class="based-on">
-          <template v-if="stash.branch">Based on <span class="ref-flag">{{ stash.branch }}</span></template>
+          <template v-if="stash.branch">Based on <RefName kind="local" :name="stash.branch" class="branch" /></template>
           <template v-else>Detached HEAD</template>
         </span>
         <span class="date" :title="fullDateFormat.format(stash.time * 1000)">
@@ -103,7 +104,7 @@ function onKeydown(event) {
   color: var(--text-tertiary);
 }
 
-.ref-flag {
+.branch {
   margin-left: 2px;
   vertical-align: middle;
 }

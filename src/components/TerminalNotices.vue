@@ -51,7 +51,7 @@ const icons = { done: CircleCheck, blocked: MessageCircleQuestion, error: Circle
   padding: 10px 8px 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background: var(--content-bg);
+  background: var(--popover-bg);
   box-shadow: var(--shadow-popover);
   cursor: pointer;
 }

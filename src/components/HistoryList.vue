@@ -3,7 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, s
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, History, Search } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
-import { formatAgo } from "../lib/format.js";
+import RefName from "./RefName.vue";
+import { formatWhen } from "../lib/format.js";
+import { REF_ICONS, refBadges } from "../lib/refBadges.js";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
@@ -33,7 +35,7 @@ const props = defineProps({
 // dragged commit above or below another; "count" reports how many commits are listed.
 const emit = defineEmits(["select", "menu", "menu-many", "move", "count"]);
 
-const ROW_HEIGHT = 46;
+const ROW_HEIGHT = 52;
 const HEADER_HEIGHT = 34;
 const PAGE_SIZE = 100;
 const OVERSCAN = 400;
@@ -44,6 +46,9 @@ const error = ref("");
 const viewport = ref(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(0);
+// The card of a commit's branches and tags, while its badges are pointed at: { head,
+// badges, style }, or null (see "Branches and tags" below).
+const refsCard = shallowRef(null);
 
 // Index of the selected commit in the list, used for keyboard navigation.
 let selectedIndex = -1;
@@ -56,6 +61,9 @@ const inflight = new Set();
 let selectionChanges = 0;
 
 async function load({ resetScroll }) {
+  // The commits are read again, and the badges pointed at may go without the pointer
+  // leaving them, which would close their card.
+  refsCard.value = null;
   const seq = ++loadSeq;
   const selections = selectionChanges;
   try {
@@ -267,6 +275,8 @@ const canDrag = (commit) => props.editable && commit && !commit.incoming;
 const canPick = (commit) => props.pickable && !!commit;
 
 function onDragStart(index, event) {
+  // A drag holds back the pointer leaving the badges, which would close their card.
+  refsCard.value = null;
   const commit = commitAt(index);
   const moving = canDrag(commit);
   if (!moving && !canPick(commit)) {
@@ -411,6 +421,7 @@ function scrollIntoView(index, { center = false } = {}) {
 
 function onScroll() {
   scrollTop.value = viewport.value.scrollTop;
+  refsCard.value = null;
 }
 
 let resizeObserver;
@@ -452,11 +463,28 @@ watch(
 onBeforeUnmount(() => clearTimeout(narrowing));
 const graphWidth = computed(() => graphLayout(lanes.value).width);
 
-// When each commit was made, as "2 hours ago", with the date and time in full on hover.
-const ago = (seconds) => formatAgo(new Date(seconds * 1000).toISOString());
+// When each commit was made: "2 hours ago", or for one older than a week its date, with
+// the date and time in full on hover.
+const when = (seconds) => formatWhen(seconds * 1000);
 const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
 
-const MAX_REFS = 3;
+// --- Branches and tags ---------------------------------------------------------
+// A commit's branches and tags show as badges beside its message (see refBadges.js),
+// and pointing at them shows a card with every name in full.
+
+function showRefs(commit, event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  // Below the badges, or above them where there's more room, no taller than that room.
+  const roomBelow = window.innerHeight - rect.bottom - 14;
+  const roomAbove = rect.top - 14;
+  const below = roomBelow >= 240 || roomBelow >= roomAbove;
+  const style = {
+    right: `${Math.max(8, window.innerWidth - rect.right)}px`,
+    maxHeight: `${below ? roomBelow : roomAbove}px`,
+    ...(below ? { top: `${rect.bottom + 6}px` } : { bottom: `${window.innerHeight - rect.top + 6}px` }),
+  };
+  refsCard.value = { ...refBadges(commit.refs), style };
+}
 </script>
 
 <template>
@@ -522,23 +550,30 @@ const MAX_REFS = 3;
             <Avatar class="avatar" :name="item.commit.author_name" :email="item.commit.author_email" />
             <div class="body">
               <div class="line">
-                <span class="summary">{{ item.commit.summary }}</span>
+                <span class="summary" :title="item.commit.incoming ? `${item.commit.summary}\n\nFetched, not pulled yet` : item.commit.summary">{{ item.commit.summary }}</span>
                 <span
-                  v-for="label in item.commit.refs.slice(0, MAX_REFS)"
-                  :key="label.kind + label.name"
-                  class="ref-flag"
-                  :class="label.kind"
-                >{{ label.name }}</span>
-                <span
-                  v-if="item.commit.refs.length > MAX_REFS"
-                  class="ref-flag more"
-                  :title="item.commit.refs.slice(MAX_REFS).map((r) => r.name).join('\n')"
-                >+{{ item.commit.refs.length - MAX_REFS }}</span>
+                  v-if="item.commit.refs.length"
+                  class="badges"
+                  role="img"
+                  :aria-label="item.commit.refs.map((r) => r.name).join(', ')"
+                  @mouseenter="showRefs(item.commit, $event)"
+                  @mouseleave="refsCard = null"
+                >
+                  <span
+                    v-for="badge in refBadges(item.commit.refs).badges"
+                    :key="badge.kind"
+                    class="badge"
+                    :class="[badge.kind, { head: badge.head }]"
+                  >
+                    <component :is="REF_ICONS[badge.kind]" :size="12" :stroke-width="2.25" />
+                    <span v-if="badge.count > 1">{{ badge.count }}</span>
+                  </span>
+                </span>
               </div>
               <div class="line meta">
                 <span class="author">{{ item.commit.author_name }}</span>
                 <span>·</span>
-                <span class="date" :title="fullDateFormat.format(item.commit.time * 1000)">{{ ago(item.commit.time) }}</span>
+                <span class="date" :title="fullDateFormat.format(item.commit.time * 1000)">{{ when(item.commit.time) }}</span>
                 <span>·</span>
                 <span class="hash mono">{{ item.commit.short_id }}</span>
               </div>
@@ -557,6 +592,19 @@ const MAX_REFS = 3;
       </template>
     </div>
   </div>
+
+  <Teleport to="body">
+    <Transition name="refs-card">
+      <div v-if="refsCard" class="refs-card" :style="refsCard.style">
+        <p v-if="refsCard.head" class="here"><RefName kind="head" name="HEAD" /> Checked out here</p>
+        <section v-for="badge in refsCard.badges.filter((b) => b.count)" :key="badge.kind">
+          <h4>{{ badge.title }}</h4>
+          <p v-for="name in badge.shown" :key="name"><RefName :kind="badge.kind" :name="name" /></p>
+          <p v-if="badge.more" class="more">and {{ badge.more }} more</p>
+        </section>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -615,6 +663,7 @@ const MAX_REFS = 3;
 /* Fetched from the remote but not pulled into the branch yet. */
 .commit.incoming .avatar,
 .commit.incoming .summary,
+.commit.incoming .badges,
 .commit.incoming .meta {
   opacity: 0.55;
 }
@@ -622,18 +671,6 @@ const MAX_REFS = 3;
 .graph {
   flex-shrink: 0;
   align-self: stretch;
-}
-
-.avatar {
-  margin-right: 10px;
-}
-
-.avatar.placeholder {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--pill-bg);
 }
 
 /* The message first, what's scanned for; who, when and which commit quietly below. */
@@ -653,6 +690,18 @@ const MAX_REFS = 3;
   border-bottom-color: transparent;
 }
 
+.avatar {
+  margin-right: 10px;
+}
+
+.avatar.placeholder {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pill-bg);
+}
+
 .line {
   display: flex;
   align-items: center;
@@ -669,7 +718,7 @@ const MAX_REFS = 3;
 .summary {
   overflow: hidden;
   flex-shrink: 1;
-  min-width: 6em;
+  min-width: 0;
   font-weight: 500;
   text-overflow: ellipsis;
 }
@@ -687,8 +736,111 @@ const MAX_REFS = 3;
   color: var(--text-secondary);
 }
 
-.ref-flag {
+/* Beside the message, a badge for each kind of branch or tag at the commit, tinted in
+   its color; filled where the commit is checked out. */
+.badges {
+  display: flex;
   flex-shrink: 0;
+  gap: 4px;
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+.badge {
+  --tint: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 17px;
+  margin-top: 1px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--tint) 18%, transparent);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--tint);
+  transition: background 0.12s;
+}
+
+.badge.remote {
+  --tint: var(--text-secondary);
+}
+
+.badge.tag {
+  --tint: var(--ref-tag);
+}
+
+.badge.head {
+  background: var(--accent);
+  color: white;
+}
+
+.badges:hover .badge:not(.head) {
+  background: color-mix(in srgb, var(--tint) 30%, transparent);
+}
+
+/* Every branch and tag at the commit, in full, while the badges are pointed at. */
+.refs-card {
+  position: fixed;
+  z-index: 30;
+  min-width: 180px;
+  max-width: 360px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.refs-card .more {
+  padding: 2px 0;
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+}
+
+.refs-card p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+
+.refs-card .here {
+  margin-bottom: 6px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+.refs-card h4 {
+  margin: 8px 0 3px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.refs-card section:first-of-type h4 {
+  margin-top: 2px;
+}
+
+.refs-card section p {
+  padding: 2px 0;
+}
+
+.refs-card-enter-active,
+.refs-card-leave-active {
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
+}
+
+.refs-card-enter-from,
+.refs-card-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
 }
 
 .date,

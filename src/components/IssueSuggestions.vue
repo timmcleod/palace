@@ -37,7 +37,7 @@ defineProps({
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--content-bg);
+  background: var(--popover-bg);
   box-shadow: var(--shadow-popover);
 }
 

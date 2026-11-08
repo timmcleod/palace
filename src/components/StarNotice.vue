@@ -44,7 +44,7 @@ onMounted(markAsked);
   padding: 12px 10px 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background: var(--content-bg);
+  background: var(--popover-bg);
   box-shadow: var(--shadow-popover);
 }
 

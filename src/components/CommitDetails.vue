@@ -6,6 +6,7 @@ import Avatar from "./Avatar.vue";
 import CopyText from "./CopyText.vue";
 import FileDiff from "./FileDiff.vue";
 import FileIcon from "./FileIcon.vue";
+import RefName from "./RefName.vue";
 import { splitIssueRefs } from "../lib/issues.js";
 
 const props = defineProps({
@@ -248,9 +249,7 @@ function splitPath(path) {
           <template v-if="commit.refs.length">
             <dt>Refs</dt>
             <dd class="refs">
-              <span v-for="label in commit.refs" :key="label.kind + label.name" class="ref-flag" :class="label.kind">
-                {{ label.name }}
-              </span>
+              <RefName v-for="label in commit.refs" :key="label.kind + label.name" :kind="label.kind" :name="label.name" />
             </dd>
           </template>
           <dt>Commit Hash</dt>
@@ -366,7 +365,8 @@ dd.mono {
 .refs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 4px 6px;
 }
 
 .commit-message {
