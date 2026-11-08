@@ -13,22 +13,35 @@ pub struct Identity {
     local_email: String,
 }
 
+/// The name and email for every repository, and those the repository at `path` sets for
+/// itself. With no repository, as for Settings from the welcome screen, only the first.
 #[tauri::command]
-pub async fn git_identity(path: String) -> Result<Identity, String> {
+pub async fn git_identity(path: Option<String>) -> Result<Identity, String> {
+    let folder = path.clone().unwrap_or_else(outside_any);
     // `git config --get` fails when a key isn't set, which just means it's empty.
-    let get = |scope: &str, key: &str| cli::git(&path, &["config", scope, "--get", key], None).unwrap_or_default();
+    let get = |scope: &str, key: &str| cli::git(&folder, &["config", scope, "--get", key], None).unwrap_or_default();
+    let local = |key: &str| if path.is_some() { get("--local", key) } else { String::new() };
     Ok(Identity {
         global_name: get("--global", "user.name"),
         global_email: get("--global", "user.email"),
-        local_name: get("--local", "user.name"),
-        local_email: get("--local", "user.email"),
+        local_name: local("user.name"),
+        local_email: local("user.email"),
     })
+}
+
+/// A folder to run git in for settings of no repository: git needs to run somewhere.
+fn outside_any() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
 }
 
 /// Sets the name and email for every repository (`global`) or just this one. An empty
 /// value removes the setting, so this repository goes back to the global one.
 #[tauri::command]
-pub async fn set_git_identity(path: String, global: bool, name: String, email: String) -> Result<(), String> {
+pub async fn set_git_identity(path: Option<String>, global: bool, name: String, email: String) -> Result<(), String> {
+    if !global && path.is_none() {
+        return Err("There's no repository to set them for.".into());
+    }
+    let path = path.unwrap_or_else(outside_any);
     let scope = if global { "--global" } else { "--local" };
     for (key, value) in [("user.name", name.trim()), ("user.email", email.trim())] {
         if value.is_empty() {
@@ -60,13 +73,21 @@ mod tests {
         let t = TempRepo::new("identity");
         use tauri::async_runtime::block_on as run;
 
-        run(set_git_identity(t.path().into(), false, "Grace Hopper".into(), "grace@example.com".into())).unwrap();
-        let identity = run(git_identity(t.path().into())).unwrap();
+        run(set_git_identity(Some(t.path().into()), false, "Grace Hopper".into(), "grace@example.com".into())).unwrap();
+        let identity = run(git_identity(Some(t.path().into()))).unwrap();
         assert_eq!((identity.local_name.as_str(), identity.local_email.as_str()), ("Grace Hopper", "grace@example.com"));
 
-        run(set_git_identity(t.path().into(), false, "".into(), "".into())).unwrap();
-        let identity = run(git_identity(t.path().into())).unwrap();
+        run(set_git_identity(Some(t.path().into()), false, "".into(), "".into())).unwrap();
+        let identity = run(git_identity(Some(t.path().into()))).unwrap();
         assert_eq!((identity.local_name.as_str(), identity.local_email.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn with_no_repository_only_the_identity_for_every_one() {
+        use tauri::async_runtime::block_on as run;
+        let identity = run(git_identity(None)).unwrap();
+        assert_eq!((identity.local_name.as_str(), identity.local_email.as_str()), ("", ""));
+        assert!(run(set_git_identity(None, false, "Grace Hopper".into(), "grace@example.com".into())).is_err());
     }
 
     #[test]

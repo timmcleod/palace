@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  ArrowLeft,
   FileCode,
   FileDiff,
   FolderDown,
@@ -26,10 +27,15 @@ import { checkForUpdates, updates } from "../lib/updates.js";
 import { PALACE_URL } from "../lib/star.js";
 import castleUrl from "../assets/castle.webp";
 
+// The repository open, if one is: with none, as from the welcome screen, there's no
+// name and email for it alone to set.
 const props = defineProps({
-  path: { type: String, required: true },
-  name: { type: String, required: true },
+  path: { type: String, default: null },
+  name: { type: String, default: null },
+  // Shown on its own, from the welcome screen, with a way back ("back").
+  standalone: { type: Boolean, default: false },
 });
+const emit = defineEmits(["back"]);
 
 // The page's sections, for the list beside them on wide windows.
 const SECTIONS = [
@@ -77,6 +83,22 @@ function onScroll() {
 function release() {
   chosen = null;
 }
+
+// What the system's About panel said: the copyright and license, from Palace's
+// configuration (see about.rs), at the foot of the page.
+const about = ref(null);
+invoke("about_palace")
+  .then((value) => (about.value = value))
+  .catch(() => {});
+
+/** Scrolls back to the top, where Palace's version and Check for Updates are: its About page. */
+function scrollToTop() {
+  release();
+  current.value = SECTIONS[0].id;
+  scroller.value?.scrollTo({ top: 0 });
+}
+
+defineExpose({ scrollToTop });
 
 // --- Commit identity -------------------------------------------------------------
 
@@ -134,7 +156,7 @@ async function signIn() {
   githubError.value = (await signInWithToken()) ?? "";
   signingIn.value = false;
   // Private repositories' authors can now be looked up too.
-  if (account.value) loadAvatars(props.path);
+  if (account.value && props.path) loadAvatars(props.path);
 }
 
 async function signOut() {
@@ -245,6 +267,7 @@ const SAMPLE = {
       </nav>
 
       <div class="page">
+        <button v-if="standalone" class="back" @click="emit('back')"><ArrowLeft :size="15" /> Back</button>
         <header class="hero">
           <img :src="castleUrl" alt="" class="hero-castle" />
           <div class="hero-content">
@@ -334,7 +357,7 @@ const SAMPLE = {
                 </button>
               </div>
             </div>
-            <div class="item column">
+            <div v-if="path" class="item column">
               <div class="text">
                 <div class="title">For {{ name }} only</div>
                 <div class="desc">Leave these empty to use the ones above, or use a work email for work projects.</div>
@@ -617,6 +640,12 @@ const SAMPLE = {
           <h2>Acknowledgments</h2>
           <Acknowledgments />
         </section>
+
+        <footer v-if="about" class="colophon">
+          <span v-if="about.copyright">{{ about.copyright }}</span>
+          <button v-if="about.license" @click="openUrl(`${PALACE_URL}/blob/main/LICENSE`)">{{ about.license }} License</button>
+          <button @click="openUrl(PALACE_URL)">Source on GitHub</button>
+        </footer>
       </div>
     </div>
   </div>
@@ -680,6 +709,52 @@ const SAMPLE = {
   .section-list {
     display: none;
   }
+}
+
+/* The copyright and license, quietly, at the foot of the page. */
+.colophon {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 0;
+  margin-top: 32px;
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+}
+
+.colophon > * + *::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--text-tertiary);
+}
+
+.colophon button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.colophon button:hover {
+  color: var(--accent);
+}
+
+.back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -12px 0 12px -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  color: var(--text-secondary);
+}
+
+.back:hover {
+  background: var(--row-hover);
 }
 
 /* --- Header: a night-blue banner like the icon's, whatever the theme, with the castle

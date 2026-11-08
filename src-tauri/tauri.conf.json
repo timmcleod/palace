@@ -35,7 +35,7 @@
     "shortDescription": "Run your agent, review its work, ship it",
     "longDescription": "Your agent writes the code. Palace shows you what changed. You decide what gets shipped.",
     "publisher": "Tim McLeod",
-    "copyright": "Copyright (c) 2026 Tim McLeod",
+    "copyright": "Copyright © 2026 Tim McLeod",
     "license": "MIT",
     "homepage": "https://github.com/timmcleod/palace",
     "icon": [

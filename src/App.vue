@@ -99,6 +99,7 @@ import { dragEdge } from "./lib/resize.js";
 import { useShortcuts } from "./lib/shortcuts.js";
 import { useTerminalPanel } from "./lib/terminalPanel.js";
 import { useRepository } from "./lib/repository.js";
+import { useAppMenu } from "./lib/appMenu.js";
 import { useGitRun } from "./lib/gitRun.js";
 import { useLostCommits } from "./lib/lostCommits.js";
 import { allAgentStates } from "./lib/agentStates.js";
@@ -194,6 +195,9 @@ const isGitHub = computed(() => selected.value === "workspace:github");
 const isFullView = computed(() => isSettings.value || isGitHub.value);
 // The GitHub view opened from the welcome screen, before any repository is open.
 const browsingGitHub = ref(false);
+// Settings opened from the welcome screen, as by About Palace.
+const browsingSettings = ref(false);
+const settingsView = ref(null);
 const isStashes = computed(() => selected.value === "workspace:stashes");
 const isFiles = computed(() => selected.value === "workspace:files");
 // The views that list the changed files, which the overview then brings, so each
@@ -847,6 +851,19 @@ const thisWindow = getCurrentWebviewWindow();
 const unlistenChanges = thisWindow.listen("repo-changed", () => refresh());
 onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 
+// About Palace, from the menu: the top of Settings, in the repository open, or with
+// none, on its own.
+useAppMenu({
+  window: thisWindow,
+  showAbout: async () => {
+    if (overview.value) selected.value = "workspace:settings";
+    else browsingSettings.value = true;
+    browsingGitHub.value = false;
+    await nextTick();
+    settingsView.value?.scrollToTop();
+  },
+});
+
 // What each repository's agents are doing, in every window, by path (see agentStates.js),
 // for Worktrees to show which is busy or wants you.
 const agentStates = ref({});
@@ -1057,6 +1074,8 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     switchRepository(overview.value?.path, data.path);
   },
   onLoaded(data) {
+    // A repository open, Settings from the welcome screen is done with.
+    browsingSettings.value = false;
     rememberRepository(data);
     recents.value = recentRepositories();
   },
@@ -1351,7 +1370,7 @@ const breadcrumb = computed(() => {
 
     <section v-if="isSettings" class="pane settings-pane">
       <div class="splitter" @pointerdown="startResize($event, 'sidebar', 200, 480)" />
-      <SettingsView :path="overview.path" :name="overview.name" />
+      <SettingsView ref="settingsView" :path="overview.path" :name="overview.name" />
     </section>
 
     <section v-if="isGitHub" class="pane settings-pane">
@@ -1820,8 +1839,12 @@ const breadcrumb = computed(() => {
     />
   </div>
 
-  <main v-else-if="browsingGitHub" class="github-page">
+  <main v-else-if="browsingGitHub" class="standalone-page">
     <GitHubView standalone @clone="cloneRepository" @back="browsingGitHub = false" />
+  </main>
+
+  <main v-else-if="browsingSettings" class="standalone-page">
+    <SettingsView ref="settingsView" standalone @back="browsingSettings = false" />
   </main>
 
   <WelcomeView
@@ -2156,13 +2179,14 @@ const breadcrumb = computed(() => {
   }
 }
 
-.github-page {
+/* A view shown from the welcome screen, in place of it: GitHub, or Settings. */
+.standalone-page {
   display: flex;
   height: 100vh;
 }
 
 /* Below the macOS window buttons and the strip that drags the window. */
-:root[data-title-bar="overlay"] .github-page {
+:root[data-title-bar="overlay"] .standalone-page {
   box-sizing: border-box;
   padding-top: 28px;
 }

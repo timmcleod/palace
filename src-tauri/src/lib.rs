@@ -1,3 +1,4 @@
+mod about;
 mod avatars;
 mod branch;
 mod cli;
@@ -15,6 +16,8 @@ mod drop;
 mod keys;
 mod lost;
 mod markdown;
+#[cfg(target_os = "macos")]
+mod menu;
 mod notify;
 mod open;
 mod pulls;
@@ -63,12 +66,16 @@ pub fn run() {
                     no_pinch_zoom(window);
                 }
             }
+            #[cfg(target_os = "macos")]
+            menu::set(app.handle())?;
             windows::show_first(app.handle());
             // Copies of files dropped on a terminal a day or more ago go.
             drop::clear_old();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            about::about_palace,
+
             avatars::github_avatars,
 
             branch::checkout,
