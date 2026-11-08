@@ -796,23 +796,6 @@ function showPreviewTab() {
   color: var(--text-primary);
 }
 
-.image-view {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  padding: 20px;
-  overflow: auto;
-  background: repeating-conic-gradient(var(--row-hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
-}
-
-.image-view img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
 .message {
   display: flex;
   align-items: center;

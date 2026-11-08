@@ -374,15 +374,4 @@ h3:not(:first-child) {
   font-size: var(--font-sm);
   color: var(--text-tertiary);
 }
-
-kbd {
-  min-width: 16px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: var(--font-xs);
-  line-height: 16px;
-  text-align: center;
-}
 </style>

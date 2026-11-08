@@ -247,8 +247,9 @@ watch(
         </div>
         <p v-if="showBlame && blameError" class="message"><CircleAlert :size="15" /> {{ blameError }}</p>
         <p v-if="contents.missing" class="message">This file doesn't exist in this commit.</p>
-        <p v-else-if="contents.binary" class="message">Binary file, not shown.</p>
+        <div v-else-if="contents.image" class="image-view"><img :src="contents.image" alt="" /></div>
         <p v-else-if="contents.too_large" class="message">This file is too large to show.</p>
+        <p v-else-if="contents.binary" class="message">Binary file, not shown.</p>
         <div v-else class="source selectable mono">
           <div v-if="showBlame" class="blame">
             <div

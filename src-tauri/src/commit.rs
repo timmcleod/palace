@@ -1,4 +1,4 @@
-use base64::Engine;
+use crate::image::{data_url, image_type, MAX_IMAGE};
 use git2::{Commit, Delta, Diff, DiffFile, DiffFindOptions, Oid, Patch, Repository, Signature, Tree};
 use serde::Serialize;
 
@@ -182,36 +182,19 @@ pub(crate) fn file_diff_at(repo: &Repository, diff: &Diff, index: usize, max_lin
     Ok(file_diff)
 }
 
-pub(crate) const IMAGE_TYPES: &[(&str, &str)] = &[
-    ("png", "image/png"),
-    ("jpg", "image/jpeg"),
-    ("jpeg", "image/jpeg"),
-    ("gif", "image/gif"),
-    ("webp", "image/webp"),
-    ("avif", "image/avif"),
-    ("bmp", "image/bmp"),
-    ("ico", "image/x-icon"),
-    ("svg", "image/svg+xml"),
-];
-
-/// Larger images are described but not shown.
-pub(crate) const MAX_IMAGE: usize = 10 * 1024 * 1024;
-
 /// One side of a diff as an image, if it's a file with an image's extension.
 fn image(repo: &Repository, file: &DiffFile) -> Option<Image> {
     if !file.exists() {
         return None;
     }
     let path = file.path()?;
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    let (_, mime) = IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension)?;
+    let mime = image_type(path)?;
     // The working copy's side of a diff isn't in the object database.
     let bytes = match repo.find_blob(file.id()) {
         Ok(blob) => blob.content().to_vec(),
         Err(_) => std::fs::read(repo.workdir()?.join(path)).ok()?,
     };
-    let url = (bytes.len() <= MAX_IMAGE)
-        .then(|| format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)));
+    let url = (bytes.len() <= MAX_IMAGE).then(|| data_url(mime, &bytes));
     Some(Image { size: bytes.len(), url })
 }
 

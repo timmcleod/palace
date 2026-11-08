@@ -496,7 +496,8 @@ body.resizing-rows * {
   pointer-events: none;
 }
 
-.toolbar-search .search-hint kbd {
+/* A key, drawn as one, as in "Type / to search". */
+kbd {
   display: inline-block;
   min-width: 16px;
   padding: 0 4px;
@@ -726,4 +727,23 @@ body.resizing-rows * {
 
 .markdown .pl-ent {
   color: var(--syntax-tag);
+}
+
+/* An image shown whole, on a checkerboard so its transparent parts show: in the Files
+   view, and a commit's files. */
+.image-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+  background: repeating-conic-gradient(var(--row-hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+}
+
+.image-view img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }

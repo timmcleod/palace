@@ -9,6 +9,7 @@ mod files;
 mod git;
 mod github;
 mod history;
+mod image;
 mod issues;
 mod drop;
 mod keys;

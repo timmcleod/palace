@@ -9,13 +9,10 @@
 //! the web view can't load the repository's files itself. Those outside the repository,
 //! not images or too large are left out.
 
-use base64::Engine;
+use crate::image::{data_url, image_type, MAX_IMAGE};
 use pulldown_cmark::{html, Options, Parser};
 use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
-
-/// The largest image put in the page, so a stray huge one doesn't stall the preview.
-const MAX_IMAGE: u64 = 10 * 1024 * 1024;
 
 /// The Markdown `text` of `file`, in the repository at `path`, as HTML to show. `text`
 /// is what's in the editor, with any edits not saved yet.
@@ -75,11 +72,11 @@ fn image_source(repository: &Path, folder: &Path, value: &str) -> Option<String>
     let mime = image_type(&inside)?;
     let full = repository.join(&inside);
     let size = std::fs::metadata(&full).ok()?.len();
-    if size > MAX_IMAGE {
+    if size > MAX_IMAGE as u64 {
         return None;
     }
     let bytes = std::fs::read(&full).ok()?;
-    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    Some(data_url(mime, &bytes))
 }
 
 /// `path` with its "." and ".." worked out, or None if it leads out of the repository.
@@ -96,19 +93,6 @@ fn normalize(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(parts.iter().collect())
-}
-
-fn image_type(path: &Path) -> Option<&'static str> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    Some(match extension.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "avif" => "image/avif",
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

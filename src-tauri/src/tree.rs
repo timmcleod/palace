@@ -2,6 +2,7 @@
 //! folders and file contents for the Tree view.
 
 use crate::cli;
+use crate::image::{data_url, image_type, MAX_IMAGE};
 use git2::{ObjectType, Oid, Repository, StatusOptions};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -21,9 +22,12 @@ pub struct TreeEntry {
 pub struct FileContents {
     size: usize,
     binary: bool,
-    /// True when the file is too big to show.
+    /// True when the file is too big to show: as text, or as an image.
     too_large: bool,
     text: Option<String>,
+    /// A binary image, such as a PNG, as a data URL to show, unless it's too large. An
+    /// SVG is text, and shows as that.
+    image: Option<String>,
 }
 
 /// Every file git tracks in the working copy, for file search, and with `untracked`,
@@ -59,9 +63,11 @@ pub async fn file_contents(path: String, id: String, file: String) -> Result<Fil
 
     let size = blob.size();
     let binary = blob.is_binary();
-    let too_large = !binary && size > MAX_SHOWN;
+    let image_type = image_type(&file).filter(|_| binary);
+    let too_large = if image_type.is_some() { size > MAX_IMAGE } else { !binary && size > MAX_SHOWN };
     let text = (!binary && !too_large).then(|| String::from_utf8_lossy(blob.content()).into_owned());
-    Ok(FileContents { size, binary, too_large, text })
+    let image = image_type.filter(|_| !too_large).map(|mime| data_url(mime, blob.content()));
+    Ok(FileContents { size, binary, too_large, text, image })
 }
 
 /// A run of lines last changed by the same commit.
@@ -227,22 +233,35 @@ mod tests {
     fn browsing_a_commit() {
         let t = TempRepo::new("tree");
         let id = t.commit(
-            &[("b.txt", Some("bee\n")), ("A.txt", Some("ay\n")), ("src/main.rs", Some("fn main() {}\n")), ("logo.bin", Some("\0\x01\x02"))],
+            &[("b.txt", Some("bee\n")), ("A.txt", Some("ay\n")), ("src/main.rs", Some("fn main() {}\n")), ("logo.bin", Some("\0\x01\x02")), ("logo.png", Some("\0png"))],
             "First",
         );
         let id = id.to_string();
 
         let top = read_entries(t.path(), &id, "").unwrap();
         let names: Vec<_> = top.iter().map(|e| (e.name.as_str(), e.kind)).collect();
-        assert_eq!(names, [("src", "dir"), ("A.txt", "file"), ("b.txt", "file"), ("logo.bin", "file")]);
+        assert_eq!(names, [("src", "dir"), ("A.txt", "file"), ("b.txt", "file"), ("logo.bin", "file"), ("logo.png", "file")]);
 
         let src = read_entries(t.path(), &id, "src").unwrap();
         assert_eq!(src[0].path, "src/main.rs");
 
         let source = run(file_contents(t.path().into(), id.clone(), "src/main.rs".into()));
         assert_eq!(source.text.as_deref(), Some("fn main() {}\n"));
-        let bin = run(file_contents(t.path().into(), id, "logo.bin".into()));
-        assert!(bin.binary && bin.text.is_none());
+        let bin = run(file_contents(t.path().into(), id.clone(), "logo.bin".into()));
+        assert!(bin.binary && bin.text.is_none() && bin.image.is_none());
+        // An image shows as one.
+        let png = run(file_contents(t.path().into(), id, "logo.png".into()));
+        assert_eq!(png.image.as_deref(), Some("data:image/png;base64,AHBuZw=="));
+    }
+
+    #[test]
+    fn saying_an_image_too_large_to_show() {
+        let t = TempRepo::new("tree-large-image");
+        // A NUL, so it's binary, and a byte more than is shown.
+        let huge = format!("\0{}", "x".repeat(MAX_IMAGE));
+        let id = t.commit(&[("huge.png", Some(&huge))], "Huge").to_string();
+        let shown = run(file_contents(t.path().into(), id, "huge.png".into()));
+        assert!(shown.binary && shown.too_large && shown.image.is_none());
     }
 
     #[test]

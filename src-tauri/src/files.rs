@@ -2,9 +2,8 @@
 //! file's contents, and saving edits to it. Saving only ever writes inside the working
 //! copy, never into .git, and never over changes made since the file was read.
 
-use crate::commit::{IMAGE_TYPES, MAX_IMAGE};
+use crate::image::{data_url, image_type, MAX_IMAGE};
 use crate::errors::CHANGED_ON_DISK;
-use base64::Engine;
 use git2::Repository;
 use serde::Serialize;
 use std::fs;
@@ -93,8 +92,7 @@ pub async fn read_working_file(path: String, file: String, as_text: Option<bool>
         && size as usize <= MAX_IMAGE
     {
         let bytes = fs::read(&full).map_err(|e| format!("Couldn't read {file}: {e}"))?;
-        let url = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
-        return Ok(WorkingFileContents { kind: "image", image: Some(url), ..empty });
+        return Ok(WorkingFileContents { kind: "image", image: Some(data_url(mime, &bytes)), ..empty });
     }
     if size > MAX_SHOWN {
         return Ok(WorkingFileContents { kind: "too_large", ..empty });
@@ -364,11 +362,6 @@ fn same_file_in_other_case(old: &Path, new: &Path) -> bool {
 fn version(meta: &fs::Metadata) -> String {
     let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
     format!("{modified}:{}", meta.len())
-}
-
-fn image_type(file: &str) -> Option<&'static str> {
-    let extension = Path::new(file).extension()?.to_str()?.to_ascii_lowercase();
-    IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension).map(|(_, mime)| *mime)
 }
 
 fn shown(dir: &str) -> &str {
