@@ -9,7 +9,8 @@ import FileIcon from "./FileIcon.vue";
 import LinkedText from "./LinkedText.vue";
 import RefName from "./RefName.vue";
 import { howCommitted, readMessage } from "../lib/commitMessage.js";
-import { agentIconOf } from "../lib/agents.js";
+import { signingAgent } from "../lib/agents.js";
+import { namedIconUrl } from "../lib/fileIcons.js";
 import { shortHash } from "../lib/format.js";
 
 const props = defineProps({
@@ -44,6 +45,11 @@ const message = computed(() => readMessage(details.value?.message ?? ""));
 const committed = computed(() => details.value && howCommitted(details.value));
 // A person as git writes them, which a click on their name copies: "Ada <ada@example.com>".
 const signature = (person) => `${person.name} <${person.email}>`;
+// The icon of an agent that co-authored it, as Claude, in place of an avatar, or null.
+const agentIcon = (person) => {
+  const agent = signingAgent(person);
+  return agent && namedIconUrl(agent.icon, agent.light);
+};
 
 async function load() {
   const seq = ++loadSeq;
@@ -266,7 +272,7 @@ function splitPath(path) {
             <span class="dim">· with</span>
             <!-- By where it's listed: two can share an email, as Claude's models do. -->
             <span v-for="(person, i) in message.coAuthors" :key="i" class="co-author">
-              <img v-if="agentIconOf(person)" :src="agentIconOf(person)" alt="" class="agent-icon" />
+              <img v-if="agentIcon(person)" :src="agentIcon(person)" alt="" class="agent-icon" />
               <Avatar v-else :name="person.name" :email="person.email" :size="18" />
               <CopyText :value="signature(person)" label="Copy the name and email">{{ person.name }}</CopyText>
             </span>

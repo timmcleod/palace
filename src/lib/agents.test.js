@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { agentIconOf, programOf, taskCommand } from "./agents.js";
+import { programOf, signingAgent, taskCommand } from "./agents.js";
 
 test("the program a command runs is its first word after any settings", () => {
   expect(programOf("claude --resume")).toBe("claude");
@@ -39,7 +39,15 @@ test("a command that resumes a session, or that Palace doesn't know, takes no ta
   expect(taskCommand("cd api && claude")).toBeNull();
 });
 
-test("Claude, as a co-author, is known by Anthropic's no-reply address, not by name", () => {
-  expect(agentIconOf({ name: "Claude Opus 5.5", email: "noreply@anthropic.com" })).toBe("/file-icons/claude.svg");
-  expect(agentIconOf({ name: "Claude Debussy", email: "claude@example.com" })).toBeNull();
+test("an agent that co-authored a commit is known by the address it signs with, not by name", () => {
+  const agent = (email) => signingAgent({ email })?.name ?? null;
+  expect(agent("noreply@anthropic.com")).toBe("Claude");
+  expect(agent("copilot@github.com")).toBe("Copilot");
+  expect(agent("223556219+Copilot@users.noreply.github.com")).toBe("Copilot");
+  expect(agent("cursoragent@cursor.com")).toBe("Cursor");
+  expect(agent("cursoragent@cursor.sh")).toBe("Cursor");
+  // People, whatever they're called, and agents without an icon.
+  expect(signingAgent({ name: "Claude Debussy", email: "claude@example.com" })).toBeNull();
+  expect(agent("noreply@openai.com")).toBeNull();
+  expect(signingAgent({ email: "copilot@github.com" })).toEqual({ name: "Copilot", icon: "copilot", light: true });
 });

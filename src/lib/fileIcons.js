@@ -15,11 +15,17 @@ function load() {
 }
 
 // Whether the light theme is showing, which some icons have versions of their own for.
-const light = ref(document.documentElement.dataset.theme !== "dark");
-new MutationObserver(() => (light.value = document.documentElement.dataset.theme !== "dark")).observe(
+const isLight = ref(document.documentElement.dataset.theme !== "dark");
+new MutationObserver(() => (isLight.value = document.documentElement.dataset.theme !== "dark")).observe(
   document.documentElement,
   { attributes: true, attributeFilter: ["data-theme"] },
 );
+
+/**
+ * The URL of one of the icons by its own name, such as "copilot", in its version for the
+ * light theme where it has one (`light`), as a dark one would be lost there.
+ */
+export const namedIconUrl = (icon, light = false) => `/file-icons/${icon}${light && isLight.value ? "_light" : ""}.svg`;
 
 /**
  * The URL of the icon for `name` (a file or folder's name, or its path), or null until
@@ -32,7 +38,7 @@ export function fileIconUrl(name, kind = "file", open = false) {
     return null;
   }
   const lower = name.slice(name.lastIndexOf("/") + 1).toLowerCase();
-  const themed = light.value ? icons.light : null;
+  const themed = isLight.value ? icons.light : null;
   let icon;
   if (kind === "dir" || kind === "submodule") {
     const table = open ? "folderNamesOpen" : "folderNames";

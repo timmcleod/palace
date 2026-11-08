@@ -113,16 +113,27 @@ const AGENT_NAMES = {
 /** The agent a program is, by its name, such as "Codex" for "codex", or null. */
 export const agentOfProgram = (program) => AGENT_NAMES[program?.toLowerCase()] ?? null;
 
-// Agents' own icons, where Palace has one: Material Icon Theme's, kept with the file
-// icons (public/file-icons) as CLAUDE.md files use it too.
-const AGENT_ICONS = { Claude: "/file-icons/claude.svg" };
+// The agents that sign commits they co-author, by the address each signs with, and its
+// icon among the file icons (Material Icon Theme's, see fileIcons.js), with whether that
+// has a version for the light theme. By address, not name: people are called Claude too.
+// Codex signs too (noreply@openai.com), but has no icon there, so it shows as a person.
+const SIGNING_AGENTS = [
+  { name: "Claude", icon: "claude", light: false, signs: (email) => email === "noreply@anthropic.com" },
+  // As VS Code writes it, or as GitHub's noreply address for its Copilot account.
+  { name: "Copilot", icon: "copilot", light: true, signs: (email) => email === "copilot@github.com" || /^\d+\+copilot@users\.noreply\.github\.com$/.test(email) },
+  // Its agent, at cursor.com, or cursor.sh as it was.
+  { name: "Cursor", icon: "cursor", light: true, signs: (email) => /^cursoragent@cursor\.(com|sh)$/.test(email) },
+];
 
 /**
- * The icon of the agent a commit's author or co-author is, by their email, or null for
- * a person. Claude Code signs with Anthropic's no-reply address; its name alone isn't
- * enough, as people are called Claude too.
+ * The agent a commit's author or co-author is, by their email: { name, icon, light },
+ * or null for a person.
  */
-export const agentIconOf = ({ email }) => (email?.trim().toLowerCase() === "noreply@anthropic.com" ? AGENT_ICONS.Claude : null);
+export function signingAgent({ email }) {
+  const address = email?.trim().toLowerCase() ?? "";
+  const agent = SIGNING_AGENTS.find((a) => a.signs(address));
+  return agent ? { name: agent.name, icon: agent.icon, light: agent.light } : null;
+}
 
 // Commands that run another, which isn't what to call the tab.
 const LAUNCHERS = new Set(["cd", "env", "exec", "npx", "bunx", "pnpx", "uvx", "nice", "time", "&&", ";"]);
