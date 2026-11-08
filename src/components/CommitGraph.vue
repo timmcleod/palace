@@ -54,14 +54,13 @@ const lines = computed(() => {
 <template>
   <svg :width="width" :height="height" :viewBox="`0 0 ${width} ${height}`">
     <path v-for="(line, i) in lines" :key="i" :d="line.d" :stroke="line.color" :stroke-width="line.width" fill="none" />
+    <!-- The commit: a solid dot in its line's color. -->
     <circle
       v-if="graph && !through"
       :cx="x(graph.lane)"
       :cy="height / 2"
-      :r="layout.squeezed(graph.lane) ? 3 : 5"
-      :stroke="color(graph.lane)"
-      stroke-width="2"
-      fill="var(--content-bg)"
+      :r="layout.squeezed(graph.lane) ? 3 : 4.5"
+      :fill="color(graph.lane)"
     />
   </svg>
 </template>

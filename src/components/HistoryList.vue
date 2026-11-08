@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, s
 import { invoke } from "@tauri-apps/api/core";
 import { CircleAlert, History, Search } from "lucide-vue-next";
 import Avatar from "./Avatar.vue";
+import { formatAgo } from "../lib/format.js";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
@@ -451,7 +452,8 @@ watch(
 onBeforeUnmount(() => clearTimeout(narrowing));
 const graphWidth = computed(() => graphLayout(lanes.value).width);
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
+// When each commit was made, as "2 hours ago", with the date and time in full on hover.
+const ago = (seconds) => formatAgo(new Date(seconds * 1000).toISOString());
 const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" });
 
 const MAX_REFS = 3;
@@ -520,25 +522,25 @@ const MAX_REFS = 3;
             <Avatar class="avatar" :name="item.commit.author_name" :email="item.commit.author_email" />
             <div class="body">
               <div class="line">
-                <span class="author">{{ item.commit.author_name }}</span>
+                <span class="summary">{{ item.commit.summary }}</span>
                 <span
                   v-for="label in item.commit.refs.slice(0, MAX_REFS)"
                   :key="label.kind + label.name"
-                  class="ref"
+                  class="ref-flag"
                   :class="label.kind"
                 >{{ label.name }}</span>
                 <span
                   v-if="item.commit.refs.length > MAX_REFS"
-                  class="ref more"
+                  class="ref-flag more"
                   :title="item.commit.refs.slice(MAX_REFS).map((r) => r.name).join('\n')"
                 >+{{ item.commit.refs.length - MAX_REFS }}</span>
-                <span class="date" :title="fullDateFormat.format(item.commit.time * 1000)">
-                  {{ dateFormat.format(item.commit.time * 1000) }}
-                </span>
               </div>
-              <div class="line">
+              <div class="line meta">
+                <span class="author">{{ item.commit.author_name }}</span>
+                <span>·</span>
+                <span class="date" :title="fullDateFormat.format(item.commit.time * 1000)">{{ ago(item.commit.time) }}</span>
+                <span>·</span>
                 <span class="hash mono">{{ item.commit.short_id }}</span>
-                <span class="summary">{{ item.commit.summary }}</span>
               </div>
             </div>
           </template>
@@ -547,8 +549,8 @@ const MAX_REFS = 3;
             <div class="graph" :style="{ width: `${graphWidth}px` }" />
             <div class="avatar placeholder" />
             <div class="body">
-              <div class="skeleton" style="width: 30%" />
               <div class="skeleton" style="width: 70%" />
+              <div class="skeleton" style="width: 30%" />
             </div>
           </template>
         </div>
@@ -579,14 +581,15 @@ const MAX_REFS = 3;
 }
 
 .month-label {
-  font-size: var(--font-sm);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 .commit {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
 }
 
 .commit.selected {
@@ -611,9 +614,8 @@ const MAX_REFS = 3;
 
 /* Fetched from the remote but not pulled into the branch yet. */
 .commit.incoming .avatar,
-.commit.incoming .author,
-.commit.incoming .hash,
-.commit.incoming .summary {
+.commit.incoming .summary,
+.commit.incoming .meta {
   opacity: 0.55;
 }
 
@@ -634,15 +636,16 @@ const MAX_REFS = 3;
   background: var(--pill-bg);
 }
 
+/* The message first, what's scanned for; who, when and which commit quietly below. */
 .body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   flex: 1;
   min-width: 0;
   align-self: stretch;
-  padding-right: 8px;
+  padding-right: 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -655,68 +658,42 @@ const MAX_REFS = 3;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   line-height: 18px;
 }
 
-.author {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-}
-
-.ref {
-  overflow: hidden;
-  flex-shrink: 1;
-  min-width: 2em;
-  max-width: 14em;
-  padding: 0 5px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-sm);
-  line-height: 16px;
-  text-overflow: ellipsis;
-  color: white;
-}
-
-.ref.head,
-.ref.local {
-  background: var(--accent);
-}
-
-.ref.head {
-  flex-shrink: 0;
-}
-
-.ref.remote,
-.ref.more {
-  background: var(--ref-remote);
-}
-
-.ref.more {
-  flex-shrink: 0;
-  min-width: 0;
-}
-
-.ref.tag {
-  background: var(--ref-tag);
-}
-
-.date {
-  flex-shrink: 0;
-  margin-left: auto;
-  padding-left: 8px;
-  font-size: var(--font-md);
-  color: var(--text-secondary);
-}
-
-.hash {
-  flex-shrink: 0;
-  font-size: var(--font-md);
-  color: var(--text-secondary);
-}
-
+/* The message gives way to the flags beside it, which keep their size (each long name
+   cut at the most a flag shows); only a pane too narrow even for a short message cuts
+   them off at its edge. */
 .summary {
   overflow: hidden;
+  flex-shrink: 1;
+  min-width: 6em;
+  font-weight: 500;
   text-overflow: ellipsis;
+}
+
+.meta {
+  gap: 5px;
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+}
+
+.author {
+  overflow: hidden;
+  flex-shrink: 1;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+.ref-flag {
+  flex-shrink: 0;
+}
+
+.date,
+.hash {
+  flex-shrink: 0;
 }
 
 .skeleton {

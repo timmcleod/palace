@@ -747,3 +747,29 @@ kbd {
   max-height: 100%;
   object-fit: contain;
 }
+
+/* A branch or tag, flown as a pennant: in the history, a commit's details and a stash's
+   branch. Its kind colors it: "head" and "local" branches, "remote" ones, "tag"s. */
+.ref-flag {
+  display: inline-block;
+  overflow: hidden;
+  max-width: 14em;
+  padding: 0 13px 0 6px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 6px) 50%, 100% 100%, 0 100%);
+  background: var(--ref-remote);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 17px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: white;
+}
+
+.ref-flag.head,
+.ref-flag.local {
+  background: var(--accent);
+}
+
+.ref-flag.tag {
+  background: var(--ref-tag);
+}

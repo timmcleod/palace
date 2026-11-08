@@ -248,7 +248,7 @@ function splitPath(path) {
           <template v-if="commit.refs.length">
             <dt>Refs</dt>
             <dd class="refs">
-              <span v-for="label in commit.refs" :key="label.kind + label.name" class="ref" :class="label.kind">
+              <span v-for="label in commit.refs" :key="label.kind + label.name" class="ref-flag" :class="label.kind">
                 {{ label.name }}
               </span>
             </dd>
@@ -367,27 +367,6 @@ dd.mono {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-
-.ref {
-  padding: 0 5px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-sm);
-  line-height: 17px;
-  color: white;
-}
-
-.ref.head,
-.ref.local {
-  background: var(--accent);
-}
-
-.ref.remote {
-  background: var(--ref-remote);
-}
-
-.ref.tag {
-  background: var(--ref-tag);
 }
 
 .commit-message {
