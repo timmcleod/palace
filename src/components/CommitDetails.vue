@@ -36,9 +36,6 @@ const error = ref("");
 const expanded = reactive(new Set());
 // File diffs load as they scroll into view within this element.
 const scroller = ref(null);
-// The height of the bar pinned once the heading's scrolled away (see "The pinned bar"):
-// a file scrolled to lands below it, not under it. .pinned-bar's height in the styles.
-const PINNED_HEIGHT = 36;
 provide("diffScroller", scroller);
 
 let loadSeq = 0;
@@ -86,7 +83,9 @@ async function focus(file) {
   expanded.add(index);
   await nextTick();
   if (windowed.value) {
-    scroller.value.scrollTop = listEl.value.offsetTop + offsets.value[index] - PINNED_HEIGHT;
+    // Below the pinned bar, where there is one, as scrollIntoView puts it (see .details).
+    const below = parseFloat(getComputedStyle(scroller.value).scrollPaddingTop) || 0;
+    scroller.value.scrollTop = listEl.value.offsetTop + offsets.value[index] - below;
   } else {
     scroller.value?.querySelectorAll(".file")[index]?.scrollIntoView({ block: "start" });
   }
@@ -169,6 +168,8 @@ const sizes = new ResizeObserver((entries) => {
   }
   if (changed) layout.value++;
   if (scroller.value) viewHeight.value = scroller.value.clientHeight;
+  // A heading rewrapped to a new width ends somewhere else.
+  if (scroller.value) followHeading();
 });
 watch(
   scroller,
@@ -263,7 +264,7 @@ function splitPath(path) {
 </script>
 
 <template>
-  <div ref="scroller" class="details selectable" @scroll="onScroll">
+  <div ref="scroller" class="details selectable" :class="{ 'with-heading': !comparison }" @scroll="onScroll">
     <div v-if="error" class="message">
       <CircleAlert :size="28" :stroke-width="1.25" />
       <p>{{ error }}</p>
@@ -391,8 +392,13 @@ function splitPath(path) {
   position: relative;
   flex: 1;
   overflow-y: auto;
-  /* What's scrolled to lands below the pinned bar (see PINNED_HEIGHT). */
-  scroll-padding-top: 36px;
+  /* The height of the bar pinned once the heading's scrolled away. */
+  --pinned-height: 36px;
+}
+
+/* What's scrolled to lands below the pinned bar, where there is one (see focus). */
+.details.with-heading {
+  scroll-padding-top: var(--pinned-height);
 }
 
 /* At the top, the height of nothing, so the bar in it lies over what scrolls. */
@@ -411,7 +417,7 @@ function splitPath(path) {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: var(--pinned-height);
   padding: 0 24px;
   border-bottom: 1px solid var(--border);
   background: var(--sunken-bg);

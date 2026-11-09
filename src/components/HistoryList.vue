@@ -186,7 +186,10 @@ const visible = computed(() => {
   const result = [];
   for (let i = itemAt(Math.max(0, scrollTop.value - OVERSCAN)); i < items.length && offsets[i] < bottom; i++) {
     const item = items[i];
-    result.push({ ...item, key: i, top: offsets[i], commit: commitAt(item.header ? item.next : item.index) });
+    const commit = commitAt(item.header ? item.next : item.index);
+    // Its branches and tags as badges, worked out once for the row (see refBadges.js).
+    const marks = commit?.refs.length ? refBadges(commit.refs) : null;
+    result.push({ ...item, key: i, top: offsets[i], commit, marks });
   }
   return result;
 });
@@ -472,7 +475,7 @@ const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", t
 // A commit's branches and tags show as badges beside its message (see refBadges.js),
 // and pointing at them shows a card with every name in full.
 
-function showRefs(commit, event) {
+function showRefs(badges, event) {
   const rect = event.currentTarget.getBoundingClientRect();
   // Below the badges, or above them where there's more room, no taller than that room.
   const roomBelow = window.innerHeight - rect.bottom - 14;
@@ -483,7 +486,7 @@ function showRefs(commit, event) {
     maxHeight: `${below ? roomBelow : roomAbove}px`,
     ...(below ? { top: `${rect.bottom + 6}px` } : { bottom: `${window.innerHeight - rect.top + 6}px` }),
   };
-  refsCard.value = { badges: refBadges(commit.refs).badges, style };
+  refsCard.value = { badges, style };
 }
 </script>
 
@@ -551,18 +554,18 @@ function showRefs(commit, event) {
             <div class="body">
               <div class="line">
                 <span class="summary" :title="item.commit.incoming ? `${item.commit.summary}\n\nFetched, not pulled yet` : item.commit.summary">{{ item.commit.summary }}</span>
-                <span v-if="item.commit.refs.length" class="ref-marks">
+                <span v-if="item.marks" class="ref-marks">
                   <!-- Where it's checked out, said outright; its branches and tags as badges. -->
-                  <RefName v-if="refBadges(item.commit.refs).head" kind="head" name="HEAD" />
+                  <RefName v-if="item.marks.head" kind="head" name="HEAD" />
                   <span
-                    v-if="refBadges(item.commit.refs).badges.length"
+                    v-if="item.marks.badges.length"
                     class="badges"
                     role="img"
                     :aria-label="item.commit.refs.filter((r) => r.kind !== 'head').map((r) => r.name).join(', ')"
-                    @mouseenter="showRefs(item.commit, $event)"
+                    @mouseenter="showRefs(item.marks.badges, $event)"
                     @mouseleave="refsCard = null"
                   >
-                    <span v-for="badge in refBadges(item.commit.refs).badges" :key="badge.kind" class="badge" :class="badge.kind">
+                    <span v-for="badge in item.marks.badges" :key="badge.kind" class="badge" :class="badge.kind">
                       <component :is="REF_ICONS[badge.kind]" :size="12" :stroke-width="2.25" />
                       <span v-if="badge.count > 1">{{ badge.count }}</span>
                     </span>
