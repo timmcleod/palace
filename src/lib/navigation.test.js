@@ -61,6 +61,24 @@ describe("useNavigation", () => {
     expect(nav.forward).toHaveLength(1);
   });
 
+  test("reopens a file closed in the Files view going back, and closes it again going forward", async () => {
+    const { go, view, openFiles } = setUp();
+    await moveTo(() => (view.selected.value = "workspace:files"));
+    await moveTo(() => (openFiles["/repo"] = "src/main.js"));
+    await moveTo(() => (openFiles["/repo"] = null));
+    await go("back");
+    expect(openFiles["/repo"]).toBe("src/main.js");
+    await go("forward");
+    expect(openFiles["/repo"]).toBeNull();
+    // Away from the Files view, its file stays as it was.
+    await moveTo(() => (openFiles["/repo"] = "src/app.js"));
+    await moveTo(() => (view.selected.value = "workspace:history"));
+    await moveTo(() => (view.selected.value = "branch:main"));
+    await go("back");
+    expect(view.selected.value).toBe("workspace:history");
+    expect(openFiles["/repo"]).toBe("src/app.js");
+  });
+
   // Where it starts isn't a place until something changes.
   test("keeps only the last of places replaced quickly in the same view", async () => {
     const { nav, view } = setUp();

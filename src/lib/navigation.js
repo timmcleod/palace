@@ -80,7 +80,9 @@ export function useNavigation({ overview, view, fileShown, showFile }) {
     treeFile.value = place.treeFile;
     treeReveal.value = place.treeFile;
     comparison.value = place.comparison;
-    if (place.file) showFile(place.file);
+    // The file it had open, or none, where the Files view is shown: one closed there
+    // stays closed. Elsewhere both are null, and the Files view keeps its file.
+    if (place.file !== fileShown()) showFile(place.file);
     // Let the views settle (opening a stash's view picks one, say) before recording again.
     await nextTick();
     await nextTick();

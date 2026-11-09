@@ -915,6 +915,13 @@ function openInFiles(file) {
 
 // A file deleted in the Files view, or a folder, closes if it's open, once the editor
 // has let it go, and takes its edits not saved with it.
+// The Files view's file closed from its header: keyboard focus goes to the tree, as the
+// button it was on goes with the file.
+function closeFile() {
+  openFiles[overview.value.path] = null;
+  fileTree.value?.focus();
+}
+
 async function onFileDeleted(file) {
   const path = overview.value.path;
   const open = openFiles[path];
@@ -1728,6 +1735,7 @@ const breadcrumb = computed(() => {
         :file="openFiles[overview.path] ?? null"
         :refresh-key="refreshKey"
         @send-to-agent="pasteToAgent"
+        @close="closeFile"
       />
 
       <template v-else-if="isIssues">

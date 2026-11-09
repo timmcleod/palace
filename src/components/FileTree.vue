@@ -39,6 +39,8 @@ watch(
 );
 const view = computed(() => remembered.get(props.path));
 defineExpose({
+  // Keyboard focus, as when the file open beside it closes and its button with it.
+  focus: () => list.value?.focus(),
   toggleIgnored: () => (view.value.showIgnored = !view.value.showIgnored),
   showsIgnored: () => view.value.showIgnored,
 });

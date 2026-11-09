@@ -2,7 +2,7 @@
 import { computed, h, markRaw, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from "vue";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleAlert, ExternalLink, Save } from "lucide-vue-next";
+import { CircleAlert, ExternalLink, Save, X } from "lucide-vue-next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   asText,
@@ -35,8 +35,9 @@ const props = defineProps({
   file: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
 });
-// "send-to-agent" with text to put in the agent's prompt.
-const emit = defineEmits(["send-to-agent"]);
+// "send-to-agent" with text to put in the agent's prompt; "close" to show no file. Edits
+// not saved stay with the file closed, as with one left for another (see leave).
+const emit = defineEmits(["send-to-agent", "close"]);
 
 // The editor module, loaded with the first file opened.
 let cm = null;
@@ -598,6 +599,7 @@ function showPreviewTab() {
       >
         <Save :size="13" /> Save
       </button>
+      <button v-if="file" class="icon-button small" title="Close" @click="emit('close')"><X :size="14" /></button>
     </div>
 
     <div v-if="changedOnDisk" class="disk-banner">
