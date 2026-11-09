@@ -560,7 +560,7 @@ function showRefs(badges, event) {
                   <RefName v-if="item.marks.head" kind="head" name="HEAD" />
                   <!-- Spelled out, as Settings can choose, the rest listed on hover. -->
                   <template v-if="settings.historyRefNames">
-                    <RefName v-for="label in item.marks.named.shown" :key="label.kind + label.name" :kind="label.kind" :name="label.name" fit />
+                    <RefName v-for="label in item.marks.named.shown" :key="label.kind + label.name" :kind="label.kind" :name="label.name" fit plain />
                     <span
                       v-if="item.marks.named.more"
                       class="badge more"
@@ -760,15 +760,17 @@ function showRefs(badges, event) {
   padding-left: 6px;
 }
 
-/* Names spelled out are wider, so they give way too, each cut shorter, and the message
-   keeps a share of the line: both stay readable in a narrow pane. */
+/* Names spelled out are wider, so they give way too, each cut shorter, though the
+   message gives way first, faster, down to a share of the line it keeps: both stay
+   readable in a narrow pane. */
 .named .ref-marks {
   flex-shrink: 1;
   min-width: 0;
 }
 
 .named .summary {
-  min-width: min(45%, 180px);
+  flex-shrink: 3;
+  min-width: min(30%, 140px);
 }
 
 .badges {
