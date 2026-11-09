@@ -10,7 +10,7 @@ const props = defineProps({
   kind: { type: String, required: true },
   name: { type: String, required: true },
   // On one line, a long name cut short, as beside a commit's message in the history,
-  // rather than wrapping.
+  // rather than wrapping; what it's in shows it in full (there, the card on hover).
   fit: { type: Boolean, default: false },
   // Without its kind's icon, the tint alone saying which, where pills sit side by side
   // in a row of the history (see Settings › Branch and tag names in the history).
@@ -22,7 +22,7 @@ const icon = computed(() => REF_ICONS[props.kind]);
 
 <template>
   <span v-if="kind === 'head'" class="head-pill">HEAD</span>
-  <span v-else class="ref-name" :class="[kind, { fit, plain }]" :title="fit ? name : undefined">
+  <span v-else class="ref-name" :class="[kind, { fit, plain }]">
     <component :is="icon" v-if="!plain" :size="13" :stroke-width="2" class="icon" />
     <span class="text">{{ name }}</span>
   </span>

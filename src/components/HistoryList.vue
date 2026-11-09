@@ -558,18 +558,21 @@ function showRefs(badges, event) {
                 <span v-if="item.marks" class="ref-marks">
                   <!-- Where it's checked out, said outright; its branches and tags as badges. -->
                   <RefName v-if="item.marks.head" kind="head" name="HEAD" />
-                  <!-- Spelled out, as Settings can choose, the rest listed on hover. -->
-                  <template v-if="settings.historyRefNames">
+                  <!-- Spelled out, as Settings can choose, every one in full on hover. -->
+                  <span
+                    v-if="settings.historyRefNames"
+                    class="names"
+                    @mouseenter="showRefs(item.marks.badges, $event)"
+                    @mouseleave="refsCard = null"
+                  >
                     <RefName v-for="label in item.marks.named.shown" :key="label.kind + label.name" :kind="label.kind" :name="label.name" fit plain />
                     <span
                       v-if="item.marks.named.more"
                       class="badge more"
                       role="img"
                       :aria-label="`and ${item.marks.named.rest.join(', ')}`"
-                      @mouseenter="showRefs(item.marks.badges, $event)"
-                      @mouseleave="refsCard = null"
                     >+{{ item.marks.named.more }}</span>
-                  </template>
+                  </span>
                   <span
                     v-else-if="item.marks.badges.length"
                     class="badges"
@@ -760,17 +763,17 @@ function showRefs(badges, event) {
   padding-left: 6px;
 }
 
-/* Names spelled out are wider, so they give way too, each cut shorter, though the
-   message gives way first, faster, down to a share of the line it keeps: both stay
-   readable in a narrow pane. */
+/* Names spelled out keep their size while there's room, the message giving way; only
+   past most of the line are they cut shorter, so the message keeps a share of it. */
 .named .ref-marks {
-  flex-shrink: 1;
+  max-width: 70%;
   min-width: 0;
 }
 
-.named .summary {
-  flex-shrink: 3;
-  min-width: min(30%, 140px);
+.names {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
 }
 
 .badges {
@@ -812,11 +815,11 @@ function showRefs(badges, event) {
   flex-shrink: 0;
 }
 
-.badge.more:hover {
+.names:hover .badge.more {
   background: color-mix(in srgb, var(--tint) 30%, transparent);
 }
 
-/* Every branch and tag at the commit, in full, while the badges are pointed at. */
+/* Every branch and tag at the commit, in full, while its badges or names are pointed at. */
 .refs-card {
   position: fixed;
   z-index: 30;
