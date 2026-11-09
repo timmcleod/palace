@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { CARD_NAMES, refBadges } from "./refBadges.js";
+import { CARD_NAMES, ROW_NAMES, refBadges } from "./refBadges.js";
 
 const ref = (kind, name) => ({ kind, name });
 
@@ -15,7 +15,7 @@ describe("a commit's branches and tags as badges", () => {
   });
 
   test("none for a commit without any", () => {
-    expect(refBadges([])).toEqual({ head: false, badges: [] });
+    expect(refBadges([])).toEqual({ head: false, badges: [], named: { shown: [], more: 0, rest: [] } });
   });
 
   test("HEAD is said apart from the badges, a detached one with none", () => {
@@ -29,4 +29,17 @@ test("the card lists so many names of a kind, then says how many more", () => {
   expect(badge.count).toBe(CARD_NAMES + 3);
   expect(badge.shown).toHaveLength(CARD_NAMES);
   expect(badge.more).toBe(3);
+});
+
+test("spells out the first few names, in the badges' order, then says how many more", () => {
+  // Out of order, with HEAD among them, which isn't one of them.
+  const refs = [ref("tag", "v1.0"), ref("remote", "origin/dev"), ref("head", "HEAD")];
+  for (let i = 0; i < ROW_NAMES; i++) refs.push(ref("local", `branch-${i}`));
+  const inOrder = [...refs.filter((r) => r.kind === "local"), ref("remote", "origin/dev"), ref("tag", "v1.0")];
+  expect(refBadges(refs).named).toEqual({
+    shown: inOrder.slice(0, ROW_NAMES),
+    more: 2,
+    rest: ["origin/dev", "v1.0"],
+  });
+  expect(refBadges([ref("local", "main")]).named).toEqual({ shown: [ref("local", "main")], more: 0, rest: [] });
 });

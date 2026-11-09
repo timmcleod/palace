@@ -20,6 +20,9 @@ const DEFAULTS = {
   syntaxHighlighting: true,
   // Colorful icons for files and folders, by name, rather than plain outlines.
   fileIcons: true,
+  // Spell out each commit's branches and tags in the history, rather than a badge for
+  // each kind with the names on hover (see refBadges.js).
+  historyRefNames: false,
   // Save edits in the Files view as they're made: a moment after typing stops, and on
   // leaving the file, the editor or Palace.
   autoSave: true,

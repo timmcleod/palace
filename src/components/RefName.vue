@@ -9,6 +9,9 @@ const props = defineProps({
   // "head", "local", "remote" or "tag", as history.rs gives them.
   kind: { type: String, required: true },
   name: { type: String, required: true },
+  // On one line, a long name cut short, as beside a commit's message in the history,
+  // rather than wrapping.
+  fit: { type: Boolean, default: false },
 });
 
 const icon = computed(() => REF_ICONS[props.kind]);
@@ -16,9 +19,9 @@ const icon = computed(() => REF_ICONS[props.kind]);
 
 <template>
   <span v-if="kind === 'head'" class="head-pill">HEAD</span>
-  <span v-else class="ref-name" :class="kind">
+  <span v-else class="ref-name" :class="[kind, { fit }]" :title="fit ? name : undefined">
     <component :is="icon" :size="13" :stroke-width="2" class="icon" />
-    <span>{{ name }}</span>
+    <span class="text">{{ name }}</span>
   </span>
 </template>
 
@@ -39,6 +42,16 @@ const icon = computed(() => REF_ICONS[props.kind]);
   color: var(--text-primary);
 }
 
+.ref-name.fit {
+  max-width: 180px;
+  white-space: nowrap;
+}
+
+.fit .text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ref-name.remote {
   --tint: var(--text-secondary);
 }
@@ -53,6 +66,7 @@ const icon = computed(() => REF_ICONS[props.kind]);
 }
 
 .head-pill {
+  flex-shrink: 0;
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--accent);

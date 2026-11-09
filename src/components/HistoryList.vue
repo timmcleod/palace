@@ -6,6 +6,7 @@ import Avatar from "./Avatar.vue";
 import RefName from "./RefName.vue";
 import { formatWhen } from "../lib/format.js";
 import { REF_ICONS, refBadges } from "../lib/refBadges.js";
+import { settings } from "../lib/settings.js";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
@@ -552,13 +553,25 @@ function showRefs(badges, event) {
             <CommitGraph class="graph" :graph="item.commit.graph" :lanes="lanes" :height="ROW_HEIGHT" />
             <Avatar class="avatar" :name="item.commit.author_name" :email="item.commit.author_email" />
             <div class="body">
-              <div class="line">
+              <div class="line" :class="{ named: item.marks && settings.historyRefNames }">
                 <span class="summary" :title="item.commit.incoming ? `${item.commit.summary}\n\nFetched, not pulled yet` : item.commit.summary">{{ item.commit.summary }}</span>
                 <span v-if="item.marks" class="ref-marks">
                   <!-- Where it's checked out, said outright; its branches and tags as badges. -->
                   <RefName v-if="item.marks.head" kind="head" name="HEAD" />
+                  <!-- Spelled out, as Settings can choose, the rest listed on hover. -->
+                  <template v-if="settings.historyRefNames">
+                    <RefName v-for="label in item.marks.named.shown" :key="label.kind + label.name" :kind="label.kind" :name="label.name" fit />
+                    <span
+                      v-if="item.marks.named.more"
+                      class="badge more"
+                      role="img"
+                      :aria-label="`and ${item.marks.named.rest.join(', ')}`"
+                      @mouseenter="showRefs(item.marks.badges, $event)"
+                      @mouseleave="refsCard = null"
+                    >+{{ item.marks.named.more }}</span>
+                  </template>
                   <span
-                    v-if="item.marks.badges.length"
+                    v-else-if="item.marks.badges.length"
                     class="badges"
                     role="img"
                     :aria-label="item.commit.refs.filter((r) => r.kind !== 'head').map((r) => r.name).join(', ')"
@@ -713,9 +726,8 @@ function showRefs(badges, event) {
   line-height: 18px;
 }
 
-/* The message gives way to the flags beside it, which keep their size (each long name
-   cut at the most a flag shows); only a pane too narrow even for a short message cuts
-   them off at its edge. */
+/* The message gives way to the badges beside it, which keep their size; only a pane too
+   narrow even for a short message cuts them off at its edge. */
 .summary {
   overflow: hidden;
   flex-shrink: 1;
@@ -748,6 +760,17 @@ function showRefs(badges, event) {
   padding-left: 6px;
 }
 
+/* Names spelled out are wider, so they give way too, each cut shorter, and the message
+   keeps a share of the line: both stay readable in a narrow pane. */
+.named .ref-marks {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.named .summary {
+  min-width: min(45%, 180px);
+}
+
 .badges {
   display: flex;
   gap: 4px;
@@ -778,6 +801,16 @@ function showRefs(badges, event) {
 }
 
 .badges:hover .badge {
+  background: color-mix(in srgb, var(--tint) 30%, transparent);
+}
+
+/* How many more names than are spelled out, which lists them all on hover. */
+.badge.more {
+  --tint: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.badge.more:hover {
   background: color-mix(in srgb, var(--tint) 30%, transparent);
 }
 

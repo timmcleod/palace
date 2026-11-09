@@ -1,7 +1,8 @@
 // A commit's branches and tags in the history, as badges: one for each kind it has, with
 // how many, and every name in full on hover (see HistoryList.vue). Names can be long, and
 // several can point at one commit, so they never crowd out the message. HEAD, where the
-// commit is checked out, is a pill of its own beside them.
+// commit is checked out, is a pill of its own beside them. With Settings › Branch and tag
+// names in the history, the first few are spelled out instead (`named`).
 
 import { Cloud, GitBranch, Tag } from "lucide-vue-next";
 
@@ -18,10 +19,15 @@ const KINDS = [
 // The most names of a kind the card lists; past that it says how many more.
 export const CARD_NAMES = 8;
 
+// The most names a row spells out; past that it says how many more, listed on hover.
+export const ROW_NAMES = 3;
+
 /**
  * `refs` ({ name, kind } as history.rs gives them: "head", "local", "remote", "tag") as
  * badges: [{ kind, title, names, count, shown, more }], one for each kind of branch or
- * tag it has; and `head`, whether the commit is checked out.
+ * tag it has; `head`, whether the commit is checked out; and `named`, { shown, more,
+ * rest }, the first names to spell out in their badges' order ({ kind, name }), how
+ * many that leaves, and their names.
  */
 export function refBadges(refs) {
   const head = refs.some((r) => r.kind === "head");
@@ -37,5 +43,8 @@ export function refBadges(refs) {
       more: Math.max(0, names.length - CARD_NAMES),
     };
   }).filter((badge) => badge.count);
-  return { head, badges };
+  const all = badges.flatMap(({ kind, names }) => names.map((name) => ({ kind, name })));
+  const rest = all.slice(ROW_NAMES).map((r) => r.name);
+  const named = { shown: all.slice(0, ROW_NAMES), more: rest.length, rest };
+  return { head, badges, named };
 }

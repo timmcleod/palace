@@ -418,6 +418,15 @@ const SAMPLE = {
               </div>
               <label class="switch"><input v-model="settings.fileIcons" type="checkbox" /><span /></label>
             </div>
+            <div class="item">
+              <div class="text">
+                <div class="title">Branch and tag names in the history</div>
+                <div class="desc">
+                  Spelled out beside each commit's message. Off, each kind is a small badge, with the names on hover.
+                </div>
+              </div>
+              <label class="switch"><input v-model="settings.historyRefNames" type="checkbox" /><span /></label>
+            </div>
           </div>
         </section>
 
