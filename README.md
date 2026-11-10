@@ -17,8 +17,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://timmcleod.github.io/palace/assets/hero-dark.webp?v=2">
-    <img src="https://timmcleod.github.io/palace/assets/hero-light.webp?v=2" width="900" alt="Palace showing a repository's Working Copy and the diff of a changed file, with Claude Code running in a Claude tab below">
+    <source media="(prefers-color-scheme: dark)" srcset="https://timmcleod.github.io/palace/assets/hero-dark.webp?v=3">
+    <img src="https://timmcleod.github.io/palace/assets/hero-light.webp?v=3" width="900" alt="Palace showing a repository's Working Copy and the diff of a changed file, with Claude Code running in a Claude tab below">
   </picture>
 </p>
 
@@ -32,18 +32,19 @@ When your agent writes the code, your job changes: less typing, more steering, r
 
 ## Features
 
-- **Claude Code:** a Claude tab starts Claude Code in the repository you're looking at, with a command you set for each repository, and its changes appear in the Working Copy as it works. Prefer another agent that runs in a terminal, such as Codex or Gemini? Set its command instead, and the tab is named after it. The panel's ⋯ menu also opens Codex or Gemini CLI in a tab of their own, and Shift+Enter starts a new line in each one's prompt. Ordinary terminal tabs sit beside it for your dev server or tests, and keep running while you look at another repository. Ctrl+' (⌘' on a Mac) shows and hides the panel.
-- **Files:** browse the working copy and edit files in place, with syntax highlighting, marks on lines changed since the last commit, Ctrl+P (⌘P on a Mac) to find a file, and colorful icons by file type. Palace isn't an IDE: no autocomplete, debugger or plugins, on purpose.
-- **Windows:** open a window for each repository with Ctrl+N (⌘N), each with its own terminals. Closing a window or quitting with a busy terminal or an unsaved file asks first.
-- **History:** every commit on a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash. Search files and commits together with Ctrl+F (⌘F on a Mac), browse each commit's files, and blame them line by line.
+- **Claude Code:** a Claude tab starts Claude Code in the repository you're looking at, with a command you set for each repository, and its changes appear in the Working Copy as it works. Prefer another agent that runs in a terminal, such as Codex or Gemini? Set its command instead, and the tab is named after it. The panel's ⋯ menu also opens Codex or Gemini CLI in a tab of their own, and Shift+Enter starts a new line in each one's prompt. Drop a screenshot or any file on the terminal, and its path goes into the agent's prompt. The terminal opens on your agent; Ctrl+Shift+T (⌘T on a Mac) adds a shell tab for your dev server or tests, which keeps running while you look at another repository. Ctrl+' (⌘' on a Mac) shows and hides the panel.
+- **Files:** browse the working copy and edit files in place, with syntax highlighting, marks on lines changed since the last commit, Ctrl+P (⌘P on a Mac) to find a file, a preview for Markdown files, and colorful icons by file type. Palace isn't an IDE: no autocomplete, debugger or plugins, on purpose.
+- **Agents side by side:** describe a task, and New Agent Task makes a branch for it in a worktree of its own and opens it in a new window, with your agent already working on it. Worktrees shows each one's agent working, finished or waiting on you. Open a window for any repository with Ctrl+N (⌘N), each with its own terminals. Closing a window or quitting with a busy terminal or an unsaved file asks first.
+- **History:** every commit on a branch graph, grouped by month, for HEAD or any branch, remote branch, tag or stash. Search files and commits together with / or Ctrl+F (⌘F on a Mac), browse each commit's files, and blame them line by line.
 - **Diffs:** unified or side by side, with the changed words within each line highlighted. Images show old and new versions side by side.
 - **Working copy:** stage, unstage or discard whole files, single chunks or individual lines. Discarded changes go to the Trash. Commit, amend, and stash everything or just the files you pick.
-- **Branches:** drag a branch onto HEAD to merge it, drag branches into your own order with labeled dividers between groups, and drag commits to reorder or squash them. Rebase, cherry-pick, revert, reset and edit commit messages from a right-click. Compare any two branches or tags, and resolve conflicts one block at a time.
+- **Undo:** Ctrl+Z (⌘Z) undoes a commit, discard, merge, rebase, reset and more, putting back exactly what it changed. Commits a branch loses, as to an agent's `git reset --hard`, are offered back in a click.
+- **Branches:** drag a branch onto HEAD to merge it (hold Alt to rebase onto it), drag branches into your own order with labeled dividers between groups, drag commits to reorder or squash them, and drag them onto your branch to cherry-pick them. Rebase, revert, reset and edit commit messages from a right-click. Compare any two branches or tags, and resolve conflicts one block at a time.
 - **Remotes:** fetch, pull and push with live progress and Cancel, and fetch in the background every few minutes. Publish new branches, and manage tags, remote branches and remotes.
 - **GitHub:** sign in to see the repository's issues and pull requests in the sidebar: filter, comment, label, create pull requests and merge them. Clone your repositories, create new ones and manage SSH keys.
 - **Real Git underneath:** Palace runs your own `git` for every change, so your hooks, commit signing, SSH agent, credential helpers and `.gitconfig` work exactly as they do in a terminal.
 
-Palace updates itself when a new release comes out. See the [website](https://timmcleod.github.io/palace/) for a tour.
+Palace updates itself when a new release comes out, and reopens your windows as they were. See the [website](https://timmcleod.github.io/palace/) for a tour.
 
 ## Install
 
