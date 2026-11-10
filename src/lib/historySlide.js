@@ -16,12 +16,14 @@ export function newestInView({ top, rowHeight, scrollTop }) {
  *
  * `before` is where the newest commit shown so far started, and `after` where that same
  * commit starts now, or null if it's no longer in the history (amended, undone, rebased
- * away), when nothing was simply added above it. New rows taller than the view
- * (`viewportHeight`), as a pull of hundreds would be, just appear.
+ * away), when nothing was simply added above it. New rows taller than `most` just
+ * appear: more than fits in the view, as a pull of hundreds, or than the rows drawn
+ * beyond it, which the slide starts by showing, or it would start with a blank strip at
+ * the bottom. A slide of more than that would be a lurch rather than a glide anyway.
  */
-export function slideDistance({ before, after, viewportHeight }) {
+export function slideDistance({ before, after, most }) {
   if (after == null) return 0;
   const distance = after - before;
-  if (distance <= 0 || distance > viewportHeight) return 0;
+  if (distance <= 0 || distance > most) return 0;
   return distance;
 }

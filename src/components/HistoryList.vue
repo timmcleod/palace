@@ -195,7 +195,8 @@ async function slideIn(before, position) {
   const distance = slideDistance({
     before,
     after: layout.value.offsets[layout.value.itemOfCommit[position]],
-    viewportHeight: viewportHeight.value,
+    // No more than fits in the view, nor than the rows drawn beyond it (see slideDistance).
+    most: Math.min(viewportHeight.value, OVERSCAN),
   });
   if (!distance || reducedMotion?.matches) return;
   // Once the new rows are drawn, before they're painted.
