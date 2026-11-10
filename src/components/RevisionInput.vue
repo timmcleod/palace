@@ -166,7 +166,7 @@ input:focus {
 }
 
 .option:hover {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 </style>

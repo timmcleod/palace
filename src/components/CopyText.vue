@@ -89,7 +89,7 @@ function onKeydown(event) {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   transform: translateY(-50%);
-  background: var(--accent);
+  background: var(--accent-fill);
   font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
   font-size: var(--font-xs);
   font-weight: 600;

@@ -298,7 +298,7 @@ defineExpose({ focus });
 }
 
 .result.active {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 

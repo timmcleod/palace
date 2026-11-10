@@ -673,7 +673,7 @@ function showRefs(badges, event) {
   right: 8px;
   height: 3px;
   border-radius: var(--radius-xs);
-  background: var(--accent);
+  background: var(--accent-fill);
   pointer-events: none;
 }
 
@@ -793,7 +793,8 @@ function showRefs(badges, event) {
   background: color-mix(in srgb, var(--tint) 18%, transparent);
   font-size: var(--font-xs);
   font-weight: 600;
-  color: var(--tint);
+  /* Its own color, where the tint is too light to read on itself, as a tag's is. */
+  color: var(--tint-text, var(--tint));
   transition: background 0.12s;
 }
 
@@ -803,6 +804,7 @@ function showRefs(badges, event) {
 
 .badge.tag {
   --tint: var(--ref-tag);
+  --tint-text: var(--ref-tag-text);
 }
 
 .badges:hover .badge {

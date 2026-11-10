@@ -215,7 +215,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 }
 
 .item.active:not(:disabled) {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 

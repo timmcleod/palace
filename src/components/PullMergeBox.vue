@@ -363,7 +363,7 @@ textarea.field {
 }
 
 .checkbox input {
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .buttons {

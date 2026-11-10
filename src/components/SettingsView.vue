@@ -1027,7 +1027,7 @@ h2 {
 }
 
 .switch input:checked + span {
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 
 .switch input:checked + span::after {
@@ -1185,7 +1185,7 @@ input[type="text"]:focus {
   width: 40%;
   height: 8%;
   border-radius: var(--radius-xs);
-  background: #1f7cf2;
+  background: #1769d1;
 }
 
 .mini-window .stripe {

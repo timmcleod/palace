@@ -682,7 +682,7 @@ function onRowClick(row, event) {
   left: 4px;
   height: 2px;
   border-radius: var(--radius-xs);
-  background: var(--accent);
+  background: var(--accent-fill);
   pointer-events: none;
 }
 
@@ -740,7 +740,7 @@ function onRowClick(row, event) {
   max-width: calc(100% - 16px);
   padding: 4px 9px;
   border-radius: var(--radius-md);
-  background: var(--accent);
+  background: var(--accent-fill);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
   font-size: var(--font-sm);
   font-weight: 500;
@@ -855,7 +855,7 @@ function onRowClick(row, event) {
   height: 7px;
   margin: 0 2px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 
 .agent-dot.error {
@@ -906,7 +906,7 @@ function onRowClick(row, event) {
 .count.fresh {
   padding: 0 6px;
   border-radius: var(--radius-lg);
-  background: var(--accent);
+  background: var(--accent-fill);
   font-weight: 600;
   color: #fff;
 }

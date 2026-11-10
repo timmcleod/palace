@@ -30,12 +30,18 @@
 :root {
   --toolbar-height: 56px;
 
-  --accent: #1f7cf2;
+  /* Colors are chosen to read at 4.5:1 or more on what they sit on (WCAG AA): the
+     accent as text, white on the accent fill, and the tertiary gray. */
+  --accent: #1769d1;
+  /* What's filled with the accent, with white on it: buttons, pills, checkboxes. The
+     accent itself in the light theme; deeper in the dark one, whose accent is light
+     enough to read as text on the dark page, and too light for white on it. */
+  --accent-fill: var(--accent);
   --danger: #d4342c;
 
   --text-primary: #262626;
   --text-secondary: #555;
-  --text-tertiary: #8c8c8c;
+  --text-tertiary: #707070;
   --icon: #6e6e6e;
 
   --sidebar-bg: #f4f4f4;
@@ -54,7 +60,9 @@
   --button-hover: rgba(0, 0, 0, 0.07);
 
   --ref-tag: #b7862b;
-  --lane-1: #1f7cf2;
+  /* The tag color as text or an icon, darker, to read on its own tint. */
+  --ref-tag-text: #86601a;
+  --lane-1: #1769d1;
   --lane-2: #8e4ec6;
   --lane-3: #e5484d;
   --lane-4: #30a46c;
@@ -84,7 +92,7 @@
   /* Syntax highlighting, in GitHub's colors, readable over the diff backgrounds. */
   --syntax-keyword: #cf222e;
   --syntax-string: #0a3069;
-  --syntax-comment: #6e7781;
+  --syntax-comment: #5f6872;
   --syntax-number: #0550ae;
   --syntax-title: #8250df;
   --syntax-type: #953800;
@@ -101,12 +109,13 @@
    chooses light or dark. Dark is a blue-tinted slate gray. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #3b8ff6;
+  --accent: #4f9bf8;
+  --accent-fill: #2672d6;
   --danger: #ff6b61;
 
   --text-primary: #e8edf5;
   --text-secondary: #b1bccd;
-  --text-tertiary: #98a3b5;
+  --text-tertiary: #a3adbe;
   --icon: #b3bdcc;
 
   --sidebar-bg: #212a3a;
@@ -122,6 +131,7 @@
   --button-hover: rgba(255, 255, 255, 0.09);
 
   --ref-tag: #a07524;
+  --ref-tag-text: #c0923a;
   --lane-1: #3b8ff6;
   --lane-2: #a875e0;
   --lane-3: #f2666a;
@@ -407,7 +417,7 @@ body.resizing-rows * {
   padding: 7px 18px;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
   font: inherit;
   font-weight: 500;

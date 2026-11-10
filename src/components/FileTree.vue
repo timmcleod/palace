@@ -357,7 +357,7 @@ function onKeydown(event) {
 /* Changed files' names take their status's color, as in the Working Copy. */
 .name.modified,
 .badge.modified {
-  color: var(--ref-tag);
+  color: var(--ref-tag-text);
 }
 
 .name.added,

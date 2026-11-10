@@ -883,7 +883,7 @@ input[type="checkbox"] {
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .badge {
@@ -996,7 +996,7 @@ textarea {
 }
 
 .counter.long {
-  color: var(--ref-tag);
+  color: var(--ref-tag-text);
 }
 
 .composer-actions {
@@ -1020,7 +1020,7 @@ textarea {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   background: var(--toolbar-group-bg);
-  color: var(--ref-tag);
+  color: var(--ref-tag-text);
   font-size: var(--font-ui);
 }
 

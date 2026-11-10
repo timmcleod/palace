@@ -65,18 +65,20 @@ const icon = computed(() => REF_ICONS[props.kind]);
 
 .ref-name.tag {
   --tint: var(--ref-tag);
+  --tint-text: var(--ref-tag-text);
 }
 
+/* Its own color, where the tint is too light to read on itself, as a tag's is. */
 .icon {
   flex-shrink: 0;
-  color: var(--tint);
+  color: var(--tint-text, var(--tint));
 }
 
 .head-pill {
   flex-shrink: 0;
   padding: 1px 7px;
   border-radius: 10px;
-  background: var(--accent);
+  background: var(--accent-fill);
   font-size: var(--font-xs);
   font-weight: 700;
   line-height: 16px;

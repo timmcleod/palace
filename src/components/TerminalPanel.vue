@@ -478,7 +478,7 @@ function startResize(event) {
   bottom: 3px;
   width: 2px;
   border-radius: var(--radius-xs);
-  background: var(--accent);
+  background: var(--accent-fill);
   pointer-events: none;
 }
 
@@ -527,7 +527,7 @@ function startResize(event) {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 
 .tab-mark.error {

@@ -91,7 +91,7 @@ const percent = computed(() => {
 }
 
 .icon-conflict {
-  color: var(--ref-tag);
+  color: var(--ref-tag-text);
 }
 
 .text-button {
@@ -119,7 +119,7 @@ const percent = computed(() => {
 
 .fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--accent-fill);
   transition: width 0.15s ease;
 }
 

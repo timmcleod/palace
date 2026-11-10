@@ -50,7 +50,7 @@ const status = computed(() =>
 
 .icon {
   flex-shrink: 0;
-  color: var(--ref-tag);
+  color: var(--ref-tag-text);
 }
 
 .resolved .icon {

@@ -120,7 +120,7 @@ const percent = computed(() => (updates.total ? Math.min(100, Math.round((update
 .fill {
   height: 100%;
   border-radius: var(--radius-xs);
-  background: var(--accent);
+  background: var(--accent-fill);
   transition: width 0.2s;
 }
 

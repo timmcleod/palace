@@ -627,7 +627,7 @@ td {
 
 .picked .gutter,
 .picked .sign {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 
@@ -736,7 +736,7 @@ td {
 
 .gutter.picked,
 .sign.picked {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 
@@ -758,7 +758,7 @@ td {
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   cursor: pointer;
 }

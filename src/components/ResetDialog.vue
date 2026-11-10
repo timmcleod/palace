@@ -210,7 +210,7 @@ header p {
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .hint {

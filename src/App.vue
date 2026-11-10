@@ -2039,7 +2039,7 @@ const breadcrumb = computed(() => {
   min-width: 15px;
   padding: 0 4px;
   border-radius: var(--radius-lg);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
   font-size: var(--font-xs);
   font-weight: 700;
@@ -2224,6 +2224,6 @@ const breadcrumb = computed(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 </style>

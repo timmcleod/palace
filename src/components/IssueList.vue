@@ -549,7 +549,7 @@ async function signIn() {
   height: 7px;
   margin: 0 6px 1px 0;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-fill);
 }
 
 .labels {

@@ -52,7 +52,7 @@ defineProps({
 }
 
 .suggestion.active {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 

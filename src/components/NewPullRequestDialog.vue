@@ -354,7 +354,7 @@ h2 {
 }
 
 .checkbox input {
-  accent-color: var(--accent);
+  accent-color: var(--accent-fill);
 }
 
 .error {

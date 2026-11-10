@@ -236,7 +236,7 @@ const TITLES = { App: "The app", Backend: "Behind it" };
 
 .name.selected,
 .member.selected {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 
