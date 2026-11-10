@@ -44,9 +44,10 @@ pub struct WorkingFileContents {
 }
 
 /// The folders and files directly inside `dir` of the working copy ("" for the top),
-/// folders first. Ignored ones are left out unless `show_ignored`, and .git always is.
+/// folders first, never .git. Ignored ones are there too, marked, as they're often what's
+/// opened to change by hand, such as .env, and the page shows them muted.
 #[tauri::command]
-pub async fn working_entries(path: String, dir: String, show_ignored: bool) -> Result<Vec<FileEntry>, String> {
+pub async fn working_entries(path: String, dir: String) -> Result<Vec<FileEntry>, String> {
     let (repo, workdir) = open(&path)?;
     let folder = inside(&workdir, &dir)?;
     let mut entries = Vec::new();
@@ -67,10 +68,7 @@ pub async fn working_entries(path: String, dir: String, show_ignored: bool) -> R
             "file"
         };
         let relative = if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") };
-        let ignored = repo.is_path_ignored(Path::new(&relative)).unwrap_or(false);
-        if ignored && !show_ignored {
-            continue;
-        }
+        let ignored = ignored(&repo, Path::new(&relative), kind == "dir");
         entries.push(FileEntry { name, path: relative, kind, ignored });
     }
     entries.sort_by(|a, b| (a.kind != "dir").cmp(&(b.kind != "dir")).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
@@ -312,6 +310,31 @@ fn delete(path: &str, file: &str, trash: &dyn Fn(&Path) -> Result<(), String>) -
     trash(&full)
 }
 
+/// Whether git ignores `relative`, a path in the working copy, as Palace means it: an
+/// ignore rule matches it, and it isn't tracked anyway. Rules alone say a tracked file
+/// is ignored when it matches one, as one added before the rule was, and so a folder
+/// such as an ignored logs/ kept by a tracked .gitkeep in it.
+pub(crate) fn ignored(repo: &Repository, relative: &Path, is_dir: bool) -> bool {
+    // git matches folder-only patterns like "vendor/" against paths ending in a slash.
+    let mut rule_path = relative.to_path_buf();
+    if is_dir {
+        rule_path.as_mut_os_string().push("/");
+    }
+    if !repo.is_path_ignored(&rule_path).unwrap_or(false) {
+        return false;
+    }
+    // The index as it is now, as files are added: read again only if it's changed.
+    let Ok(mut index) = repo.index() else { return true };
+    let _ = index.read(false);
+    if is_dir {
+        // The index lists files, by paths with "/" between their folders.
+        let prefix = format!("{}/", relative.to_string_lossy().replace('\\', "/"));
+        index.find_prefix(prefix.as_str()).is_err()
+    } else {
+        index.get_path(relative, 0).is_none()
+    }
+}
+
 fn open(path: &str) -> Result<(Repository, PathBuf), String> {
     let repo = Repository::discover(path).map_err(|e| e.message().to_string())?;
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
@@ -388,14 +411,30 @@ mod tests {
         fs::write(t.dir.join("README.md"), "").unwrap();
         fs::write(t.dir.join("build/out.js"), "").unwrap();
 
-        let names = |show: bool| {
-            block_on(working_entries(path(&t), "".into(), show)).unwrap().into_iter().map(|e| (e.name, e.kind, e.ignored)).collect::<Vec<_>>()
-        };
-        // Folders first, then files; never .git; ignored folders only when asked for.
-        assert_eq!(names(false), [("src".into(), "dir", false), (".gitignore".into(), "file", false), ("README.md".into(), "file", false)]);
-        assert!(names(true).contains(&("build".into(), "dir", true)));
-        let inner = block_on(working_entries(path(&t), "src".into(), false)).unwrap();
+        let names = block_on(working_entries(path(&t), "".into())).unwrap().into_iter().map(|e| (e.name, e.kind, e.ignored)).collect::<Vec<_>>();
+        // Folders first, then files; never .git; ignored ones marked.
+        assert_eq!(
+            names,
+            [("build".into(), "dir", true), ("src".into(), "dir", false), (".gitignore".into(), "file", false), ("README.md".into(), "file", false)]
+        );
+        let inner = block_on(working_entries(path(&t), "src".into())).unwrap();
         assert_eq!(inner[1].path, "src/main.rs");
+    }
+
+    #[test]
+    fn ignored_means_matched_by_a_rule_and_not_tracked() {
+        let t = TempRepo::new("files-ignored");
+        // Tracked before the rules were added: a .gitkeep keeping logs/, and a log.
+        t.commit(&[("logs/.gitkeep", Some("")), ("kept.log", Some("")), (".gitignore", Some("logs/\n*.log\n.env\n"))], "First");
+        t.write(&[(".env", Some("")), ("debug.log", Some("")), ("logs/today.txt", Some(""))]);
+        let marks = |dir: &str| {
+            block_on(working_entries(path(&t), dir.into())).unwrap().into_iter().map(|e| (e.name, e.ignored)).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            marks(""),
+            [("logs".into(), false), (".env".into(), true), (".gitignore".into(), false), ("debug.log".into(), true), ("kept.log".into(), false)]
+        );
+        assert_eq!(marks("logs"), [(".gitkeep".into(), false), ("today.txt".into(), true)]);
     }
 
     #[test]
@@ -403,7 +442,7 @@ mod tests {
         let t = TempRepo::new("files-inside");
         for bad in ["../outside", "/etc/passwd", ".git/config", ".GIT/config", ".Git/hooks", "src/../../x"] {
             assert!(block_on(read_working_file(path(&t), bad.into(), None)).is_err(), "{bad}");
-            assert!(block_on(working_entries(path(&t), bad.into(), false)).is_err(), "{bad}");
+            assert!(block_on(working_entries(path(&t), bad.into())).is_err(), "{bad}");
         }
     }
 

@@ -31,7 +31,9 @@ pub struct FileContents {
 }
 
 /// Every file git tracks in the working copy, for file search, and with `untracked`,
-/// the new files it doesn't track yet, except those it ignores.
+/// the rest on disk the Files view shows: new files it doesn't track yet, and files it
+/// ignores, such as .env. Not what's inside a folder it ignores, such as node_modules or
+/// build output: thousands of files nobody opens, which would bury the rest.
 #[tauri::command]
 pub async fn tracked_files(path: String, untracked: Option<bool>) -> Result<Vec<String>, String> {
     let repo = Repository::discover(&path).map_err(message)?;
@@ -39,9 +41,18 @@ pub async fn tracked_files(path: String, untracked: Option<bool>) -> Result<Vec<
     let mut files: Vec<String> = index.iter().map(|entry| String::from_utf8_lossy(&entry.path).into_owned()).collect();
     if untracked.unwrap_or(false) {
         let mut opts = StatusOptions::new();
-        opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+        // A folder git doesn't look inside comes as one entry, its path ending in "/",
+        // rather than everything in it: an ignored one, or another repository within
+        // this one (not a submodule), whose files are its own.
+        opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(true).recurse_ignored_dirs(false);
         let statuses = repo.statuses(Some(&mut opts)).map_err(message)?;
-        files.extend(statuses.iter().filter(|s| s.status().is_wt_new()).map(|s| String::from_utf8_lossy(s.path_bytes()).into_owned()));
+        files.extend(
+            statuses
+                .iter()
+                .filter(|s| s.status().is_wt_new() || s.status().is_ignored())
+                .map(|s| String::from_utf8_lossy(s.path_bytes()).into_owned())
+                .filter(|path| !path.ends_with('/')),
+        );
     }
     Ok(files)
 }
@@ -217,8 +228,11 @@ mod tests {
     #[test]
     fn listing_files_for_search() {
         let t = TempRepo::new("tree-search");
-        t.commit(&[(".gitignore", Some("build/\n")), ("tracked.txt", Some(""))], "Start");
-        t.write(&[("src/new.rs", Some("")), ("build/out.js", Some(""))]);
+        t.commit(&[(".gitignore", Some("build/\n.env\n*.log\n")), ("tracked.txt", Some(""))], "Start");
+        t.write(&[("src/new.rs", Some("")), ("build/out.js", Some("")), (".env", Some("")), ("src/debug.log", Some("")), ("new/build/out.js", Some("")), ("new/a.txt", Some(""))]);
+        // A repository of its own inside, not a submodule: its files are its own.
+        Repository::init(t.dir.join("other")).unwrap();
+        t.write(&[("other/inside.txt", Some(""))]);
 
         let sorted = |untracked| {
             let mut files = tauri::async_runtime::block_on(tracked_files(t.path().into(), untracked)).unwrap();
@@ -226,7 +240,9 @@ mod tests {
             files
         };
         assert_eq!(sorted(None), [".gitignore", "tracked.txt"]);
-        assert_eq!(sorted(Some(true)), [".gitignore", "src/new.rs", "tracked.txt"]);
+        // Ignored files too, as the Files view shows them, but not what's in an ignored
+        // folder, even in a new one, nor another repository's files.
+        assert_eq!(sorted(Some(true)), [".env", ".gitignore", "new/a.txt", "src/debug.log", "src/new.rs", "tracked.txt"]);
     }
 
     #[test]

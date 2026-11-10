@@ -16,7 +16,6 @@ import {
   ChevronRight,
   CloudDownload,
   ExternalLink,
-  EyeOff,
   GitBranch,
   GitCommitVertical,
   GitMerge,
@@ -903,7 +902,7 @@ function startResize(event, pane, min, max) {
 
 // --- Files view --------------------------------------------------------------------
 
-// The Files view's tree, whose Ignored toggle is in the subheader above it.
+// The Files view's tree, which takes keyboard focus as its file closes (see closeFile).
 const fileTree = ref(null);
 
 // Opens a file in the Files view, to edit it, as from the Working Copy.
@@ -1419,19 +1418,7 @@ const breadcrumb = computed(() => {
 
       <div class="subheader">
         <span v-if="isWorkingCopy">Working Copy</span>
-        <template v-else-if="isFiles">
-          <span>Files</span>
-          <button
-            class="mainline-toggle"
-            :class="{ on: fileTree?.showsIgnored() }"
-            :aria-pressed="!!fileTree?.showsIgnored()"
-            title="Show files git ignores, such as dependencies and build output"
-            @click="fileTree?.toggleIgnored()"
-          >
-            <EyeOff :size="14" :stroke-width="1.75" />
-            Ignored
-          </button>
-        </template>
+        <span v-else-if="isFiles">Files</span>
         <span v-else-if="isStashes">Stashes</span>
         <template v-else-if="isIssues || isPulls">
           <span>{{ isPulls ? "Pull Requests" : "Issues" }}</span>

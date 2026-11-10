@@ -16,8 +16,8 @@ const props = defineProps({
   // The history to search for commits; HEAD when null.
   rev: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
-  // Whether to find new files git doesn't track yet too, as in the Files view, where
-  // they can be opened.
+  // Whether to find the files git doesn't track too, as in the Files view, where they
+  // can be opened: new ones, and ignored ones such as .env (see tracked_files).
   untracked: { type: Boolean, default: false },
 });
 const emit = defineEmits(["pick", "pick-commit", "filter-commits"]);

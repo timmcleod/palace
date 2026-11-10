@@ -1,8 +1,8 @@
 <script>
 import { reactive } from "vue";
 
-// Each repository's open folders and whether ignored files show, kept while away from
-// the Files view: path -> { expanded, showIgnored }.
+// Each repository's open folders, kept while away from the Files view:
+// path -> { expanded }.
 const remembered = reactive(new Map());
 </script>
 
@@ -34,15 +34,13 @@ const emit = defineEmits(["select", "deleted", "renamed", "open-terminal"]);
 
 watch(
   () => props.path,
-  (path) => remembered.has(path) || remembered.set(path, { expanded: new Set(), showIgnored: false }),
+  (path) => remembered.has(path) || remembered.set(path, { expanded: new Set() }),
   { immediate: true },
 );
 const view = computed(() => remembered.get(props.path));
 defineExpose({
   // Keyboard focus, as when the file open beside it closes and its button with it.
   focus: () => list.value?.focus(),
-  toggleIgnored: () => (view.value.showIgnored = !view.value.showIgnored),
-  showsIgnored: () => view.value.showIgnored,
 });
 
 // Loaded folder listings by folder path ("" is the top).
@@ -52,7 +50,7 @@ const statuses = shallowRef(new Map());
 const error = ref("");
 let loadSeq = 0;
 
-const listing = (dir) => invoke("working_entries", { path: props.path, dir, showIgnored: view.value.showIgnored });
+const listing = (dir) => invoke("working_entries", { path: props.path, dir });
 
 async function load() {
   const seq = ++loadSeq;
@@ -84,7 +82,7 @@ watch(
   { immediate: true },
 );
 
-watch(() => [props.path, props.refreshKey, view.value.showIgnored], load, { immediate: true });
+watch(() => [props.path, props.refreshKey], load, { immediate: true });
 
 async function toggle(dir) {
   const { expanded } = view.value;

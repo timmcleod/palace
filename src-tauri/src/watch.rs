@@ -3,11 +3,14 @@
 //!
 //! Folders git ignores (vendor/, node_modules/, build output) are never watched: they
 //! change constantly, don't affect what Palace shows, and in a large project would use
-//! up the system's limit on watched folders.
+//! up the system's limit on watched folders. Ignored files and folders coming and going
+//! where Palace does watch are reported, as the Files view lists them, but not writes to
+//! an ignored file, such as a log.
 
 use git2::Repository;
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::{Path, PathBuf};
+use notify::event::ModifyKind;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::Path;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -95,8 +98,10 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
                 if event.kind.is_access() {
                     continue;
                 }
+                // A file or folder appearing, going, or renamed, rather than written to.
+                let comes_or_goes = event.kind.is_create() || event.kind.is_remove() || matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
                 for p in &event.paths {
-                    if !relevant(&repo, &workdir, &gitdir, &common, p) {
+                    if !relevant(&repo, &workdir, &gitdir, &common, p, comes_or_goes) {
                         continue;
                     }
                     changed = true;
@@ -136,8 +141,9 @@ fn watch_tree(watcher: &mut RecommendedWatcher, repo: &Repository, workdir: &Pat
     }
 }
 
-/// Whether a change at `path` could alter what Palace shows.
-fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, path: &Path) -> bool {
+/// Whether a change at `path` could alter what Palace shows. `comes_or_goes` says it
+/// appeared, went, or was renamed, rather than written to.
+fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, path: &Path, comes_or_goes: bool) -> bool {
     let first = |inside: &Path| inside.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
     let lock = path.extension().is_some_and(|e| e == "lock");
     if let Ok(inside_git) = path.strip_prefix(gitdir) {
@@ -150,17 +156,16 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     if let Ok(inside_common) = path.strip_prefix(common) {
         return !lock && matches!(first(inside_common).as_deref(), Some("refs" | "packed-refs" | "worktrees"));
     }
-    path.starts_with(workdir) && !ignored(repo, workdir, path, path.is_dir())
+    // An ignored file or folder coming or going shows in the Files view, muted; one
+    // written to doesn't change what's shown. Events only come from folders that are
+    // watched, which aren't ignored, so nothing inside an ignored folder gets here.
+    path.starts_with(workdir) && (comes_or_goes || !ignored(repo, workdir, path, path.is_dir()))
 }
 
+/// Whether git ignores `path`, in the working copy (see files::ignored).
 fn ignored(repo: &Repository, workdir: &Path, path: &Path, is_dir: bool) -> bool {
     let Ok(relative) = path.strip_prefix(workdir) else { return false };
-    let mut relative: PathBuf = relative.to_path_buf();
-    // git matches folder-only patterns like "vendor/" against paths ending in a slash.
-    if is_dir {
-        relative.as_mut_os_string().push("/");
-    }
-    repo.is_path_ignored(&relative).unwrap_or(false)
+    crate::files::ignored(repo, relative, is_dir)
 }
 
 #[cfg(test)]
@@ -197,10 +202,11 @@ mod tests {
     }
 
     #[test]
-    fn edits_and_commits_are_reported_but_ignored_files_are_not() {
+    fn edits_commits_and_ignored_files_coming_are_reported_but_writes_to_ignored_ones_are_not() {
         let t = TempRepo::new("watch");
         std::fs::create_dir_all(t.dir.join("vendor/package")).unwrap();
-        t.commit(&[("a.txt", Some("a\n")), (".gitignore", Some("vendor/\n"))], "First");
+        // A tracked .gitkeep keeps logs/, which the rules ignore, watched.
+        t.commit(&[("a.txt", Some("a\n")), ("logs/.gitkeep", Some("")), (".gitignore", Some("vendor/\nlogs/\n.env\n"))], "First");
         let (_watcher, rx) = watch(&t);
         settle(&rx);
 
@@ -210,6 +216,15 @@ mod tests {
 
         t.write(&[("vendor/package/lib.php", Some("<?php\n"))]);
         assert!(quiet(&rx), "files in an ignored folder");
+
+        t.write(&[(".env", Some("KEY=1\n"))]);
+        assert!(reported(&rx), "an ignored file appearing, as the Files view lists it");
+        assert!(quiet(&rx));
+        t.write(&[(".env", Some("KEY=2\n"))]);
+        assert!(quiet(&rx), "writing to an ignored file");
+
+        t.write(&[("logs/.gitkeep", Some("kept\n"))]);
+        assert!(reported(&rx), "editing a tracked file a rule matches");
 
         git(t.path(), &["commit", "-qam", "Edit"], None).unwrap();
         assert!(reported(&rx), "committing");
