@@ -345,48 +345,46 @@ To github.com:you/your-project.git
 </div>
 </section>
 
-<section id="download" style="padding: 112px 24px; border-top: 1px solid var(--border); overflow-x: hidden; overflow-x: clip">
-<div style="max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px">
+<section id="download" style="position: relative; isolation: isolate; padding: 96px 24px 112px; border-top: 1px solid var(--border); overflow-x: hidden; overflow-x: clip">
+<div aria-hidden="true" style="position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: min(1150px, 62vw + 380px); background: url(assets/gate-2400.webp) center 62% / cover no-repeat; background-image: image-set(url(assets/gate-1200.webp) 1x, url(assets/gate-2400.webp) 2x); -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%)"></div>
+<div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px">
 <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 16px">
-<div style="position: relative; width: min(620px, 100%); margin: -24px 0 12px">
-<div aria-hidden="true" style="position: absolute; inset: 25% -12% -18%; background: radial-gradient(closest-side, rgba(31, 124, 242, 0.3), rgba(31, 124, 242, 0.12) 55%, rgba(31, 124, 242, 0) 100%)"></div>
-<img src="assets/castle.webp" alt="" width="1400" height="734" loading="lazy" style="position: relative; display: block; width: 100%; height: auto">
+<h2 style="margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.08; letter-spacing: -0.025em; font-weight: 600; color: #fff; text-shadow: 0 2px 18px rgba(6, 12, 30, 0.55)">Download Palace</h2>
+<p style="margin: 0; max-width: 560px; font-size: 18px; line-height: 1.6; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 12px rgba(6, 12, 30, 0.6)">Free and MIT licensed, for 64-bit (x86-64) Linux and for macOS. Once it's installed, Palace finds new releases and updates itself.</p>
 </div>
-<h2 style="margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.08; letter-spacing: -0.025em; font-weight: 600">Download Palace</h2>
-<p style="margin: 0; max-width: 560px; font-size: 18px; line-height: 1.6; color: var(--text2)">Free and MIT licensed, for 64-bit (x86-64) Linux and for macOS. Once it's installed, Palace finds new releases and updates itself.</p>
-</div>
+<div aria-hidden="true" style="height: min(600px, 38vw + 70px)"></div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px">
 
-<div style="padding: 28px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 18px">
+<div style="padding: 24px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 18px">
 <div style="display: flex; align-items: flex-start; gap: 14px">
 <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 10px; background: var(--surface); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"></path><path d="M12 22V12"></path><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"></path><path d="m7.5 4.27 9 5.15"></path></svg></span>
 <div style="display: flex; flex-direction: column; gap: 2px"><h3 style="margin: 0; font-size: 19px; font-weight: 600">.deb package</h3><p style="margin: 0; font-size: 15px; color: var(--text2)">Ubuntu, Debian, Pop!_OS, Linux Mint, elementary</p></div>
 </div>
-<pre style="margin: 0; padding: 16px 18px; border-radius: 10px; background: var(--term); border: 1px solid var(--term-border); color: #e8edf5; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.7; overflow-x: auto"><span style="color: #98a3b5">$</span> sudo apt install ./Palace_*.deb</pre>
+<pre style="margin: 0; padding: 16px 18px; border-radius: 10px; background: var(--term); border: 1px solid var(--term-border); color: #e8edf5; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere"><span style="color: #98a3b5">$</span> sudo apt install ./Palace_*.deb</pre>
 <p style="margin: 0; font-size: 14px; color: var(--text2)">Installs Git for you if it's missing.</p>
 <a href="https://github.com/timmcleod/palace/releases/latest" style="display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 20px; border-radius: 10px; background: var(--btn); color: var(--btn-text); text-decoration: none; font-size: 16px; font-weight: 600; box-sizing: border-box; margin-top: auto">Download .deb</a>
 </div>
 
-<div style="padding: 28px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 18px">
+<div style="padding: 24px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 18px">
 <div style="display: flex; align-items: flex-start; gap: 14px">
 <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 10px; background: var(--surface); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></span>
 <div style="display: flex; flex-direction: column; gap: 2px"><h3 style="margin: 0; font-size: 19px; font-weight: 600">AppImage</h3><p style="margin: 0; font-size: 15px; color: var(--text2)">Any distribution</p></div>
 </div>
-<pre style="margin: 0; padding: 16px 18px; border-radius: 10px; background: var(--term); border: 1px solid var(--term-border); color: #e8edf5; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.7; overflow-x: auto"><span style="color: #98a3b5">$</span> chmod +x Palace_*.AppImage
+<pre style="margin: 0; padding: 16px 18px; border-radius: 10px; background: var(--term); border: 1px solid var(--term-border); color: #e8edf5; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere"><span style="color: #98a3b5">$</span> chmod +x Palace_*.AppImage
 <span style="color: #98a3b5">$</span> ./Palace_*.AppImage</pre>
 <p style="margin: 0; font-size: 14px; line-height: 1.55; color: var(--text2)">Needs Git, plus <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">libfuse2</code> on Ubuntu 22.04 and later (<code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">libfuse2t64</code> on 24.04 and later).</p>
 <a href="https://github.com/timmcleod/palace/releases/latest" style="display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 20px; border-radius: 10px; background: var(--btn); color: var(--btn-text); text-decoration: none; font-size: 16px; font-weight: 600; box-sizing: border-box; margin-top: auto">Download AppImage</a>
 </div>
 
-
+<div id="download-mac" style="padding: 24px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 18px; scroll-margin-top: 72px">
+<div style="display: flex; align-items: flex-start; gap: 14px">
+<span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 10px; background: var(--surface); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"></path><path d="M20.054 15.987H3.946"></path></svg></span>
+<div style="display: flex; flex-direction: column; gap: 2px"><h3 style="margin: 0; font-size: 19px; font-weight: 600">macOS</h3><p style="margin: 0; font-size: 15px; color: var(--text2)">macOS 11+, Apple silicon and Intel</p></div>
 </div>
-<div id="download-mac" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-top: -24px; padding: 20px 24px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg-alt); scroll-margin-top: 72px">
-<span style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px; background: var(--surface); display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"></path><path d="M20.054 15.987H3.946"></path></svg></span>
-<div style="flex: 1 1 360px; display: flex; flex-direction: column; gap: 4px">
-<h3 style="margin: 0; font-size: 16px; font-weight: 600">Also for macOS <span style="font-weight: 400; color: var(--text2)">· macOS 11 or later, Apple silicon and Intel</span></h3>
 <p style="margin: 0; font-size: 14px; line-height: 1.55; color: var(--text2)">Open the <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">.dmg</code> and drag Palace to Applications. It isn't signed by Apple yet, so the first time, go to System Settings › Privacy &amp; Security and click Open Anyway.</p>
+<a href="https://github.com/timmcleod/palace/releases/latest" style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 24px; border-radius: 10px; background: var(--btn); color: var(--btn-text); text-decoration: none; font-size: 16px; font-weight: 600; box-sizing: border-box; margin-top: auto">Download .dmg</a>
 </div>
-<a href="https://github.com/timmcleod/palace/releases/latest" style="display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 18px; border-radius: 10px; background: var(--btn2); border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 15px; font-weight: 500; box-sizing: border-box">Download .dmg</a>
+
 </div>
 </div>
 </section>
@@ -430,6 +428,22 @@ Star Palace on GitHub
   }
   buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.shot); }); });
   if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) show('dark');
+})();
+</script>
+<script>
+// The pictures the toggles switch to, fetched and decoded once the page has loaded, so
+// switching shows them at once rather than after they download. Kept, so the browser
+// keeps them decoded.
+(function () {
+  var kept = [];
+  window.addEventListener('load', function () {
+    ['assets/hero-light.webp', 'assets/hero-dark.webp', 'assets/issues.webp', 'assets/pull-requests.webp'].forEach(function (src) {
+      var picture = new Image();
+      picture.src = src;
+      if (picture.decode) picture.decode().catch(function () {});
+      kept.push(picture);
+    });
+  });
 })();
 </script>
 <script>
