@@ -71,11 +71,25 @@ fn placed(app: &AppHandle, label: &str, window: &WebviewWindow) -> Placed {
     Placed {
         repo: crate::windows::repository_in(app, label),
         corner: window.outer_position().ok().map(|p| p.to_logical::<f64>(scale)).map(|p| (p.x, p.y)),
-        size: window.inner_size().ok().map(|s| s.to_logical::<f64>(scale)).map(|s| (s.width, s.height)),
+        size: size_of(window, scale),
         maximized: window.is_maximized().unwrap_or(false),
         focused: window.is_focused().unwrap_or(false),
         first: label == "main",
     }
+}
+
+/// The window's size, as it's set again (see show_windows). On Linux, GTK's own, as it
+/// takes a size: the one the windowing library reports there takes in the shadow and
+/// title bar GTK draws around the window, and given that, a window grew by them, 52 by
+/// 89 pixels, each time it reopened. GTK's is in logical pixels already.
+fn size_of(window: &WebviewWindow, scale: f64) -> Option<Pair> {
+    #[cfg(target_os = "linux")]
+    if let Ok(gtk_window) = window.gtk_window() {
+        use gtk::prelude::GtkWindowExt;
+        let (width, height) = gtk_window.size();
+        return Some((f64::from(width), f64::from(height)));
+    }
+    window.inner_size().ok().map(|s| s.to_logical::<f64>(scale)).map(|s| (s.width, s.height))
 }
 
 /// The windows noted, taken once: the note goes as it's read, so only the start right
@@ -163,7 +177,9 @@ fn fit(placed: &Placed, screens: &[Screen]) -> (Option<Pair>, Option<Pair>) {
 }
 
 /// Shows Palace's windows as it starts: the first, and after a restart, the others it
-/// had, each where it was (see fit), the one in front last in front again.
+/// had, each where it was (see fit), the one in front last in front again, where the
+/// desktop allows it: GNOME under Wayland doesn't let a window be brought forward this
+/// way, and keeps another in front.
 pub fn show_windows(app: &AppHandle) {
     let exists = |path: &str| Path::new(path).is_dir();
     let noted = file(app).map(|path| in_order(take(&path, seconds_now()), exists)).unwrap_or_default();
