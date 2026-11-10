@@ -1,5 +1,6 @@
 //! Palace's windows, each with a repository of its own, side by side. The first, "main",
 //! reopens the last repository at startup; New Window opens another, to choose one in.
+//! Restarted by Palace itself, as into an update, it reopens all it had (see reopen.rs).
 //! A repository is open in one window at a time: opening it again shows that window.
 
 use serde::Serialize;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::window::Color;
-use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Theme, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Theme, WebviewWindow, WebviewWindowBuilder, Wry};
 
 /// The repository open in each window, by window.
 #[derive(Default)]
@@ -234,27 +235,59 @@ pub async fn new_window(
     path: Option<String>,
     task: Option<String>,
 ) -> Result<(), String> {
-    let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
-    config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    // What its page opens as it starts (see window_start).
-    if let Some(path) = path {
-        windows.0.lock().unwrap().insert(config.label.clone(), path);
-    }
+    let (label, mut builder) = make(&app, &windows, path, dark)?;
     if let Some(task) = task.filter(|t| !t.trim().is_empty()) {
-        TASKS.lock().unwrap().insert(config.label.clone(), task);
+        TASKS.lock().unwrap().insert(label, task);
     }
-    let mut builder = WebviewWindowBuilder::from_config(&app, &config).map_err(|e| format!("Couldn't open a window: {e}"))?;
     if let (Ok(position), Ok(scale)) = (window.outer_position(), window.scale_factor()) {
         let position = position.to_logical::<f64>(scale);
         builder = builder.position(position.x + CASCADE, position.y + CASCADE);
     }
+    let opened = open(builder)?;
+    show_themed(&opened, Some(if dark { Theme::Dark } else { Theme::Light }));
+    Ok(())
+}
+
+/// A new window, to build: the first window's settings, a label of its own, returned
+/// with it, and the repository at `path` for its page to open (see window_start).
+pub(crate) fn make<'a>(
+    app: &'a AppHandle,
+    windows: &Windows,
+    path: Option<String>,
+    dark: bool,
+) -> Result<(String, WebviewWindowBuilder<'a, Wry, AppHandle>), String> {
+    let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
+    config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    if let Some(path) = path {
+        start_with(windows, &config.label, path);
+    }
     let theme = if dark { Theme::Dark } else { Theme::Light };
-    builder = builder.theme(Some(theme)).background_color(background(dark));
+    let builder = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|e| format!("Couldn't open a window: {e}"))?
+        .theme(Some(theme))
+        .background_color(background(dark));
+    Ok((config.label, builder))
+}
+
+/// Builds a window made with `make`, hidden until it's shown (see show_themed).
+pub(crate) fn open(builder: WebviewWindowBuilder<'_, Wry, AppHandle>) -> Result<WebviewWindow, String> {
     let opened = builder.build().map_err(|e| format!("Couldn't open a window: {e}"))?;
     #[cfg(target_os = "linux")]
     crate::no_pinch_zoom(&opened);
-    show_themed(&opened, Some(theme));
-    Ok(())
+    Ok(opened)
+}
+
+/// The repository open in the window labeled `window`, if any.
+pub(crate) fn repository_in(app: &AppHandle, window: &str) -> Option<String> {
+    app.state::<Windows>().0.lock().unwrap().get(window).cloned()
+}
+
+/// Has the window labeled `window` open the repository at `path` as its page starts
+/// (see window_start), as a new one for a worktree does, or the first with the one it
+/// had before Palace restarted (see reopen.rs). Its page lets go of it if it can't open
+/// it, so it doesn't stand for a repository that isn't showing.
+pub(crate) fn start_with(windows: &Windows, window: &str, path: String) {
+    windows.0.lock().unwrap().insert(window.to_string(), path);
 }
 
 /// The sidebar's color in each theme (--sidebar-bg in styles.css), the page's
@@ -270,24 +303,32 @@ fn background(dark: bool) -> Color {
 /// Shows a window, made hidden (see tauri.conf.json), in `theme`, or the system's for
 /// None. On Linux a window's theme is the system's as it's made, whatever it was asked
 /// to be, and that's every window's title bar, so it's set again before it's shown.
-fn show_themed(window: &WebviewWindow, theme: Option<Theme>) {
+pub(crate) fn show_themed(window: &WebviewWindow, theme: Option<Theme>) {
     let _ = window.set_theme(theme);
     let _ = window.show();
     let _ = window.set_focus();
 }
 
 /// Shows the first window, which opens with Palace, in the theme its settings choose,
-/// so it isn't light until its page has loaded them and turned it dark.
-pub fn show_first(app: &AppHandle) {
-    let Some(window) = app.get_webview_window("main") else { return };
+/// so it isn't light until its page has loaded them and turned it dark. Returns that
+/// theme, None for the system's, and whether it's dark, for other windows opening now.
+pub(crate) fn show_first(window: &WebviewWindow) -> (Option<Theme>, bool) {
+    let (theme, dark) = saved_theme(window.app_handle(), window);
+    let _ = window.set_background_color(Some(background(dark)));
+    show_themed(window, theme);
+    (theme, dark)
+}
+
+/// The theme Palace's settings choose, or None for the system's, and whether it's dark,
+/// as the system's is for `window`.
+fn saved_theme(app: &AppHandle, window: &WebviewWindow) -> (Option<Theme>, bool) {
     let theme = match crate::store::saved_theme(app).as_deref() {
         Some("dark") => Some(Theme::Dark),
         Some("light") => Some(Theme::Light),
         _ => None,
     };
     let dark = theme.unwrap_or_else(|| window.theme().unwrap_or(Theme::Light)) == Theme::Dark;
-    let _ = window.set_background_color(Some(background(dark)));
-    show_themed(&window, theme);
+    (theme, dark)
 }
 
 /// Lets go of everything a closed window had: its terminals, the watch on its

@@ -66,8 +66,8 @@ pub fn set_store_aside(app: AppHandle, store: tauri::State<Store>) -> Result<(),
     Ok(())
 }
 
-/// Seconds since 1970, to tell set-aside files apart.
-fn seconds_now() -> u64 {
+/// Seconds since 1970, to tell set-aside files apart, and how old a note is (reopen.rs).
+pub(crate) fn seconds_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 

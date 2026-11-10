@@ -1210,6 +1210,10 @@ async function checkGit() {
     if (start.task && overview.value) startTask(start.task);
     else if (start.task) tell("Couldn't Start the Task", `Its worktree didn't open. The task was:\n\n${start.task}`);
   }
+  // Given a repository it couldn't open, or with git missing, none at all, the window
+  // lets go of it: otherwise opening it in another window would bring this one forward
+  // (see show_window_with), as the watch on overview only says when one opens.
+  if (!overview.value) invoke("set_window_repo", { path: null }).catch(() => {});
   starting.value = false;
 }
 

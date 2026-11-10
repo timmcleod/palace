@@ -24,6 +24,7 @@ mod pulls;
 mod quit;
 mod rebase;
 mod remote;
+mod reopen;
 mod reset;
 mod shell_path;
 mod stash;
@@ -68,7 +69,7 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             menu::set(app.handle())?;
-            windows::show_first(app.handle());
+            reopen::show_windows(app.handle());
             // Copies of files dropped on a terminal a day or more ago go.
             drop::clear_old();
             Ok(())
