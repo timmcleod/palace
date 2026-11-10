@@ -98,17 +98,20 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
       return;
     }
     const path = overview.value.path;
+    // Another repository chosen meanwhile, as when the window comes forward as the
+    // folder picker closes: opening still, or open already, which this one, reloaded or
+    // said to be gone, mustn't take the place of.
+    const elsewhere = () => loading.value || overview.value?.path !== path;
     refreshing = (async () => {
       // Its folder gone, the views keep what they last showed, rather than each failing
       // to read it again and saying so in its place. It's looked for each time, so a
       // folder put back is shown again.
-      if (!(await invoke("folder_exists", { path }).catch(() => true))) {
+      const exists = await invoke("folder_exists", { path }).catch(() => true);
+      if (elsewhere()) return;
+      if (!exists) {
         folderGone.value = true;
         return;
       }
-      // One chosen may have started opening meanwhile, as when the window comes forward
-      // as the folder picker closes: the views are about to show that one instead.
-      if (loading.value) return;
       refreshKey.value++;
       await loadRepository(path, { quiet: true });
     })().finally(() => {

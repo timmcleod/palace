@@ -292,6 +292,27 @@ describe("refresh", () => {
     expect(repo.refreshKey.value).toBe(0);
   });
 
+  test("already under way as a repository chosen opens, all before it hears back, doesn't win over it", async () => {
+    // The chosen one opens before the refresh hears whether its folder's there, as on a
+    // slow drive: it mustn't reload the one it started with, nor say that one's gone.
+    let exists;
+    const backend = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation((command, args) =>
+      command === "folder_exists" ? new Promise((resolve) => (exists = resolve)) : backend(command, args),
+    );
+    overviews["/a"] = overviewOf("/a");
+    overviews["/b"] = overviewOf("/b");
+    const repo = repository({ open: overviewOf("/a") });
+    repo.refresh();
+    await repo.loadRepository("/b", { keepOnError: true });
+    expect(repo.overview.value.path).toBe("/b");
+    exists(false);
+    await settle();
+    expect(repo.overview.value.path).toBe("/b");
+    expect(repo.folderGone.value).toBe(false);
+    expect(repo.refreshKey.value).toBe(0);
+  });
+
   test("happens when the window comes forward, until the page goes", async () => {
     overviews["/a"] = overviewOf("/a");
     const repo = repository({ open: overviewOf("/a") });
