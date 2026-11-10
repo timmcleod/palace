@@ -33,6 +33,9 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
    * `keepOnError` keeps the one showing if this one can't be opened.
    */
   async function loadRepository(path, { quiet = false, keepOnError = false } = {}) {
+    // A background reload while a repository the user chose is opening would, being
+    // newer, win over it, and the one chosen would never show.
+    if (quiet && loading.value) return;
     const seq = ++loadSeq;
     if (!quiet) {
       loading.value = true;
@@ -103,6 +106,9 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
         folderGone.value = true;
         return;
       }
+      // One chosen may have started opening meanwhile, as when the window comes forward
+      // as the folder picker closes: the views are about to show that one instead.
+      if (loading.value) return;
       refreshKey.value++;
       await loadRepository(path, { quiet: true });
     })().finally(() => {

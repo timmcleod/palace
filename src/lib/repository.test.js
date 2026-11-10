@@ -269,6 +269,29 @@ describe("refresh", () => {
     expect(empty.refreshKey.value).toBe(0);
   });
 
+  test("already under way as a repository is chosen, as when the folder picker closes, doesn't win over it", async () => {
+    // The window comes forward as the picker closes, so a refresh can start, and be
+    // waiting to hear whether the folder's there, before the chosen one starts opening.
+    let exists;
+    const backend = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation((command, args) =>
+      command === "folder_exists" ? new Promise((resolve) => (exists = resolve)) : backend(command, args),
+    );
+    overviews["/a"] = overviewOf("/a");
+    const opening = waiting();
+    overviews["/b"] = opening.answer;
+    const repo = repository({ open: overviewOf("/a") });
+    repo.refresh();
+    const choosing = repo.loadRepository("/b", { keepOnError: true });
+    exists(true);
+    await settle();
+    opening.release(overviewOf("/b"));
+    await choosing;
+    await settle();
+    expect(repo.overview.value.path).toBe("/b");
+    expect(repo.refreshKey.value).toBe(0);
+  });
+
   test("happens when the window comes forward, until the page goes", async () => {
     overviews["/a"] = overviewOf("/a");
     const repo = repository({ open: overviewOf("/a") });
