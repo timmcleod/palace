@@ -61,7 +61,7 @@ async function load() {
   else if (selected.value) await openFile(selected.value);
 }
 
-watch(() => [props.path, props.commit.id], load, { immediate: true });
+watch([() => props.path, () => props.commit.id], load, { immediate: true });
 watch(() => props.reveal, (file) => file && revealFile(file));
 
 async function toggle(dir) {

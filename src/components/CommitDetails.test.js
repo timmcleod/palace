@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createApp, h, nextTick } from "vue";
+import { createApp, h, nextTick, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import CommitDetails from "./CommitDetails.vue";
 
@@ -135,4 +135,25 @@ test("hands off to a bar pinned at the top, in step, as the heading scrolls away
   expect(document.querySelector(".pinned-bar").style.opacity).toBe("1");
   await scrollTo(0);
   expect(document.querySelector(".pinned-bar")).toBeNull();
+});
+
+// A stash's commit is made afresh each time the repository refreshes, as when the
+// window comes forward; showing it again from the start made its details flicker.
+test("keeps showing a commit handed over again as a new object with the same id", async () => {
+  const result = details();
+  vi.mocked(invoke).mockResolvedValue(result);
+  const commit = shallowRef({ id: result.id, short_id: "95d90e0", refs: [] });
+  const root = document.createElement("div");
+  document.body.append(root);
+  app = createApp({ render: () => h(CommitDetails, { path: "/repo", commit: commit.value, stash: true }) });
+  app.mount(root);
+  for (let i = 0; i < 4; i++) await nextTick();
+  const loads = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "commit_details").length;
+  expect(loads()).toBe(1);
+  const shown = document.querySelector(".heading");
+
+  commit.value = { ...commit.value };
+  for (let i = 0; i < 4; i++) await nextTick();
+  expect(loads()).toBe(1);
+  expect(document.querySelector(".heading")).toBe(shown);
 });

@@ -56,7 +56,7 @@ async function load() {
     error.value = String(e);
   }
 }
-watch(() => [props.path, props.comparison, props.refreshKey], load, { immediate: true });
+watch([() => props.path, () => props.comparison, () => props.refreshKey], load, { immediate: true });
 
 function swap() {
   emit("change", { head: props.comparison.base, base: props.comparison.head });

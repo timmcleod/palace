@@ -82,7 +82,7 @@ watch(
   { immediate: true },
 );
 
-watch(() => [props.path, props.refreshKey], load, { immediate: true });
+watch([() => props.path, () => props.refreshKey], load, { immediate: true });
 
 async function toggle(dir) {
   const { expanded } = view.value;

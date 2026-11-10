@@ -421,7 +421,7 @@ const stash = computed(() => overview.value?.stashes.find((s) => s.index === sel
 
 // Opening the view, or stashes coming and going, keeps a stash chosen while there are any.
 watch(
-  () => [isStashes.value, overview.value?.stashes.length],
+  [() => isStashes.value, () => overview.value?.stashes.length],
   () => {
     if (isStashes.value && !stash.value) selectedStash.value = overview.value?.stashes[0]?.index ?? null;
   },

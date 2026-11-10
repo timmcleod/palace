@@ -247,9 +247,9 @@ async function showState(state, focus) {
   if (focus) view.focus();
 }
 
-watch(() => [props.path, props.file], open, { immediate: true });
+watch([() => props.path, () => props.file], open, { immediate: true });
 watch(
-  () => [props.path, props.file],
+  [() => props.path, () => props.file],
   () => {
     previewing.value = false;
     previewHtml.value = "";
@@ -403,7 +403,7 @@ async function writeNow(target, doc, auto) {
 }
 
 watch(
-  () => [settings.tabSize, settings.syntaxHighlighting, settings.wrapLines],
+  [() => settings.tabSize, () => settings.syntaxHighlighting, () => settings.wrapLines],
   () => view && cm.applySettings(view, settingsNow()),
 );
 

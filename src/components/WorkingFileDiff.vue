@@ -3,6 +3,7 @@ import { ref, shallowRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirmDiscard } from "../lib/confirm.js";
 import { CANCELED } from "../lib/errors.js";
+import { keepUnchanged } from "../lib/keepUnchanged.js";
 import DiffTable from "./DiffTable.vue";
 
 // The staged and unstaged changes of one working-copy file, with hunk staging.
@@ -22,6 +23,13 @@ const busy = ref(false);
 const loadingAll = ref(null);
 
 let loadSeq = 0;
+// The sides shown in full with Show All, which a refresh reads in full again, rather
+// than cutting them short once more. Each file starts cut short.
+let inFull = { staged: false, unstaged: false };
+watch(
+  () => props.file.path,
+  () => (inFull = { staged: false, unstaged: false }),
+);
 
 function fetchDiff(staged, maxLines) {
   return invoke("working_diff", {
@@ -37,11 +45,15 @@ async function load() {
   const seq = ++loadSeq;
   try {
     const [staged, unstaged] = await Promise.all([
-      props.file.staged ? fetchDiff(true, MAX_LINES) : null,
-      props.file.unstaged ? fetchDiff(false, MAX_LINES) : null,
+      props.file.staged ? fetchDiff(true, inFull.staged ? null : MAX_LINES) : null,
+      props.file.unstaged ? fetchDiff(false, inFull.unstaged ? null : MAX_LINES) : null,
     ]);
     if (seq !== loadSeq) return;
-    diffs.value = { staged, unstaged };
+    // A refresh, as when the window comes forward, mostly reads the same diffs again:
+    // the ones on screen stay, rather than redrawing (see keepUnchanged).
+    const before = diffs.value;
+    const next = { staged: keepUnchanged(before.staged, staged), unstaged: keepUnchanged(before.unstaged, unstaged) };
+    if (next.staged !== before.staged || next.unstaged !== before.unstaged) diffs.value = next;
     error.value = "";
   } catch (e) {
     if (seq === loadSeq) error.value = String(e);
@@ -56,6 +68,7 @@ async function showAll(staged) {
   loadingAll.value = staged;
   try {
     const full = await fetchDiff(staged, null);
+    inFull = { ...inFull, [staged ? "staged" : "unstaged"]: true };
     diffs.value = { ...diffs.value, [staged ? "staged" : "unstaged"]: full };
   } catch (e) {
     error.value = String(e);

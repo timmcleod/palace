@@ -28,6 +28,17 @@ export default [
       // A prop isn't replaced, but its fields may be changed: the commit message's draft,
       // which App.vue hands Working Copy to fill in, is shared that way on purpose.
       "vue/no-mutating-props": ["error", { shallowOnly: true }],
+      // A watch whose getter returns a new array, as watch(() => [a, b], …), runs each time
+      // anything it reads changes, even to the same values: a stash's commit, rebuilt on
+      // every refresh with the same id, reloaded its details and made them flicker.
+      // watch([() => a, () => b], …) compares each value instead.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='watch'] > ArrowFunctionExpression:first-child[body.type='ArrayExpression']",
+          message: "Watch several values as watch([() => a, () => b], …), which compares each one, not with a getter that returns a new array.",
+        },
+      ],
       // Palace's single-file components are named for what they are, as Sidebar.
       "vue/multi-word-component-names": "off",
     },

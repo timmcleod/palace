@@ -125,7 +125,7 @@ function commitAt(index) {
 }
 
 watch(
-  () => [props.path, props.rev, props.hide, props.file, props.search, props.firstParent],
+  [() => props.path, () => props.rev, () => props.hide, () => props.file, () => props.search, () => props.firstParent],
   () => load({ resetScroll: true }),
   { immediate: true },
 );

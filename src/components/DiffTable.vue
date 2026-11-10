@@ -254,7 +254,7 @@ onMounted(() => window.addEventListener("keydown", onKey));
 // scrolled near the end doesn't jump.
 const root = ref(null);
 watch(
-  () => [draft.value, comments.value.length],
+  [() => draft.value, () => comments.value.length],
   async () => {
     await nextTick();
     const el = root.value;

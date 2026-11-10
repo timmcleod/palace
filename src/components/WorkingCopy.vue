@@ -77,7 +77,7 @@ watch(
   },
   { immediate: true },
 );
-watch(() => [props.path, props.refreshKey], load, { immediate: true });
+watch([() => props.path, () => props.refreshKey], load, { immediate: true });
 
 // Runs a git operation, then has the whole window refresh. With `step`, it can be
 // undone (see undoable).

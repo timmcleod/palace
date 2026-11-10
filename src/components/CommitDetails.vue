@@ -70,7 +70,7 @@ async function load() {
   }
 }
 
-watch(() => [props.path, props.commit?.id, props.comparison?.base, props.comparison?.head], load, { immediate: true });
+watch([() => props.path, () => props.commit?.id, () => props.comparison?.base, () => props.comparison?.head], load, { immediate: true });
 
 // Older commits may have the file under a previous name, which still shows up as
 // the old side of a rename or, failing that, as a file with the same name.

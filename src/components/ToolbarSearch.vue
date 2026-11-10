@@ -39,7 +39,7 @@ const position = ref({});
 let files = null;
 const loaded = ref(0);
 watch(
-  () => [props.path, props.refreshKey, props.untracked],
+  [() => props.path, () => props.refreshKey, () => props.untracked],
   () => {
     files = null;
     loaded.value++;
