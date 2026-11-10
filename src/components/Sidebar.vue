@@ -466,7 +466,8 @@ function onRowClick(row, event) {
               <span v-if="row.detail" class="row-detail">{{ row.detail }}</span>
               <Lock v-if="row.locked" :size="12" class="row-mark" />
               <FolderGit2 v-if="row.elsewhere" :size="13" class="row-mark" />
-              <!-- A worktree's agent, in whichever window: as its terminal tab shows it. -->
+              <!-- The agent in a worktree, or where a branch is checked out, in whichever
+                   window: as its terminal tab shows it. -->
               <Spinner v-if="row.agent === 'working'" :size="12" class="agent-mark" />
               <span v-else-if="row.agent" class="agent-mark agent-dot" :class="row.agent" />
 
