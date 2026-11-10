@@ -21,6 +21,7 @@ import Spinner from "./Spinner.vue";
 import { commandKey, isMac, shortcut } from "../lib/platform.js";
 import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
+import { repositoryFolder } from "../lib/recents.js";
 import { splitKey } from "../lib/sidebarKeys.js";
 import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
 
@@ -71,6 +72,10 @@ const query = computed(() => filter.value.trim().toLowerCase());
 // Whether the Older tags are showing (see sidebarRows.js).
 const olderTagsOpen = ref(false);
 
+// Where the branches' arrangement is kept: the repository's, the same from any of its
+// worktrees.
+const arrangedIn = computed(() => repositoryFolder(props.overview));
+
 // The sections and their rows, built from the repository's overview as the filter,
 // the folders opened and closed, and the branches' arrangement have them.
 const sections = computed(() =>
@@ -81,8 +86,8 @@ const sections = computed(() =>
     issues: props.issues,
     pulls: props.pulls,
     agents: props.agents,
-    order: branchOrder(props.overview.path),
-    dividers: dividerRows(props.overview.path),
+    order: branchOrder(arrangedIn.value),
+    dividers: dividerRows(arrangedIn.value),
   }),
 );
 // Branches' rows, among which a dragged one moves.
@@ -256,7 +261,7 @@ function onPointerUp(event) {
     emit(rebase ? "rebase-head-onto" : "merge-into-head", name);
   } else if (at) {
     const siblings = branchRows.value.filter((r) => r.parent === row.parent).map((r) => r.key);
-    moveKey(props.overview.path, row.key, at.key, at.after, siblings);
+    moveKey(arrangedIn.value, row.key, at.key, at.after, siblings);
   }
 }
 

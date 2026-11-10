@@ -5,6 +5,7 @@ import { askConfirm, openForm, openMergeDialog, tell, openPullDialog, openResetD
 import { readJson, writeJson } from "./storage.js";
 import { fileManager } from "./platform.js";
 import { folderName } from "./format.js";
+import { repositoryFolder } from "./recents.js";
 import { undoHint } from "./confirm.js";
 import { keepDraft } from "./drafts.js";
 import { CANCELED, CONFLICT, PULL_REWRITTEN, errorDetail, isError } from "./errors.js";
@@ -163,7 +164,7 @@ export function useGitActions({
       old: name,
       new: values.name.trim(),
     });
-    if (!error) renameKey(overview.value.path, name, values.name.trim());
+    if (!error) renameKey(arrangedIn(), name, values.name.trim());
   }
 
   // Renames a branch on its remote (`name` is e.g. "origin/old"). On GitHub, GitHub
@@ -198,7 +199,7 @@ export function useGitActions({
     } else {
       error = await run(titles, "rename_remote_branch", { name, new: to });
     }
-    if (!error && followsLocally) renameKey(overview.value.path, old, to);
+    if (!error && followsLocally) renameKey(arrangedIn(), old, to);
   }
 
   async function deleteBranch(name) {
@@ -215,7 +216,7 @@ export function useGitActions({
       if (!force) return;
       error = await run(titles, "delete_branch", { name, force: true });
     }
-    if (!error) removeKey(overview.value.path, `branch:${name}`);
+    if (!error) removeKey(arrangedIn(), `branch:${name}`);
   }
 
   // Deletes a branch whose pull request was merged on GitHub, if everything on it was
@@ -223,7 +224,7 @@ export function useGitActions({
   // it's forced; Undo brings it back.
   async function deleteMergedBranch(name, commit) {
     const error = await run(["Deleting branch…", "Deleted branch", "Couldn't delete the branch"], "delete_merged_branch", { name, commit });
-    if (!error) removeKey(overview.value.path, `branch:${name}`);
+    if (!error) removeKey(arrangedIn(), `branch:${name}`);
     return error;
   }
 
@@ -608,7 +609,7 @@ export function useGitActions({
   // A new worktree's folder is named after the repository and the branch, as
   // "palace-feature-login", and goes beside the repository's own unless another place
   // is chosen.
-  const mainFolder = () => worktrees().find((w) => w.main)?.path ?? overview.value.path;
+  const mainFolder = () => repositoryFolder(overview.value);
   const worktreeName = (branch) => `${folderName(mainFolder())}-${branch.replace(/[/\\\s]+/g, "-")}`;
   const besideRepository = () => mainFolder().slice(0, mainFolder().lastIndexOf("/"));
 
@@ -932,6 +933,9 @@ export function useGitActions({
 
   // --- Arranging branches ------------------------------------------------------------
 
+  // Where the branches' arrangement is kept: the repository's, from any of its worktrees.
+  const arrangedIn = () => repositoryFolder(overview.value);
+
   // A divider in the sidebar's Branches, after `afterKey` or at the end.
   async function newDivider(afterKey = null) {
     const values = await openForm({
@@ -941,7 +945,7 @@ export function useGitActions({
       confirmLabel: "Add Divider",
     });
     if (!values) return;
-    const path = overview.value.path;
+    const path = arrangedIn();
     addDivider(path, values.label.trim(), afterKey, topLevelKeys(path, overview.value.branches));
   }
 
@@ -952,14 +956,14 @@ export function useGitActions({
       fields: [{ key: "label", label: "Label", type: "text", value: label, placeholder: "None", optional: true }],
       confirmLabel: "Save",
     });
-    if (values) labelDivider(overview.value.path, key, values.label.trim());
+    if (values) labelDivider(arrangedIn(), key, values.label.trim());
   }
 
   function dividerMenu(key, label) {
     return [
       { label: label ? "Edit Label…" : "Add Label…", action: () => editDividerLabel(key, label) },
       { separator: true },
-      { label: "Remove Divider", action: () => removeKey(overview.value.path, key) },
+      { label: "Remove Divider", action: () => removeKey(arrangedIn(), key) },
     ];
   }
 
@@ -970,7 +974,7 @@ export function useGitActions({
       "Reset",
       false,
     );
-    if (ok) resetOrder(overview.value.path);
+    if (ok) resetOrder(arrangedIn());
   }
 
   // Menus for the sidebar's section headings, and its + button.
@@ -981,7 +985,7 @@ export function useGitActions({
         { label: "New Branch…", action: () => newBranch() },
         { separator: true },
         { label: "Add Divider…", action: () => newDivider() },
-        { label: "Reset Order…", action: resetBranchOrder, disabled: !isArranged(overview.value.path) },
+        { label: "Reset Order…", action: resetBranchOrder, disabled: !isArranged(arrangedIn()) },
       ];
     }
     if (section === "remotes") return [{ label: "Add Remote Repository…", action: addRemote }];

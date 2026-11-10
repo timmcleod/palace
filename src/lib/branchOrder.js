@@ -1,10 +1,12 @@
 import { reactive } from "vue";
-import { readJson, writeJson } from "./storage.js";
+import { keepInSync, readJson, writeJson } from "./storage.js";
 import { buildTree, flattenTree } from "./tree.js";
 
 // The order the sidebar lists local branches in once they've been dragged around, and
 // the dividers between them, per repository. Only Palace's sidebar uses it; git knows
-// nothing of it.
+// nothing of it. Branches are the repository's, whichever of its worktrees is open, so
+// `path` is the folder it's known by (see repositoryFolder in recents.js), and its
+// arrangement is the same from each.
 //
 // `order` holds sidebar keys: "branch:name", "branch-folder:path/" and
 // "branch-divider:id". Only the order of keys in the same folder matters. Branches it
@@ -14,6 +16,9 @@ import { buildTree, flattenTree } from "./tree.js";
 const KEY = "palace.branchOrder";
 const stored = readJson(KEY, {});
 const arrangements = reactive(stored && typeof stored === "object" ? stored : {});
+// What another window arranged, as for one of the repository's worktrees, shows here too,
+// rather than this window saving what it had before over it.
+keepInSync(KEY, arrangements, (value) => (value && typeof value === "object" ? value : {}));
 
 const DIVIDER = "branch-divider:";
 export const isDivider = (key) => key.startsWith(DIVIDER);

@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, openForm, openPullDialog } from "./overlays.js";
+import { branchOrder, resetOrder } from "./branchOrder.js";
 import { CANCELED } from "./errors.js";
 import { draftFor } from "./drafts.js";
 import { agentCommand, setAgentCommand } from "./agents.js";
@@ -58,6 +59,9 @@ beforeEach(() => {
   vi.mocked(openForm).mockReset();
   vi.mocked(openPullDialog).mockReset();
 });
+
+// The branches' arrangement is kept for all of Palace, so each test's goes.
+afterEach(() => resetOrder("/code/palace"));
 
 describe("a branch's menu", () => {
   test("for the current branch, offers neither merging it into itself nor deleting it", () => {
@@ -253,6 +257,15 @@ describe("worktrees", () => {
     const { actions } = actionsOn({ worktrees: [{ ...main, current: false }, other] });
     expect(labels(actions.worktreeMenu(main.path))).not.toContain("Remove…");
     expect(item(actions.worktreeMenu(other.path), "Remove…").disabled).toBe(true);
+  });
+
+  test("arranges the repository's branches from any of its worktrees alike", async () => {
+    const other = worktree("/code/palace-feature", { branch: "feature", current: true });
+    const { actions } = actionsOn({ path: other.path, worktrees: [{ ...main, current: false }, other] });
+    vi.mocked(openForm).mockResolvedValue({ label: "" });
+    await item(actions.branchMenu("main"), "Add Divider Below…").action();
+    expect(branchOrder("/code/palace")).toEqual(["branch:main", expect.stringMatching(/^branch-divider:/)]);
+    expect(branchOrder(other.path)).toEqual([]);
   });
 
   test("Prune shows only when a worktree's folder is gone", () => {

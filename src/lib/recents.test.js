@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { forgetGoneRepositories, lastRepository, recentRepositories, rememberRepository, remembering } from "./recents.js";
+import { forgetGoneRepositories, lastRepository, recentRepositories, rememberRepository, remembering, repositoryFolder } from "./recents.js";
 import { writeJson } from "./storage.js";
 
 // storage.js listens for Palace's other windows as it loads.
@@ -10,6 +10,18 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({ getCurrentWebviewWindow: () =>
 
 const repo = (name) => ({ name, path: `/code/${name}` });
 const worktree = (name, more = {}) => ({ path: `/code/${name}`, branch: name, main: false, current: false, locked: false, prunable: false, ...more });
+
+describe("the folder a repository is known by", () => {
+  test("is its own, opened itself or from one of its worktrees", () => {
+    const worktrees = [worktree("palace", { main: true }), worktree("palace-search", { current: true })];
+    expect(repositoryFolder({ path: "/code/palace-search", worktrees })).toBe("/code/palace");
+    expect(repositoryFolder({ path: "/code/palace", worktrees: [] })).toBe("/code/palace");
+  });
+
+  test("with no folder of its own, as for a bare repository, is the worktree's", () => {
+    expect(repositoryFolder({ path: "/code/palace-search", worktrees: [worktree("palace-search", { current: true })] })).toBe("/code/palace-search");
+  });
+});
 
 describe("remembering a repository", () => {
   test("puts it first, once", () => {

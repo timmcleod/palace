@@ -2,7 +2,7 @@
 // from terminals.js, which brings the terminal with it, for what only needs the name.
 
 import { reactive } from "vue";
-import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
+import { keepInSync, readJson, writeJson } from "./storage.js";
 
 // The command an agent tab runs, for each repository that doesn't use the default:
 // Claude Code, or another agent that runs in a terminal, such as Codex or Gemini.
@@ -11,11 +11,7 @@ const AGENT_COMMANDS_KEY = "palace.claudeCommands";
 export const DEFAULT_AGENT_COMMAND = "claude";
 
 const agentCommands = reactive(readJson(AGENT_COMMANDS_KEY, {}));
-onSavedElsewhere((key, value) => {
-  if (key !== AGENT_COMMANDS_KEY) return;
-  for (const path of Object.keys(agentCommands)) delete agentCommands[path];
-  Object.assign(agentCommands, value);
-});
+keepInSync(AGENT_COMMANDS_KEY, agentCommands);
 
 export const agentCommand = (path) => agentCommands[path] || DEFAULT_AGENT_COMMAND;
 

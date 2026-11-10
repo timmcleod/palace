@@ -21,12 +21,22 @@ export function recentRepositories() {
 }
 
 /**
+ * The folder Palace knows the repository `overview` shows by: its own, even with one of
+ * its worktrees open, so what's kept for it, such as its place among the recent ones or
+ * its branches' arrangement, is the same from each. Without one, as for a bare
+ * repository, it's the worktree's.
+ */
+export function repositoryFolder(overview) {
+  return overview.worktrees?.find((w) => w.main)?.path ?? overview.path;
+}
+
+/**
  * `recents` with the repository `overview` shows put first: as its own folder, when a
  * worktree added to it is open, and without those worktrees, which an older Palace listed.
  */
 export function remembering(recents, overview) {
-  const main = overview.worktrees.find((w) => w.main);
-  const repo = main && !main.current ? { name: folderName(main.path), path: main.path } : { name: overview.name, path: overview.path };
+  const path = repositoryFolder(overview);
+  const repo = { name: path === overview.path ? overview.name : folderName(path), path };
   const added = new Set(overview.worktrees.filter((w) => !w.main).map((w) => w.path));
   return [repo, ...recents.filter((r) => r.path !== repo.path && !added.has(r.path))];
 }

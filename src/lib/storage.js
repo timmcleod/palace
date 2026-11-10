@@ -82,6 +82,20 @@ listen("store-changed", ({ payload }) => {
   }
 }).catch(() => {});
 
+/**
+ * Keeps `target`, a reactive object of what's saved at `key`, the same as other windows
+ * save it, `clean` tidying what they saved first. Only what this window has taken in is
+ * saved over when it next saves, but two windows saving at once still race: the later
+ * save wins.
+ */
+export function keepInSync(key, target, clean = (value) => value) {
+  return onSavedElsewhere((changed, value) => {
+    if (changed !== key) return;
+    for (const k of Object.keys(target)) delete target[k];
+    Object.assign(target, clean(value) ?? {});
+  });
+}
+
 export function readJson(key, fallback) {
   const value = values[key];
   // A copy, so changing what's read never changes what's saved.

@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { onSavedElsewhere, readJson, writeJson } from "./storage.js";
+import { keepInSync, readJson, writeJson } from "./storage.js";
 
 // Review comments: notes on lines of a diff, kept for each repository until they're
 // sent to its agent (see sendToAgent), which puts them all in its prompt, and so done
@@ -24,11 +24,7 @@ function withoutSent(all) {
   return all ?? {};
 }
 
-onSavedElsewhere((key, value) => {
-  if (key !== KEY) return;
-  for (const path of Object.keys(reviews)) delete reviews[path];
-  Object.assign(reviews, withoutSent(value));
-});
+keepInSync(KEY, reviews, withoutSent);
 
 function save() {
   for (const [path, comments] of Object.entries(reviews)) if (!comments.length) delete reviews[path];
