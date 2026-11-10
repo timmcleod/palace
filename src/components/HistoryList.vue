@@ -11,6 +11,7 @@ import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
 import { setDragImage } from "../lib/dragImage.js";
 import { COMMIT_TYPE, draggedCommits } from "../lib/commitDrag.js";
+import { newestInView, slideDistance } from "../lib/historySlide.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -45,6 +46,7 @@ const summary = shallowRef(null);
 const pages = shallowReactive(new Map());
 const error = ref("");
 const viewport = ref(null);
+const spacer = ref(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(0);
 // The card of a commit's branches and tags, while its badges are pointed at: { badges,
@@ -67,6 +69,10 @@ async function load({ resetScroll }) {
   refsCard.value = null;
   const seq = ++loadSeq;
   const selections = selectionChanges;
+  // The newest commit and where it was, while it's in view, to slide in any added above
+  // it (see historySlide.js).
+  const newestTop = resetScroll ? null : layout.value.offsets[layout.value.itemOfCommit[0]];
+  const newest = newestTop != null && newestInView({ top: newestTop, rowHeight: ROW_HEIGHT, scrollTop: scrollTop.value }) ? commitAt(0) : null;
   try {
     const next = await invoke("load_history", {
       path: props.path,
@@ -80,8 +86,21 @@ async function load({ resetScroll }) {
     error.value = "";
     // An unchanged generation means nothing moved; keep the rows already on screen.
     if (next.generation === summary.value?.generation) return;
+    // Where that commit is now, and the rows it would slide in with, read before they're
+    // shown so none is shown blank.
+    const [position, firstPage] = newest
+      ? await Promise.all([
+          invoke("history_position", { generation: next.generation, id: newest.id }).catch(() => null),
+          invoke("history_page", { generation: next.generation, offset: 0, limit: PAGE_SIZE }).catch(() => null),
+        ])
+      : [];
+    if (seq !== loadSeq) return;
+    // A slide still under way was of the history this one replaces.
+    sliding?.cancel();
     pages.clear();
     summary.value = next;
+    if (firstPage) pages.set(0, firstPage);
+    if (position != null && firstPage) slideIn(newestTop, position);
     emit("count", next.total);
     if (resetScroll && viewport.value) {
       viewport.value.scrollTop = 0;
@@ -165,6 +184,28 @@ const layout = computed(() => {
 
   return { items, offsets, itemOfCommit, height: y };
 });
+
+// The rows slide down from where they were to make room for commits added above the
+// newest one shown before, which started `before` from the top and is now at `position`.
+const SLIDE_MS = 220;
+const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+let sliding = null;
+
+async function slideIn(before, position) {
+  const distance = slideDistance({
+    before,
+    after: layout.value.offsets[layout.value.itemOfCommit[position]],
+    viewportHeight: viewportHeight.value,
+  });
+  if (!distance || reducedMotion?.matches) return;
+  // Once the new rows are drawn, before they're painted.
+  await nextTick();
+  sliding = spacer.value?.animate([{ transform: `translateY(${-distance}px)` }, { transform: "none" }], {
+    duration: SLIDE_MS,
+    easing: "cubic-bezier(0.2, 0, 0, 1)",
+  });
+}
+onBeforeUnmount(() => sliding?.cancel());
 
 // Binary search for the last item that starts at or above `y`.
 function itemAt(y) {
@@ -521,7 +562,7 @@ function showRefs(badges, event) {
     @keydown="onKeydown"
     @dragover="onViewportDragOver"
   >
-    <div class="spacer" :style="{ height: `${layout.height}px` }">
+    <div ref="spacer" class="spacer" :style="{ height: `${layout.height}px` }">
       <div v-if="dropLine != null" class="drop-line" :style="{ top: `${dropLine - 1}px` }" />
       <template v-for="item in visible" :key="item.key">
         <div v-if="item.header" class="month" :style="{ top: `${item.top}px`, height: `${HEADER_HEIGHT}px` }">
