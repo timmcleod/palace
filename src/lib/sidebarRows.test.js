@@ -141,20 +141,6 @@ describe("sidebarSections", () => {
     });
   });
 
-  test("marks a branch with what the agent's doing in the worktree it's checked out in", () => {
-    const repo = overview({
-      branches: [branch("main", { is_head: true }), branch("a", { worktree: "/code/repo-a" }), branch("b", { worktree: "/code/repo-b" }), branch("c")],
-    });
-    const agents = { "/repo": "working", "/code/repo-a": "blocked", "/code/repo-b": "something new" };
-    const [main, a, b, c] = section(sidebarSections(repo, { agents }), "branches").rows;
-    expect(main.agent).toBe("working");
-    expect(a.agent).toBe("blocked");
-    expect(a.title).toContain("Its agent needs you");
-    // A state it doesn't know shows nothing.
-    expect(b.agent).toBeNull();
-    expect(c.agent).toBeNull();
-  });
-
   test("marks each worktree with what its agent's doing, in whichever window", () => {
     const repo = overview({
       worktrees: [

@@ -15,8 +15,7 @@ export const OLDER_TAGS = "tags-older:";
  *   olderTagsOpen  whether the Older tags are showing
  *   issues         { count, fresh } for the Issues row, or null for none
  *   pulls          { count } for the Pull Requests row, or null for none
- *   agents         what each repository's agents are doing, by path, for its worktree,
- *                  and the branch checked out in it
+ *   agents         what each repository's agents are doing, by path, for its worktree
  *   order          the keys of the branches in the order they've been dragged into
  *   dividers       the dividers between them, as rows (see branchOrder.js)
  * A row is { key, label, depth, icon, … }: see the template in Sidebar.vue for the rest.
@@ -31,7 +30,7 @@ export function sidebarSections(overview, view) {
 
   return [
     { id: "workspace", title: "Workspace", rows: workspaceRows(overview, issues, pulls) },
-    { id: "branches", title: "Branches", rows: branchRows(overview, views, query ? [] : dividers, order, agents) },
+    { id: "branches", title: "Branches", rows: branchRows(overview, views, query ? [] : dividers, order) },
     { id: "worktrees", title: "Worktrees", rows: worktreeRows(overview, views, agents), optional: true },
     { id: "tags", title: "Tags", rows: tagRows(overview, views, query, olderTagsOpen) },
     { id: "remotes", title: "Remotes", rows: remoteRows(overview, views, query) },
@@ -60,11 +59,8 @@ function workspaceRows(overview, issues, pulls) {
 }
 
 // In the order they've been dragged into, with their dividers, though those stay
-// hidden while filtering. Each checked out in a worktree, this one or another, says
-// what the agent there is doing, as the worktree's own row does, so the branches can
-// be worked from without looking among the worktrees too.
-function branchRows(overview, { matches, isOpen }, dividers, order, agents) {
-  const agentOf = (b) => agentState(agents, b.worktree ?? (b.is_head ? overview.path : null));
+// hidden while filtering.
+function branchRows(overview, { matches, isOpen }, dividers, order) {
   return flattenTree(
     buildTree(
       overview.branches.filter((b) => matches(b.name)),
@@ -84,12 +80,7 @@ function branchRows(overview, { matches, isOpen }, dividers, order, agents) {
         behind: b.behind,
         // Checked out in another worktree: double-clicking it opens that.
         elsewhere: b.worktree,
-        agent: agentOf(b),
-        title: [
-          b.upstream ? `${b.name} → ${b.upstream}` : b.name,
-          b.worktree && `Checked out in the worktree at ${b.worktree}`,
-          AGENT_SAYS[agentOf(b)],
-        ]
+        title: [b.upstream ? `${b.name} → ${b.upstream}` : b.name, b.worktree && `Checked out in the worktree at ${b.worktree}`]
           .filter(Boolean)
           .join("\n"),
       }),
@@ -163,10 +154,6 @@ function submoduleRows(overview, { matches }) {
     .map((s) => ({ key: `submodule:${s.path}`, label: s.name, icon: Package, depth: 0, title: s.path }));
 }
 
-// What the agent in the worktree at `path` is doing, or null for nothing, or a state
-// this doesn't know.
-const agentState = (agents, path) => (path && AGENT_SAYS[agents[path]] ? agents[path] : null);
-
 // What a worktree's agent doing says, in its row's tooltip.
 const AGENT_SAYS = {
   working: "Its agent is working",
@@ -189,10 +176,10 @@ function worktreeRows(overview, { matches }, agents) {
       current: w.current,
       locked: w.locked,
       gone: w.prunable,
-      agent: agentState(agents, w.path),
+      agent: AGENT_SAYS[agents[w.path]] ? agents[w.path] : null,
       title: [
         w.path,
-        AGENT_SAYS[agentState(agents, w.path)],
+        AGENT_SAYS[agents[w.path]],
         w.main && "The repository's own working copy",
         w.locked && "Locked",
         w.prunable && "Its folder is gone: Prune Worktrees forgets it",
