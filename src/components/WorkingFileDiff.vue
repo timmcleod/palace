@@ -66,8 +66,12 @@ watch(() => props.file, load, { immediate: true });
 
 async function showAll(staged) {
   loadingAll.value = staged;
+  // Another file chosen meanwhile, or a refresh, reads its own: this one, read for the
+  // file before, mustn't show in its place.
+  const seq = ++loadSeq;
   try {
     const full = await fetchDiff(staged, null);
+    if (seq !== loadSeq) return;
     inFull = { ...inFull, [staged ? "staged" : "unstaged"]: true };
     diffs.value = { ...diffs.value, [staged ? "staged" : "unstaged"]: full };
   } catch (e) {

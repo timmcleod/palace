@@ -77,3 +77,24 @@ test("a diff shown in full stays in full when a refresh reads it again", async (
   expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).toBeNull();
   expect(document.querySelector(".notice")).toBeNull();
 });
+
+test("a diff shown in full for a file left before it's read doesn't show for the next", async () => {
+  let fullRead;
+  const file = await mount(({ file: path, maxLines }) => {
+    if (maxLines == null) return new Promise((resolve) => (fullRead = resolve));
+    return { ...diff(), truncated: true, hunks: path === "src/notes.js" ? [] : diff().hunks };
+  });
+  document.querySelector(".notice .link-button").click();
+  await settle();
+
+  file.value = changed("src/other.js");
+  await settle();
+  fullRead({ ...diff(), hunks: [{ header: "@@ -1 +1 @@", lines: [line("+", null, 1, "from notes.js")] }] });
+  await settle();
+  expect(document.body.textContent).not.toContain("from notes.js");
+
+  // Nor is the next file's then read in full on a refresh.
+  file.value = changed("src/other.js");
+  await settle();
+  expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).not.toBeNull();
+});

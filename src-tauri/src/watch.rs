@@ -7,12 +7,11 @@
 //! where Palace does watch are reported, as the Files view lists them, but not writes to
 //! an ignored file, such as a log.
 
-use git2::Repository;
-use notify::event::ModifyKind;
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::Path;
+use git2::{Repository, StatusOptions};
+use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tauri::{Emitter, EventTarget, WebviewWindow};
@@ -53,6 +52,8 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
     // In a worktree added with `git worktree add`, .git holds only its own HEAD and
     // index: its branches are the main repository's, in the .git they share.
     let common = repo.commondir().to_path_buf();
+    // Noted before watching starts, so one made meanwhile comes as an event.
+    let mut present = ignored_now(&repo, &workdir);
 
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
     let watcher = notify::recommended_watcher(move |event| {
@@ -98,15 +99,15 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
                 if event.kind.is_access() {
                     continue;
                 }
-                // A file or folder appearing, going, or renamed, rather than written to.
-                let comes_or_goes = event.kind.is_create() || event.kind.is_remove() || matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
                 for p in &event.paths {
-                    if !relevant(&repo, &workdir, &gitdir, &common, p, comes_or_goes) {
+                    if !relevant(&repo, &workdir, &gitdir, &common, p, &mut present) {
                         continue;
                     }
                     changed = true;
-                    // A new folder needs watching too.
-                    if event.kind.is_create() && p.is_dir() && !p.starts_with(&gitdir) {
+                    // A new folder needs watching too, unless git ignores it: its coming
+                    // shows in the Files view, but what's made in it, as npm install
+                    // fills a new node_modules, would refresh on every file.
+                    if event.kind.is_create() && p.is_dir() && !p.starts_with(&gitdir) && !ignored(&repo, &workdir, p, true) {
                         let Some(watcher) = weak.upgrade() else { return };
                         watch_tree(&mut watcher.lock().unwrap(), &repo, &workdir, &gitdir, p);
                     }
@@ -141,9 +142,10 @@ fn watch_tree(watcher: &mut RecommendedWatcher, repo: &Repository, workdir: &Pat
     }
 }
 
-/// Whether a change at `path` could alter what Palace shows. `comes_or_goes` says it
-/// appeared, went, or was renamed, rather than written to.
-fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, path: &Path, comes_or_goes: bool) -> bool {
+/// Whether a change at `path` could alter what Palace shows. `present` holds the ignored
+/// files and folders known to be there (see ignored_now), kept up to date as they come
+/// and go.
+fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, path: &Path, present: &mut HashSet<PathBuf>) -> bool {
     let first = |inside: &Path| inside.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
     let lock = path.extension().is_some_and(|e| e == "lock");
     if let Ok(inside_git) = path.strip_prefix(gitdir) {
@@ -156,10 +158,39 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     if let Ok(inside_common) = path.strip_prefix(common) {
         return !lock && matches!(first(inside_common).as_deref(), Some("refs" | "packed-refs" | "worktrees"));
     }
+    if !path.starts_with(workdir) {
+        return false;
+    }
+    if !ignored(repo, workdir, path, path.is_dir()) {
+        return true;
+    }
     // An ignored file or folder coming or going shows in the Files view, muted; one
-    // written to doesn't change what's shown. Events only come from folders that are
-    // watched, which aren't ignored, so nothing inside an ignored folder gets here.
-    path.starts_with(workdir) && (comes_or_goes || !ignored(repo, workdir, path, path.is_dir()))
+    // written to doesn't change what's shown. What the event says happened can't tell
+    // them apart: macOS goes on calling each write to a file it saw made a creation, so
+    // a log written on every request would refresh each time. Whether it's there now,
+    // as against before, can. One made and gone again, as SQLite's journal is, isn't
+    // reported. Events only come from folders that are watched, which aren't ignored,
+    // even new ones (see start), so nothing inside an ignored folder gets here.
+    if path.exists() {
+        present.insert(path.to_path_buf())
+    } else {
+        present.remove(path)
+    }
+}
+
+/// The ignored files and folders in the working copy, but not what's inside an ignored
+/// folder, as the Files view lists them. Nor, as libgit2 has it, what's in one a rule
+/// ignores but a tracked file keeps, as logs/ with a .gitkeep: one of those is reported
+/// the first time it's written to, and known after that.
+fn ignored_now(repo: &Repository, workdir: &Path) -> HashSet<PathBuf> {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(true).recurse_ignored_dirs(false);
+    let Ok(statuses) = repo.statuses(Some(&mut opts)) else { return HashSet::new() };
+    statuses
+        .iter()
+        .filter(|s| s.status().is_ignored())
+        .filter_map(|s| s.path().ok().map(|p| workdir.join(p.trim_end_matches('/'))))
+        .collect()
 }
 
 /// Whether git ignores `path`, in the working copy (see files::ignored).
@@ -195,7 +226,9 @@ mod tests {
         while std::time::Instant::now() < until && rx.recv_timeout(Duration::from_secs(2)).is_ok() {}
     }
 
-    /// Waits out any pending report, then checks nothing more arrives.
+    /// Waits out any pending report, then checks nothing more arrives. As it lets
+    /// through what's pending, it checks a change was the last reported, not that a
+    /// change made just before wasn't: for that, `!reported`.
     fn quiet(rx: &mpsc::Receiver<()>) -> bool {
         while rx.recv_timeout(Duration::from_millis(800)).is_ok() {}
         rx.recv_timeout(Duration::from_millis(1200)).is_err()
@@ -206,7 +239,9 @@ mod tests {
         let t = TempRepo::new("watch");
         std::fs::create_dir_all(t.dir.join("vendor/package")).unwrap();
         // A tracked .gitkeep keeps logs/, which the rules ignore, watched.
-        t.commit(&[("a.txt", Some("a\n")), ("logs/.gitkeep", Some("")), (".gitignore", Some("vendor/\nlogs/\n.env\n"))], "First");
+        t.commit(&[("a.txt", Some("a\n")), ("logs/.gitkeep", Some("")), (".gitignore", Some("vendor/\nlogs/\n.env\nnode_modules/\n*.log\n"))], "First");
+        // There before watching starts, as a log is.
+        t.write(&[("today.log", Some("started\n"))]);
         let (_watcher, rx) = watch(&t);
         settle(&rx);
 
@@ -215,13 +250,25 @@ mod tests {
         assert!(quiet(&rx));
 
         t.write(&[("vendor/package/lib.php", Some("<?php\n"))]);
-        assert!(quiet(&rx), "files in an ignored folder");
+        assert!(!reported(&rx), "files in an ignored folder");
 
         t.write(&[(".env", Some("KEY=1\n"))]);
         assert!(reported(&rx), "an ignored file appearing, as the Files view lists it");
         assert!(quiet(&rx));
         t.write(&[(".env", Some("KEY=2\n"))]);
-        assert!(quiet(&rx), "writing to an ignored file");
+        assert!(!reported(&rx), "writing to an ignored file");
+        t.write(&[("today.log", Some("more\n"))]);
+        assert!(!reported(&rx), "writing to an ignored file there before watching");
+        t.write(&[("today.log", None)]);
+        assert!(reported(&rx), "an ignored file there before watching going");
+        assert!(quiet(&rx));
+
+        // As npm install makes node_modules: the folder shows, but isn't watched.
+        std::fs::create_dir(t.dir.join("node_modules")).unwrap();
+        assert!(reported(&rx), "an ignored folder appearing");
+        assert!(quiet(&rx));
+        t.write(&[("node_modules/package.js", Some(""))]);
+        assert!(!reported(&rx), "files in a new ignored folder");
 
         t.write(&[("logs/.gitkeep", Some("kept\n"))]);
         assert!(reported(&rx), "editing a tracked file a rule matches");
