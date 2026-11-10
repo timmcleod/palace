@@ -161,7 +161,12 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     if !path.starts_with(workdir) {
         return false;
     }
-    if !ignored(repo, workdir, path, path.is_dir()) {
+    // Gone, it's no longer a folder on disk, so a folder-only rule such as "node_modules/"
+    // wouldn't match it: one known to be there is asked about as a folder. A rule that
+    // isn't folder-only matches files and folders alike, so a file asked about that way
+    // still matches as it did.
+    let is_dir = path.is_dir() || (!path.exists() && present.contains(path));
+    if !ignored(repo, workdir, path, is_dir) {
         return true;
     }
     // An ignored file or folder coming or going shows in the Files view, muted; one
@@ -275,6 +280,22 @@ mod tests {
 
         git(t.path(), &["commit", "-qam", "Edit"], None).unwrap();
         assert!(reported(&rx), "committing");
+    }
+
+    #[test]
+    fn an_ignored_folder_removed_and_made_again_is_reported_both_times() {
+        let t = TempRepo::new("watch-ignored-again");
+        t.commit(&[("a.txt", Some("a\n")), (".gitignore", Some("node_modules/\n"))], "First");
+        // As after npm install, before Palace starts watching.
+        std::fs::create_dir(t.dir.join("node_modules")).unwrap();
+        let (_watcher, rx) = watch(&t);
+        settle(&rx);
+
+        std::fs::remove_dir_all(t.dir.join("node_modules")).unwrap();
+        assert!(reported(&rx), "removing it");
+        assert!(quiet(&rx));
+        std::fs::create_dir(t.dir.join("node_modules")).unwrap();
+        assert!(reported(&rx), "making it again, as npm install does");
     }
 
     #[test]
