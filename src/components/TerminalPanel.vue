@@ -17,6 +17,7 @@ import {
   markSeen,
   openTerminal,
   dropFiles,
+  typePaths,
   missingAgent,
   offerInstall,
   paste,
@@ -28,6 +29,7 @@ import {
   tabsFor,
 } from "../lib/terminals.js";
 import { setDragImage } from "../lib/dragImage.js";
+import { draggingFiles, onFilesDropped } from "../lib/fileDrag.js";
 import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
 
@@ -153,11 +155,12 @@ function onTabListDragLeave(event) {
 // in the tab showing (see dropFiles). While they're held over it, it's outlined, saying
 // what dropping them does.
 const fileOver = ref(null);
-// Whether files from the desktop are what's dragged, to a tab they can go to.
-const droppingFiles = (event) => !!active.value && !!event.dataTransfer?.types.includes("Files");
+// Whether files from the desktop are what's dragged (see fileDrag.js), to a tab they can go to.
+const droppingFiles = (event) => !!active.value && draggingFiles(event.dataTransfer);
 
 function onFileDragOver(event) {
   if (!droppingFiles(event)) return;
+  overTerminal = true;
   event.preventDefault();
   event.dataTransfer.dropEffect = "copy";
   const many = event.dataTransfer.items.length > 1;
@@ -178,6 +181,24 @@ function onFileDrop(event) {
   event.preventDefault();
   dropFiles(active.value, event.dataTransfer);
 }
+
+// On Linux, Tauri takes the drop and says where the files are, not where they were
+// dropped (see fileDrag.js): they go to the tab showing if they were last dragged over
+// the terminal. Any drag over the window says they aren't, before the terminal's own
+// says they are.
+let overTerminal = false;
+const notOverTerminal = () => (overTerminal = false);
+onMounted(() => window.addEventListener("dragover", notOverTerminal, true));
+const stopDrops = onFilesDropped((paths) => {
+  const here = overTerminal;
+  overTerminal = false;
+  fileOver.value = null;
+  if (here && active.value) typePaths(active.value, paths);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("dragover", notOverTerminal, true);
+  stopDrops();
+});
 
 function onTabListDrop(event) {
   const tab = draggedTab.value;

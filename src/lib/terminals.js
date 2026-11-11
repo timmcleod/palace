@@ -417,6 +417,11 @@ export async function dropFiles(tab, transfer) {
     );
     paths = saved.filter(Boolean);
   }
+  typePaths(tab, paths);
+}
+
+/** Types `paths` in the terminal tab `tab`, quoted for its shell, as for files dropped on it. */
+export function typePaths(tab, paths) {
   if (!paths.length) return;
   tab.session.term.paste(`${paths.map(shellEscape).join(" ")} `);
   tab.session.term.focus();

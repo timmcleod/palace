@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-const { missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor } = await import("./terminals.js");
+const { missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor, typePaths } = await import("./terminals.js");
 const { nextTick } = await import("vue");
 
 beforeEach(() => vi.mocked(invoke).mockReset());
@@ -101,4 +101,14 @@ test("an agent that isn't installed isn't started on a task, to say only \"comma
   vi.mocked(invoke).mockReset().mockImplementation(async (command) => (command === "program_available" ? false : null));
   expect((await startAgentOn("/repo", "Fix it"))?.missing?.program).toBe("claude");
   expect(invoke).not.toHaveBeenCalledWith("terminal_open", expect.anything());
+});
+
+test("types dropped files' paths in the tab, quoted for its shell, then a space", () => {
+  const term = { paste: vi.fn(), focus: vi.fn() };
+  typePaths({ session: { term } }, ["/home/ada/Desktop/shot.png", "/home/ada/My Notes/to do.md"]);
+  expect(term.paste).toHaveBeenCalledWith("/home/ada/Desktop/shot.png /home/ada/My\\ Notes/to\\ do.md ");
+  expect(term.focus).toHaveBeenCalled();
+  term.paste.mockClear();
+  typePaths({ session: { term } }, []);
+  expect(term.paste).not.toHaveBeenCalled();
 });
