@@ -7,6 +7,7 @@ export const NOT_A_REPOSITORY = "NOT_A_REPOSITORY: ";
 export const PULL_REWRITTEN = "PULL_REWRITTEN: ";
 export const CHANGED_ON_DISK = "CHANGED_ON_DISK: ";
 export const STALE_STEP = "STALE_STEP: ";
+export const NO_IDENTITY = "NO_IDENTITY: ";
 
 // The whole message for an operation canceled, by the user or declined before it
 // started: let go quietly, not shown as a failure.

@@ -854,14 +854,18 @@ onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 // none, on its own.
 useAppMenu({
   window: thisWindow,
-  showAbout: async () => {
-    if (overview.value) selected.value = "workspace:settings";
-    else browsingSettings.value = true;
-    browsingGitHub.value = false;
-    await nextTick();
-    settingsView.value?.scrollToTop();
-  },
+  showAbout: () => showSettings(),
 });
+
+/** Opens Settings at `section` (one of its SECTIONS), or with none, at the top. */
+async function showSettings(section) {
+  if (overview.value) selected.value = "workspace:settings";
+  else browsingSettings.value = true;
+  browsingGitHub.value = false;
+  await nextTick();
+  if (section) settingsView.value?.show(section);
+  else settingsView.value?.scrollToTop();
+}
 
 // What each repository's agents are doing, in every window, by path (see agentStates.js),
 // for Worktrees to show which is busy or wants you.
@@ -1511,6 +1515,7 @@ const breadcrumb = computed(() => {
         @select="workingFile = $event"
         @changed="refresh"
         @open-file="openInFiles"
+        @open-settings="showSettings"
       />
       <FileTree
         v-else-if="isFiles"

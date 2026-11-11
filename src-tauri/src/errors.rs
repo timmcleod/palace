@@ -25,6 +25,10 @@ pub(crate) const CHANGED_ON_DISK: &str = "CHANGED_ON_DISK: ";
 /// page drops it.
 pub(crate) const STALE_STEP: &str = "STALE_STEP: ";
 
+/// Starts the refusal to commit when git has no name and email to record on it, as on
+/// a computer where git was never set up, so the page can point to Settings for them.
+pub(crate) const NO_IDENTITY: &str = "NO_IDENTITY: ";
+
 /// The whole message for an operation the user canceled, as a fetch stopped partway:
 /// the page lets it go quietly rather than showing it as a failure. The page returns it
 /// too, for an operation declined before it started.
@@ -43,6 +47,7 @@ mod tests {
             ("PULL_REWRITTEN", PULL_REWRITTEN),
             ("CHANGED_ON_DISK", CHANGED_ON_DISK),
             ("STALE_STEP", STALE_STEP),
+            ("NO_IDENTITY", NO_IDENTITY),
             ("CANCELED", CANCELED),
         ] {
             let declared = format!("export const {name} = \"{prefix}\";");

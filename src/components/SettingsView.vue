@@ -98,7 +98,7 @@ function scrollToTop() {
   scroller.value?.scrollTo({ top: 0 });
 }
 
-defineExpose({ scrollToTop });
+defineExpose({ scrollToTop, show });
 
 // --- Commit identity -------------------------------------------------------------
 

@@ -84,7 +84,14 @@ pub async fn discard_hunk(path: String, file: String, hunk: usize, lines: Option
 
 #[tauri::command]
 pub async fn commit_changes(path: String, message: String, amend: bool) -> Result<(), String> {
-    commit(&path, &message, amend)
+    commit(&path, &message, amend).map_err(|e| {
+        // Checked only once committing has failed, as it rarely does.
+        if crate::config::identity_missing(&path) {
+            format!("{}Git needs your name and email to record on your commits.", crate::errors::NO_IDENTITY)
+        } else {
+            e
+        }
+    })
 }
 
 /// A conflicted file's contents as they are in the working copy, conflict markers

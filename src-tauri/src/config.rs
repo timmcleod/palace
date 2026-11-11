@@ -29,6 +29,13 @@ pub async fn git_identity(path: Option<String>) -> Result<Identity, String> {
     })
 }
 
+/// Whether git, in the repository at `path`, can't tell whose commits are made there:
+/// no email is set and it can't make one up. Asked of git itself rather than read from
+/// its message, which is in the user's language.
+pub(crate) fn identity_missing(path: &str) -> bool {
+    cli::git(path, &["var", "GIT_COMMITTER_IDENT"], None).is_err()
+}
+
 /// A folder to run git in for settings of no repository: git needs to run somewhere.
 fn outside_any() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
@@ -67,6 +74,14 @@ pub async fn pull_mode(path: String) -> Result<&'static str, String> {
 mod tests {
     use super::*;
     use crate::test_support::TempRepo;
+
+    #[test]
+    fn a_repository_with_a_name_and_email_has_an_identity() {
+        // Without one is left untested: git would find the computer's own, which tests
+        // can't hide from it without changing the environment of every test running.
+        let t = TempRepo::new("identity-set");
+        assert!(!identity_missing(t.path()));
+    }
 
     #[test]
     fn repository_identity_overrides_and_resets() {

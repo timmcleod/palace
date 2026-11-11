@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch }
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, CircleCheck, Folder, SlidersHorizontal, Undo2, X } from "lucide-vue-next";
 import { confirmDiscard } from "../lib/confirm.js";
-import { CANCELED } from "../lib/errors.js";
+import { CANCELED, NO_IDENTITY, errorDetail, isError } from "../lib/errors.js";
 import { askConfirm, openForm, openMenu, tell } from "../lib/overlays.js";
 import { commandKey, fileManager, isMac, shortcut } from "../lib/platform.js";
 import { useIssueSuggestions } from "../lib/issueSuggestions.js";
@@ -29,13 +29,16 @@ const props = defineProps({
   statusFiles: { type: Array, default: null },
 });
 // "open-file" asks to open a file in the Files view, to edit it.
-const emit = defineEmits(["select", "changed", "open-file"]);
+const emit = defineEmits(["select", "changed", "open-file", "open-settings"]);
 
 const files = shallowRef(null);
 const error = ref("");
 const busy = ref(false);
 const committing = ref(false);
 const commitError = ref("");
+// Git has no name and email for commits, as on a computer it was never set up on:
+// Settings is where to give them.
+const needsIdentity = computed(() => isError(commitError.value, NO_IDENTITY));
 // The selected files' paths; see "Selecting several files" below.
 const chosen = ref(new Set());
 let anchor = null;
@@ -692,7 +695,12 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
     </div>
 
     <form class="composer" @submit.prevent="commit">
-      <p v-if="commitError" class="commit-error">{{ commitError }}</p>
+      <p v-if="commitError" class="commit-error">
+        {{ needsIdentity ? errorDetail(commitError, NO_IDENTITY) : commitError }}
+        <button v-if="needsIdentity" type="button" class="link-button" @click="emit('open-settings', 'commits')">
+          Set Them in Settings
+        </button>
+      </p>
       <p v-if="draft.amend && head?.pushed" class="amend-warning">
         This commit has already been pushed. Amending it will mean force pushing.
       </p>
