@@ -1,0 +1,16 @@
+name: Feature request
+description: Something you'd like Palace to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The task or problem, and how you get it done today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you picture Palace doing it, if you have an idea.
