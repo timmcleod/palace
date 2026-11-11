@@ -78,10 +78,7 @@ jobs:
           and on Ubuntu 22.04 and later, `libfuse2` (`libfuse2t64` on 24.04 and later).
 
           **macOS** (11 or later, Apple Silicon or Intel): download the `.dmg`, open it and
-          drag Palace to Applications. It isn't signed by Apple yet, so the first time
-          you open it, macOS refuses. Go to System Settings › Privacy & Security and click
-          **Open Anyway**. If macOS says Palace is damaged, run
-          `xattr -cr /Applications/Palace.app` in Terminal and open it again.
+          drag Palace to Applications.
           INSTALL
             } > notes.md
             # Its id from making it: GitHub's list of releases can take a moment to
@@ -172,6 +169,17 @@ jobs:
     runs-on: macos-latest
     env:
       IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # Signed with the Developer ID certificate, and notarized by Apple, so it opens as
+      # any Mac app does, whether it's a release or built by hand. Tauri's build tool
+      # imports the certificate into a keychain of its own, signs the app, sends it to
+      # Apple and staples Apple's ticket to it. The identity named here overrides the
+      # ad hoc one in tauri.macos.conf.json, which builds on a Mac of one's own keep.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - uses: actions/checkout@v5
@@ -200,8 +208,6 @@ jobs:
         if: env.IS_RELEASE == 'true'
         run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
 
-      # Not signed by Apple yet: tauri.macos.conf.json signs it ad hoc, which Apple
-      # Silicon needs to run it at all.
       - name: Build and add to the release
         if: env.IS_RELEASE == 'true'
         uses: tauri-apps/tauri-action@v0
@@ -217,6 +223,17 @@ jobs:
       - name: Build the packages
         if: env.IS_RELEASE != 'true'
         run: npm run package -- --target universal-apple-darwin
+
+      # A build that wasn't signed and notarized, as with a secret gone or wrong, fails
+      # here, rather than going out as one macOS refuses to open. On a release, the
+      # release then stays a draft (see publish).
+      - name: Check Apple accepts the app
+        run: |
+          app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Palace.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dvv "$app" 2>&1 | grep -E "^(Authority|TeamIdentifier|Runtime)"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
 
       - name: Attach the packages to this run
         if: env.IS_RELEASE != 'true'
