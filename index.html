@@ -370,7 +370,6 @@ To github.com:you/your-project.git
 <div style="display: flex; flex-direction: column; gap: 2px"><h3 style="margin: 0; font-size: 19px; font-weight: 600">macOS</h3><p style="margin: 0; font-size: 15px; color: var(--text2)">macOS 11+, Apple silicon and Intel</p></div>
 </div>
 <p style="margin: 0; font-size: 14px; line-height: 1.55; color: var(--text2)">Open the <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">.dmg</code> and drag Palace to Applications.</p>
-<div data-mac-note style="padding: 14px 16px; border-radius: 10px; background: var(--surface); font-size: 14px; line-height: 1.55; color: var(--text2)"><strong style="display: block; margin-bottom: 4px; font-weight: 600; color: var(--text)">First launch on macOS</strong>Palace isn't signed by Apple yet. When macOS blocks it, go to System Settings › Privacy &amp; Security and click Open Anyway. You only do this once.</div>
 <a href="https://github.com/timmcleod/palace/releases/download/v0.40.0/Palace_0.40.0_universal.dmg" data-asset="dmg" style="display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 20px; border-radius: 10px; background: var(--btn); color: var(--btn-text); text-decoration: none; font-size: 16px; font-weight: 600; box-sizing: border-box; margin-top: auto">Download .dmg</a>
 </div>
 
@@ -518,27 +517,6 @@ To github.com:you/your-project.git
     var order = { deb: 0, appimage: 1, mac: 2 };
     document.querySelectorAll('[data-cards] > [data-os]').forEach(function (card) { card.style.order = order[card.getAttribute('data-os')]; });
   }
-
-  // How to open it the first time on macOS, while it isn't signed by Apple: shown once a
-  // .dmg is downloaded, in its card and under the button that downloaded it. Without
-  // JavaScript, it's always in the card.
-  var note = document.querySelector('[data-mac-note]');
-  if (!note) return;
-  note.hidden = true;
-  document.addEventListener('click', function (event) {
-    var link = event.target.closest && event.target.closest('a[data-asset="dmg"]');
-    if (!link) return;
-    note.hidden = false;
-    if (link.closest('#download')) return;
-    var after = link.closest('[data-cta]') || link.parentElement;
-    if (after.nextElementSibling && after.nextElementSibling.hasAttribute('data-mac-note-copy')) return;
-    var copy = note.cloneNode(true);
-    copy.removeAttribute('data-mac-note');
-    copy.setAttribute('data-mac-note-copy', '');
-    copy.style.maxWidth = '520px';
-    copy.style.textAlign = 'left';
-    after.insertAdjacentElement('afterend', copy);
-  });
 })();
 </script>
 <script>
