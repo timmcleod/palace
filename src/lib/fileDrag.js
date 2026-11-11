@@ -10,6 +10,7 @@
 // sees them dragged over it.
 
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 /** Whether `transfer`, a drag's dataTransfer, carries files from outside Palace. */
 export function draggingFiles(transfer) {
@@ -19,10 +20,23 @@ export function draggingFiles(transfer) {
 }
 
 /**
- * Calls `fn(paths)` with the paths of files dropped on the window where Tauri takes the
+ * Calls `fn(paths)` with the paths of files dropped on this window where Tauri takes the
  * drop, on Linux. Returns a function that stops it.
+ *
+ * Only this window's: a listener for any window hears every window's drops, so a file
+ * dropped in one could be typed in another's terminal. And only paths: Tauri gives what
+ * else is dragged, such as a link from a browser, as if it were one, where on macOS the
+ * page takes only files' addresses (see dropFiles in terminals.js).
  */
 export function onFilesDropped(fn) {
-  const stop = listen("tauri://drag-drop", (event) => fn(event.payload?.paths ?? []));
+  const target = { kind: "WebviewWindow", label: getCurrentWebviewWindow().label };
+  const stop = listen(
+    "tauri://drag-drop",
+    (event) => {
+      const paths = (event.payload?.paths ?? []).filter((path) => path.startsWith("/"));
+      if (paths.length) fn(paths);
+    },
+    { target },
+  );
   return () => stop.then((unlisten) => unlisten()).catch(() => {});
 }
