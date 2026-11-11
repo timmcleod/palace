@@ -67,8 +67,6 @@ Palace needs Git 2.27 or newer and checks for it at startup. The AppImage also n
 
 macOS 11 or later, on Apple Silicon or Intel. Open the `.dmg` and drag Palace to Applications.
 
-Palace isn't signed by Apple yet, so the first time you open it, macOS refuses. Go to System Settings › Privacy & Security and click **Open Anyway**. If macOS says Palace is damaged, run `xattr -cr /Applications/Palace.app` in Terminal and open it again.
-
 If Git isn't installed, Palace offers to install Apple's Command Line Tools, which include it.
 
 ## Development
