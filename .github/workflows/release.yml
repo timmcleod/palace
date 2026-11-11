@@ -287,8 +287,9 @@ jobs:
         with:
           ref: gh-pages
 
-      # Pushing to gh-pages republishes the site.
-      - name: Show the new version on the website
+      # Pushing to gh-pages republishes the site. Its download buttons link straight to
+      # the release's files, whose names include the version, so they're moved on too.
+      - name: Show the new version on the website, and link its downloads
         run: |
           version="${GITHUB_REF_NAME#v}"
           current=$(grep -oE 'Version [0-9]+\.[0-9]+\.[0-9]+' index.html | head -1 | cut -d' ' -f2)
@@ -302,6 +303,7 @@ jobs:
             exit 0
           fi
           sed -i -E "s/Version [0-9]+\.[0-9]+\.[0-9]+/Version $version/" index.html
+          sed -i -E "s#releases/download/v[0-9]+\.[0-9]+\.[0-9]+/Palace_[0-9]+\.[0-9]+\.[0-9]+_#releases/download/v$version/Palace_${version}_#g" index.html
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Show version $version"
