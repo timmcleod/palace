@@ -83,18 +83,17 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
    * Runs `work`, and if it changed any branch, tag or stash, or the files `step.cover`
    * names, remembers how to undo it. `step` is { label, mode, cover } and, for a
    * commit, its message. cover is take_snapshot's: { files, changed, stash }.
-   * step.resumed is a stopped step this finishes.
+   * step.resumed is a stopped step this finishes. step.resolving marks one that gets
+   * what stopped for conflicts to where it can go on, as resolving or discarding files.
    */
-  async function undoable({ cover, resumed, ...step }, work) {
+  async function undoable({ cover, resumed, resolving, ...step }, work) {
     await settle();
     const path = overview.value.path;
-    // A step on only some files while an operation is under way, as resolving or
-    // discarding them, is part of getting what stopped for conflicts to where it can go
-    // on: continuing still finishes that as one step. Anything else leaves it behind,
-    // as does a step with nothing under way, as for a stash applied, with nothing to
-    // continue.
-    const within = overview.value.operation && cover?.files && !cover.changed && cover.stash == null;
-    if (!within) stopped = null;
+    // While an operation is under way, a step resolving it is part of what continuing
+    // finishes as one step. Anything else leaves that behind, as a stash would, whose
+    // undo the operation's would undo too; so does a step with nothing under way, as
+    // for a stash applied, with nothing to continue.
+    if (!(resolving && overview.value.operation)) stopped = null;
     let reason = "";
     const snapshot = (cover) =>
       invoke("take_snapshot", { path, cover }).catch((e) => {

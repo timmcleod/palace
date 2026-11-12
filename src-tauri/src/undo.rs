@@ -122,6 +122,16 @@ fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
     let stashes = stash_list(&mut repo).map_err(message)?;
     let files = read_files(&repo, cover)?;
     let operation = crate::branch::operation(&repo).map(String::from);
+    // Every changed file is covered for a step on the whole working copy, as Reset
+    // keeping changes, which ends the merge or the like under way. Its conflicts would
+    // be put back only while that's under way (see restore), so undo would always
+    // refuse: better to say so now, before the step, than to offer an undo that fails.
+    if cover.changed
+        && operation.is_some()
+        && let Some(file) = files.iter().find(|file| !file.conflict.is_empty())
+    {
+        return Err(format!("{} has conflicts.", file.path));
+    }
     Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files, operation })
 }
 
@@ -1028,6 +1038,28 @@ mod tests {
         let refused = undo(&t, &step, "keep").unwrap_err();
         assert!(refused.starts_with(STALE_STEP), "{refused}");
         assert_eq!(read(&t, "a.txt"), "both\n");
+    }
+
+    // A step on every changed file, as Reset keeping changes, ends the merge, so its
+    // conflicts could never be put back: it isn't undoable, and Palace says so first.
+    #[test]
+    fn every_changed_file_isnt_covered_while_a_conflict_is_under_way() {
+        use crate::cli::git;
+        let t = TempRepo::new("undo-conflict-reset");
+        t.commit(&[("a.txt", Some("base
+"))], "Base");
+        let main = t.branch();
+        git(t.path(), &["switch", "-qc", "theirs"], None).unwrap();
+        t.commit(&[("a.txt", Some("theirs
+"))], "Theirs");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours
+"))], "Ours");
+        assert!(git(t.path(), &["merge", "theirs"], None).is_err());
+        let refused = snapshot(t.path(), &Cover { changed: true, ..Default::default() }).unwrap_err();
+        assert_eq!(refused, "a.txt has conflicts.");
+        // Resolving it, a step on that file alone, still is.
+        assert!(snapshot(t.path(), &files(&["a.txt"])).is_ok());
     }
 
     // A stash applied over changes it conflicts with leaves a conflict with nothing

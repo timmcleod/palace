@@ -143,3 +143,25 @@ test("Show All for both sides, one soon after the other, shows both in full", as
   await settle();
   expect(document.querySelectorAll(".notice")).toHaveLength(0);
 });
+
+test("Show All that fails in a refresh read in its place goes back to cutting the diff short", async () => {
+  let showAllRead;
+  let fullReads = 0;
+  const file = await mount(({ maxLines }) => {
+    if (maxLines != null) return { ...diff(), truncated: true, hunks: [] };
+    // Show All's own read is slow; the refresh's, in its place, fails.
+    if (fullReads++ === 0) return new Promise((resolve) => (showAllRead = resolve));
+    throw "Too large to show";
+  });
+  document.querySelector(".notice .link-button").click();
+  await settle();
+
+  file.value = changed("src/notes.js");
+  await settle();
+  showAllRead(diff());
+  await settle();
+
+  file.value = changed("src/notes.js");
+  await settle();
+  expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).not.toBeNull();
+});

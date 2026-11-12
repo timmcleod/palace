@@ -24,7 +24,8 @@ const loadingAll = ref(null);
 
 let loadSeq = 0;
 // The sides shown in full with Show All, which a refresh reads in full again, rather
-// than cutting them short once more. Each file starts cut short.
+// than cutting them short once more: true, or "trying" until a read in full has
+// worked. Each file starts cut short.
 let inFull = { staged: false, unstaged: false };
 watch(
   () => props.file.path,
@@ -41,9 +42,8 @@ function fetchDiff(staged, maxLines) {
   });
 }
 
-// Reads the diffs, each side cut short unless it's asked for in full. Returns whether
-// it shows what it read, or false for an error; undefined when a newer read took its
-// place. Show All's spinner stops with the read that's last asked for.
+// Reads the diffs, each side cut short unless it's asked for in full. Show All's
+// spinner stops with the read that's last asked for.
 async function load() {
   const seq = ++loadSeq;
   try {
@@ -58,13 +58,22 @@ async function load() {
     const next = { staged: keepUnchanged(before.staged, staged), unstaged: keepUnchanged(before.unstaged, unstaged) };
     if (next.staged !== before.staged || next.unstaged !== before.unstaged) diffs.value = next;
     error.value = "";
-    return true;
+    settleTrying(true);
   } catch (e) {
     if (seq !== loadSeq) return;
     error.value = String(e);
-    return false;
+    settleTrying(false);
   } finally {
     if (seq === loadSeq) loadingAll.value = null;
+  }
+}
+
+// Show All's sides stay in full once the read that's last asked for, Show All's own or
+// a refresh in its place, has worked, and if it failed, go back to being cut short:
+// read in full every time after, they'd show the same error.
+function settleTrying(worked) {
+  for (const side of ["staged", "unstaged"]) {
+    if (inFull[side] === "trying") inFull = { ...inFull, [side]: worked };
   }
 }
 
@@ -77,10 +86,9 @@ watch(() => props.file, load, { immediate: true });
 // than either undoing the other. Another file chosen meanwhile starts cut short again
 // (see inFull). If it can't be read in full, it goes back to being cut short.
 async function showAll(staged) {
-  const side = staged ? "staged" : "unstaged";
-  inFull = { ...inFull, [side]: true };
+  inFull = { ...inFull, [staged ? "staged" : "unstaged"]: "trying" };
   loadingAll.value = staged;
-  if ((await load()) === false) inFull = { ...inFull, [side]: false };
+  await load();
 }
 
 async function run(command, args, step) {
@@ -117,8 +125,14 @@ async function discardFile() {
   if (ok) run("discard_files", { files: [props.file.path] }, discardStep());
 }
 
-// Discarding can be undone, with copies of the file as it was.
-const discardStep = () => ({ label: "Discard", mode: "keep", cover: { files: [props.file.path, props.file.old_path].filter(Boolean) } });
+// Discarding can be undone, with copies of the file as it was, and can be part of
+// resolving a merge or the like (see useUndo).
+const discardStep = () => ({
+  label: "Discard",
+  mode: "keep",
+  cover: { files: [props.file.path, props.file.old_path].filter(Boolean) },
+  resolving: true,
+});
 
 function stageFile() {
   run("stage_files", { files: [props.file.path] });

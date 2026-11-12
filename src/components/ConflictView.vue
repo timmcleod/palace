@@ -59,8 +59,9 @@ async function resolveBlock(block, side) {
 }
 
 // What's undone is the file, in the index and on disk: with a conflict's sides there,
-// undoing brings it back (see undo.rs).
-const step = (label) => ({ label, mode: "keep", cover: { files: [props.file.path] } });
+// undoing brings it back (see undo.rs). Continuing still finishes the operation as one
+// step (see useUndo).
+const step = (label) => ({ label, mode: "keep", cover: { files: [props.file.path] }, resolving: true });
 
 // Taking one side replaces the whole file.
 async function useSide(side) {

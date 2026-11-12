@@ -194,9 +194,10 @@ test("resolving can be undone, the file covered, and choosing one conflict's sid
   disk.text = "main's\nmine\n";
   click("Mark as Resolved");
   await settle();
-  expect(steps.map((s) => [s.label, s.cover])).toEqual([
-    ["Resolve Conflict", { files: ["src/gone.txt"] }],
-    ["Mark as Resolved", { files: ["src/gone.txt"] }],
+  // Each part of resolving the merge, which continuing finishes as one step.
+  expect(steps.map((s) => [s.label, s.cover, s.resolving])).toEqual([
+    ["Resolve Conflict", { files: ["src/gone.txt"] }, true],
+    ["Mark as Resolved", { files: ["src/gone.txt"] }, true],
   ]);
 });
 

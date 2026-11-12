@@ -144,10 +144,20 @@ describe("a step that stopped for conflicts", () => {
     await expect(undo.undoable(undo.stepFor("merge", {}), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
       "CONFLICT: stopped",
     );
-    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] } }, async () => null);
+    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] }, resolving: true }, async () => null);
     expect(undo.stepFor("control_operation", { action: "continue" })).toMatchObject({ label: "Merge" });
     // Something else, as a reset, leaves it behind.
     await undo.undoable({ label: "Reset", mode: "mixed", cover: { changed: true } }, async () => null);
+    expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
+  });
+
+  test("is left behind by a stash of some files made meanwhile", async () => {
+    const { undo, overview } = setUp();
+    overview.value.operation = "merge";
+    await expect(undo.undoable(undo.stepFor("merge", {}), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
+      "CONFLICT: stopped",
+    );
+    await undo.undoable({ label: "Stash", mode: "keep", cover: { files: ["b.txt"] } }, async () => null);
     expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
   });
 
@@ -156,7 +166,7 @@ describe("a step that stopped for conflicts", () => {
     await expect(undo.undoable(undo.stepFor("stash_apply", { index: 0 }), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
       "CONFLICT: stopped",
     );
-    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] } }, async () => null);
+    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] }, resolving: true }, async () => null);
     expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
   });
 });

@@ -177,7 +177,8 @@ async function discard(list) {
           "All their staged and unstaged changes will be thrown away.",
         );
   if (!ok) return;
-  const step = { label: "Discard", mode: "keep", cover: { files: list.flatMap(pathsOf) } };
+  // Discarding, as of files a merge brought in, can be part of resolving one.
+  const step = { label: "Discard", mode: "keep", cover: { files: list.flatMap(pathsOf) }, resolving: true };
   run("discard_files", { files: list.map((f) => f.path) }, step);
 }
 
