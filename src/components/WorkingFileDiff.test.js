@@ -98,3 +98,22 @@ test("a diff shown in full for a file left before it's read doesn't show for the
   await settle();
   expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).not.toBeNull();
 });
+
+test("a refresh while Show All is reading reads in full too, rather than cutting it short again", async () => {
+  let fullRead;
+  let reads = 0;
+  const file = await mount(({ maxLines }) => {
+    if (maxLines != null) return { ...diff(), truncated: true, hunks: [] };
+    // Show All's own read is slow; the refresh's is not.
+    return reads++ === 0 ? new Promise((resolve) => (fullRead = resolve)) : diff();
+  });
+  document.querySelector(".notice .link-button").click();
+  await settle();
+
+  file.value = changed("src/notes.js");
+  await settle();
+  fullRead(diff());
+  await settle();
+  expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).toBeNull();
+  expect(document.querySelector(".notice")).toBeNull();
+});

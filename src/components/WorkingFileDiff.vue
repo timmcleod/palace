@@ -66,15 +66,19 @@ watch(() => props.file, load, { immediate: true });
 
 async function showAll(staged) {
   loadingAll.value = staged;
-  // Another file chosen meanwhile, or a refresh, reads its own: this one, read for the
-  // file before, mustn't show in its place.
+  const side = staged ? "staged" : "unstaged";
+  // Asked for in full from now, so a refresh meanwhile reads it in full too, and wins.
+  // Another file chosen meanwhile starts cut short again (see inFull), and reads its
+  // own: this one, read for the file before, mustn't show in its place.
+  inFull = { ...inFull, [side]: true };
   const seq = ++loadSeq;
   try {
     const full = await fetchDiff(staged, null);
     if (seq !== loadSeq) return;
-    inFull = { ...inFull, [staged ? "staged" : "unstaged"]: true };
-    diffs.value = { ...diffs.value, [staged ? "staged" : "unstaged"]: full };
+    diffs.value = { ...diffs.value, [side]: full };
   } catch (e) {
+    if (seq !== loadSeq) return;
+    inFull = { ...inFull, [side]: false };
     error.value = String(e);
   } finally {
     loadingAll.value = null;

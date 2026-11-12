@@ -476,15 +476,16 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&[PathBuf]) 
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
     let head = head_tree(&repo).map_err(message)?;
 
-    // Discarding a staged rename also brings back the file under its old name.
+    // Discarding a staged rename also brings back the file under its old name. That
+    // name may be chosen too, as a new file made there since: each is one target, as
+    // one moved to the Trash twice would fail the second time.
     let status = read_status(&repo).map_err(message)?;
-    let mut targets: Vec<&str> = Vec::new();
-    for file in files {
-        targets.push(file);
-        if let Some(old) = status.iter().find(|s| &s.path == file).and_then(|s| s.old_path.as_deref()) {
-            targets.push(old);
-        }
-    }
+    let mut seen = std::collections::HashSet::new();
+    let targets: Vec<&str> = files
+        .iter()
+        .flat_map(|file| std::iter::once(file.as_str()).chain(status.iter().find(|s| &s.path == file).and_then(|s| s.old_path.as_deref())))
+        .filter(|target| seen.insert(*target))
+        .collect();
 
     // A folder here is a submodule or another repository inside this one. Its changes
     // are its own, and moving it to the Trash would take all of it, history included.
@@ -1017,6 +1018,24 @@ mod tests {
         assert_eq!(statuses(&t), []);
         assert_eq!(read(&t, "old.txt").as_deref(), Some("content\n"));
         assert!(!t.dir.join("new.txt").exists());
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+
+    // Its old name made again, as a new file, and both chosen: the old name is one file,
+    // to the Trash once, as moving it twice would fail with the discard half done.
+    #[test]
+    fn discarding_a_staged_rename_and_a_new_file_at_its_old_name() {
+        let t = TempRepo::new("discard-rename-again");
+        t.commit(&[("old.txt", Some("content\n"))], "First");
+        git(t.path(), &["mv", "old.txt", "new.txt"], None).unwrap();
+        t.write(&[("old.txt", Some("made again\n"))]);
+
+        let backup = t.dir.with_extension("backup");
+        discard(t.path(), &["new.txt".into(), "old.txt".into()], &backup_all_into(&backup)).unwrap();
+
+        assert_eq!(statuses(&t), []);
+        assert_eq!(read(&t, "old.txt").as_deref(), Some("content\n"));
+        assert_eq!(std::fs::read_to_string(backup.join("old.txt")).ok().as_deref(), Some("made again\n"));
         let _ = std::fs::remove_dir_all(&backup);
     }
 

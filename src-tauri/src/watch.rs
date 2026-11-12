@@ -52,8 +52,6 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
     // In a worktree added with `git worktree add`, .git holds only its own HEAD and
     // index: its branches are the main repository's, in the .git they share.
     let common = repo.commondir().to_path_buf();
-    // Noted before watching starts, so one made meanwhile comes as an event.
-    let mut present = ignored_now(&repo, &workdir);
 
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
     let watcher = notify::recommended_watcher(move |event| {
@@ -80,6 +78,11 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
     let path = path.to_string();
     std::thread::spawn(move || {
         let Ok(repo) = Repository::discover(&path) else { return };
+        // Noted here, rather than before watching starts: watch_repo runs on the main
+        // thread, and in a large repository the walk takes a while. One made during it
+        // is noted by it, and its coming not reported, as the Files view, reading the
+        // folder as it opens, will most likely show it anyway.
+        let mut present = ignored_now(&repo, &workdir);
         while let Ok(first) = rx.recv() {
             let mut events = vec![first];
             let started = Instant::now();
@@ -165,7 +168,9 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     // wouldn't match it: one known to be there is asked about as a folder. A rule that
     // isn't folder-only matches files and folders alike, so a file asked about that way
     // still matches as it did.
-    let is_dir = path.is_dir() || (!path.exists() && present.contains(path));
+    // Whether it's there, as itself: a link to something missing is there too.
+    let there = path.symlink_metadata().is_ok();
+    let is_dir = path.is_dir() || (!there && present.contains(path));
     if !ignored(repo, workdir, path, is_dir) {
         return true;
     }
@@ -176,7 +181,7 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     // as against before, can. One made and gone again, as SQLite's journal is, isn't
     // reported. Events only come from folders that are watched, which aren't ignored,
     // even new ones (see start), so nothing inside an ignored folder gets here.
-    if path.exists() {
+    if there {
         present.insert(path.to_path_buf())
     } else {
         present.remove(path)
