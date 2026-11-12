@@ -1,4 +1,4 @@
-import { Archive, CircleDot, Cloud, Folder, FolderGit2, FolderTree, GitBranch, GitPullRequest, History, Package, Tag } from "lucide-vue-next";
+import { Archive, CircleDot, Cloud, Folder, FolderGit2, FolderTree, GitBranch, GitCommitVertical, GitPullRequest, History, Package, Tag } from "lucide-vue-next";
 import { buildTree, flattenTree } from "./tree.js";
 
 // The newest tags show, and the rest wait in a folder of their own, "Older", closed until
@@ -59,8 +59,34 @@ function workspaceRows(overview, issues, pulls) {
 }
 
 // In the order they've been dragged into, with their dividers, though those stay
-// hidden while filtering.
+// hidden while filtering. With HEAD detached, as after checking out a commit, that
+// commit comes first, by its short hash, as current, as no branch is.
 function branchRows(overview, { matches, isOpen }, dividers, order) {
+  return [...detachedRow(overview, matches), ...namedBranchRows(overview, { matches, isOpen }, dividers, order)];
+}
+
+// HEAD's commit, while no branch is checked out. Its key is HEAD's history's own, which
+// selecting it shows (see App.vue). None before the first commit, with nothing to show.
+function detachedRow(overview, matches) {
+  const head = overview.head;
+  if (!head || head.branch || !head.short_id || !matches(head.short_id)) return [];
+  return [
+    {
+      key: "workspace:history",
+      label: head.short_id,
+      icon: GitCommitVertical,
+      depth: 0,
+      current: true,
+      detached: true,
+      // As a rebase, merge or cherry-pick goes, HEAD is detached at where it's got to.
+      title: overview.operation
+        ? `HEAD is detached at ${head.short_id} while the ${overview.operation} is under way.`
+        : `HEAD is detached at ${head.short_id}: no branch is checked out.\nCommits made here are kept by creating a branch here.`,
+    },
+  ];
+}
+
+function namedBranchRows(overview, { matches, isOpen }, dividers, order) {
   return flattenTree(
     buildTree(
       overview.branches.filter((b) => matches(b.name)),

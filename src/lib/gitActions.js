@@ -841,6 +841,18 @@ export function useGitActions({
     ];
   }
 
+  // HEAD's commit, while it's detached (see sidebarRows.js): what keeps commits made
+  // there. The branch starts at HEAD itself, so checking it out leaves nothing behind
+  // to ask about first. Not while a rebase or the like is under way, detaching HEAD as
+  // it goes: git won't switch to the new branch then.
+  function detachedMenu() {
+    const at = overview.value.head.short_id;
+    return [
+      { label: "New Branch Here…", action: () => newBranch(null, at), disabled: midOperation() },
+      { label: "New Tag Here…", action: () => createTag() },
+    ];
+  }
+
   function commitMenu(commit, rewritable) {
     // Reset acts on the branch whose history this is, and says which.
     const viewed = viewedBranch();
@@ -1039,6 +1051,7 @@ export function useGitActions({
     tagMenu,
     stashMenu,
     commitMenu,
+    detachedMenu,
     cherryPick,
     revisionChoices,
   };

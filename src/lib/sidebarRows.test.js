@@ -23,6 +23,24 @@ const keys = (sections, id) => section(sections, id)?.rows.map((r) => r.key);
 const tags = (count) => Array.from({ length: count }, (_, i) => `v${count - i}`);
 
 describe("sidebarSections", () => {
+  test("puts HEAD's commit first in Branches, by its short hash, while it's detached", () => {
+    const detached = overview({ head: { branch: null, short_id: "4cbad69" }, branches: [branch("main")] });
+    const [head, main] = section(sidebarSections(detached, {}), "branches").rows;
+    expect(head).toMatchObject({ key: "workspace:history", label: "4cbad69", current: true, detached: true });
+    // Marked HEAD, but not a branch to merge into or drop commits on.
+    expect(head.head).toBeUndefined();
+    expect(main).toMatchObject({ key: "branch:main" });
+    // Only matching a filter, and none on a branch, or before the first commit.
+    expect(keys(sidebarSections(detached, { query: "main" }), "branches")).toEqual(["branch:main"]);
+    expect(keys(sidebarSections(detached, { query: "4cba" }), "branches")).toEqual(["workspace:history"]);
+    const onMain = overview({ head: { branch: "main", short_id: "4cbad69" }, branches: [branch("main", { is_head: true })] });
+    expect(keys(sidebarSections(onMain, {}), "branches")).toEqual(["branch:main"]);
+    expect(keys(sidebarSections(overview({ head: { branch: null, short_id: null } }), {}), "branches")).toEqual([]);
+    // Mid-rebase, it says so, rather than offering to keep commits made there.
+    const rebasing = overview({ head: { branch: null, short_id: "4cbad69" }, operation: "rebase" });
+    expect(section(sidebarSections(rebasing, {}), "branches").rows[0].title).toBe("HEAD is detached at 4cbad69 while the rebase is under way.");
+  });
+
   test("lists the sections in order, leaving out empty worktrees, stashes and submodules", () => {
     expect(sidebarSections(overview(), {}).map((s) => s.id)).toEqual(["workspace", "branches", "tags", "remotes"]);
     const full = overview({

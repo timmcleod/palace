@@ -471,8 +471,10 @@ function onRowClick(row, event) {
               <span v-else-if="row.agent" class="agent-mark agent-dot" :class="row.agent" />
 
               <Spinner v-if="row.key === switching" :size="13" class="switching" />
-              <span v-else-if="row.head || row.ahead || row.behind" class="pill">
-                <span v-if="row.head">HEAD</span>
+              <!-- HEAD detached at a commit shows HEAD too, though it isn't a branch to
+                   merge into or drop commits on, as `head` would make it. -->
+              <span v-else-if="row.head || row.detached || row.ahead || row.behind" class="pill">
+                <span v-if="row.head || row.detached">HEAD</span>
                 <span v-if="row.head && (row.ahead || row.behind)" class="pill-divider" />
                 <span v-if="row.ahead" class="pill-count" :title="`${row.ahead} ahead of upstream`">
                   <ArrowUp :size="12" :stroke-width="2.25" />{{ row.ahead }}

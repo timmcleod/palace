@@ -765,6 +765,8 @@ function sidebarMenu(row, event) {
     tag: () => actions.tagMenu(name),
     stash: () => actions.stashMenu(Number(name)),
     worktree: () => actions.worktreeMenu(name),
+    // HEAD's commit, while it's detached: the only Workspace row with a menu.
+    workspace: () => (name === "history" ? actions.detachedMenu() : null),
     // A remote's own row, not a folder of its branches ("origin/feature/").
     remote: () => {
       const remote = name.replace(/\/$/, "");
@@ -1252,22 +1254,24 @@ onMounted(() => {
 
 // --- Which history is shown --------------------------------------------------------
 
-// Selecting a ref in the sidebar shows its history; Workspace › History goes back to
-// HEAD. A stash opens in the Stashes view. Other items (folders, Settings, …) leave
+// Selecting a ref in the sidebar shows its history; HEAD's commit, while it's detached,
+// shows HEAD's. A stash opens in the Stashes view. Other items (folders, Settings, …) leave
 // the history pane as it is.
 const HISTORY_KINDS = ["branch", "remote-branch", "tag"];
 
 // The current branch's history is shown by selecting that branch in the sidebar.
-// "workspace:history" is HEAD's history without a sidebar row, for a detached HEAD.
+// "workspace:history" is HEAD's history while it's detached, the first row in Branches
+// then (see sidebarRows.js); on a branch it has no row.
 function headHistoryKey(o) {
   return o?.head.branch ? `branch:${o.head.branch}` : "workspace:history";
 }
 
-// Checking out another branch while looking at the current one follows it there.
+// Checking out another branch while looking at the current one follows it there, as
+// does checking one out, or making one, while looking at HEAD detached: its row goes.
 watch(
   () => overview.value?.head.branch,
   (branch, previous) => {
-    if (previous && selected.value === `branch:${previous}`) selected.value = headHistoryKey(overview.value);
+    if (selected.value === (previous ? `branch:${previous}` : "workspace:history")) selected.value = headHistoryKey(overview.value);
   },
 );
 

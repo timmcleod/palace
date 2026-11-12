@@ -358,6 +358,18 @@ describe("cherry-picking", () => {
   });
 });
 
+test("HEAD detached, its menu makes a branch where it is, without asking about leaving it", async () => {
+  const { actions, ran } = actionsOn({ head: { branch: null, short_id: "4cbad69" }, branches: [branch("main")] });
+  vi.mocked(openForm).mockResolvedValue({ name: "keep-this", checkout: true, publish: false });
+  await item(actions.detachedMenu(), "New Branch Here…").action();
+  expect(vi.mocked(openForm).mock.calls[0][0].message).toBe("The branch will start at 4cbad69.");
+  expect(askConfirm).not.toHaveBeenCalled();
+  expect(ran()).toEqual([["create_branch", { name: "keep-this", start: null, checkout: true }]]);
+  // Mid-rebase, which detaches HEAD as it goes, git won't switch to a new branch.
+  const rebasing = actionsOn({ head: { branch: null, short_id: "4cbad69" }, operation: "rebase" }).actions;
+  expect(item(rebasing.detachedMenu(), "New Branch Here…").disabled).toBe(true);
+});
+
 test("a commit's menu resets the branch whose history is shown, and only rewrites what can be", () => {
   const commit = { id: "abc1234def", short_id: "abc1234" };
   const { actions } = actionsOn();
