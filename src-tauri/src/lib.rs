@@ -5,6 +5,7 @@ mod cli;
 mod commit;
 mod compare;
 mod config;
+mod conflict;
 mod errors;
 mod files;
 mod git;
@@ -257,6 +258,7 @@ pub fn run() {
             working::discard_files,
             working::discard_hunk,
             working::head_commit,
+            conflict::conflict_sides,
             working::conflict_file,
             working::resolve_conflict,
             working::resolve_conflict_block,

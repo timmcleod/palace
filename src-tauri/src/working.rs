@@ -110,8 +110,9 @@ pub async fn conflict_file(path: String, file: String) -> Result<String, String>
 }
 
 /// Resolves a conflicted file by taking one side ("current" is HEAD's version,
-/// "incoming" is the change being merged, rebased or applied), or with "resolved",
-/// by staging it as it is in the working copy.
+/// "incoming" is the change being merged, rebased or applied), with "resolved", by
+/// staging it as it is in the working copy, or with "deleted", by deleting it, as for a
+/// file one side deleted.
 #[tauri::command]
 pub async fn resolve_conflict(path: String, file: String, side: String) -> Result<(), String> {
     resolve(&path, &file, &side, &move_to_trash)
@@ -526,15 +527,20 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&[PathBuf]) 
 /// any merging done in it by hand.
 fn resolve(path: &str, file: &str, side: &str, backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
     let flag = match side {
-        "current" => "--ours",
-        "incoming" => "--theirs",
+        "current" => Some("--ours"),
+        "incoming" => Some("--theirs"),
         "resolved" => return stage(path, &[file.to_string()]),
+        "deleted" => None,
         _ => return Err(format!("Unknown side: {side}")),
     };
     let full = crate::cli::workdir(path)?.join(file);
     if full.symlink_metadata().is_ok() {
         backup(&full)?;
     }
+    let Some(flag) = flag else {
+        // Backed up, it goes, whatever it has in it now.
+        return git(path, &["rm", "-q", "-f", "--ignore-unmatch", "--", file], None).map(drop);
+    };
     match git(path, &["checkout", flag, "--", file], None) {
         Ok(_) => stage(path, &[file.to_string()]),
         // That side deleted the file, so taking it means deleting the file.
@@ -1190,6 +1196,17 @@ mod tests {
         resolve(t.path(), "gone.txt", "incoming", &keep).unwrap();
         assert!(!t.dir.join("gone.txt").exists());
         assert!(read_status(&t.repo).unwrap().iter().all(|f| !f.conflicted));
+    }
+
+    #[test]
+    fn resolving_by_deleting_the_file() {
+        let t = merge_conflict("conflict-delete");
+        resolve(t.path(), "gone.txt", "deleted", &keep).unwrap();
+        assert!(!t.dir.join("gone.txt").exists());
+        // No longer conflicted: its deletion is staged, to commit.
+        let gone = read_status(&t.repo).unwrap().into_iter().find(|f| f.path == "gone.txt").unwrap();
+        assert!(!gone.conflicted);
+        assert_eq!(gone.staged, Some("deleted"));
     }
 
     #[test]
