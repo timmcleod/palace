@@ -8,7 +8,7 @@ use crate::cli::{git, git_input};
 use crate::commit::{FileDiff, file_diff_at};
 use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Patch, Repository, StatusOptions, Tree};
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
 pub struct WorkingFile {
@@ -73,7 +73,7 @@ pub async fn stage_hunk(
 /// a mistaken discard can be recovered.
 #[tauri::command]
 pub async fn discard_files(path: String, files: Vec<String>) -> Result<(), String> {
-    discard(&path, &files, &move_to_trash)
+    discard(&path, &files, &move_all_to_trash)
 }
 
 /// Throws away one hunk of a file's unstaged changes, or only the chosen `lines` of it.
@@ -471,7 +471,7 @@ fn read_head_commit(path: &str) -> Result<Option<HeadCommit>, git2::Error> {
     }))
 }
 
-pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&[PathBuf]) -> Result<(), String>) -> Result<(), String> {
     let repo = Repository::discover(path).map_err(message)?;
     let workdir = repo.workdir().ok_or("This repository has no working copy.")?.to_path_buf();
     let head = head_tree(&repo).map_err(message)?;
@@ -492,11 +492,11 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&Path) -> Re
         let name = folder.trim_end_matches('/');
         return Err(format!("{name} is a repository of its own (a submodule), so its changes are inside it. Open it in Palace to discard them there."));
     }
-    for target in &targets {
-        let full = workdir.join(target);
-        if full.symlink_metadata().is_ok() {
-            backup(&full)?;
-        }
+    // All at once: on macOS each move to the Trash is the Finder's, with its sound, and
+    // discarding many files played it once for each.
+    let present: Vec<PathBuf> = targets.iter().map(|t| workdir.join(t)).filter(|full| full.symlink_metadata().is_ok()).collect();
+    if !present.is_empty() {
+        backup(&present)?;
     }
 
     // Files HEAD knows about are restored from it; anything newer is dropped from the
@@ -618,6 +618,15 @@ fn is_marker(line: &str, marker: char) -> bool {
 
 pub(crate) fn move_to_trash(file: &Path) -> Result<(), String> {
     trash::delete(file).map_err(|e| format!("Couldn't move {} to the Trash: {e}", file.display()))
+}
+
+/// Moves `files` to the Trash together, as the Finder does a selection: with its sound
+/// once, rather than once for each file.
+pub(crate) fn move_all_to_trash(files: &[PathBuf]) -> Result<(), String> {
+    match files {
+        [file] => move_to_trash(file),
+        _ => trash::delete_all(files).map_err(|e| format!("Couldn't move the files to the Trash: {e}")),
+    }
 }
 
 /// Removes directories left empty by discarding new files, as git clean would.
@@ -912,6 +921,11 @@ mod tests {
         }
     }
 
+    /// As backup_into, for files moved together, as discarding does.
+    fn backup_all_into(dir: &Path) -> impl Fn(&[PathBuf]) -> Result<(), String> + '_ {
+        move |files: &[PathBuf]| files.iter().try_for_each(|file| backup_into(dir)(file))
+    }
+
     fn read(t: &TempRepo, file: &str) -> Option<String> {
         std::fs::read_to_string(t.dir.join(file)).ok()
     }
@@ -932,7 +946,15 @@ mod tests {
 
         let backup = t.dir.with_extension("backup");
         let files = ["kept.txt", "gone.txt", "new-dir/untracked.txt", "added.txt"].map(String::from);
-        discard(t.path(), &files, &backup_into(&backup)).unwrap();
+        // Together, so on macOS the Trash's sound plays once rather than for each.
+        let moves = std::cell::Cell::new(0);
+        let backup_all = backup_all_into(&backup);
+        discard(t.path(), &files, &|files: &[PathBuf]| {
+            moves.set(moves.get() + 1);
+            backup_all(files)
+        })
+        .unwrap();
+        assert_eq!(moves.get(), 1);
 
         assert_eq!(statuses(&t), []);
         assert_eq!(read(&t, "kept.txt").as_deref(), Some("original\n"));
@@ -955,7 +977,7 @@ mod tests {
 
         stage(t.path(), &["*.txt".into()]).unwrap();
         let backup = t.dir.with_extension("backup");
-        discard(t.path(), &["[id].tsx".into(), "*.txt".into()], &backup_into(&backup)).unwrap();
+        discard(t.path(), &["[id].tsx".into(), "*.txt".into()], &backup_all_into(&backup)).unwrap();
         let _ = std::fs::remove_dir_all(&backup);
 
         assert_eq!(read(&t, "[id].tsx").as_deref(), Some("1\n"));
@@ -976,7 +998,7 @@ mod tests {
         t.write(&[("sub/b.txt", Some("changed\n"))]);
 
         let backup = t.dir.join("backup");
-        let refused = discard(t.path(), &["sub".into()], &backup_into(&backup)).unwrap_err();
+        let refused = discard(t.path(), &["sub".into()], &backup_all_into(&backup)).unwrap_err();
         assert!(refused.contains("submodule"), "{refused}");
         assert_eq!(read(&t, "sub/b.txt").as_deref(), Some("changed\n"));
         assert!(!backup.exists());
@@ -990,7 +1012,7 @@ mod tests {
         assert_eq!(statuses(&t), [("new.txt".into(), Some("renamed"), None)]);
 
         let backup = t.dir.with_extension("backup");
-        discard(t.path(), &["new.txt".into()], &backup_into(&backup)).unwrap();
+        discard(t.path(), &["new.txt".into()], &backup_all_into(&backup)).unwrap();
 
         assert_eq!(statuses(&t), []);
         assert_eq!(read(&t, "old.txt").as_deref(), Some("content\n"));
@@ -1005,7 +1027,7 @@ mod tests {
         stage(t.path(), &["a.txt".into()]).unwrap();
 
         let backup = t.dir.with_extension("backup");
-        discard(t.path(), &["a.txt".into()], &backup_into(&backup)).unwrap();
+        discard(t.path(), &["a.txt".into()], &backup_all_into(&backup)).unwrap();
 
         assert_eq!(statuses(&t), []);
         let _ = std::fs::remove_dir_all(&backup);

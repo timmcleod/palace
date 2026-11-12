@@ -578,7 +578,7 @@ mod tests {
     /// Discards the way the app does, except that files go nowhere instead of the Trash.
     fn discard(t: &TempRepo, paths: &[&str]) {
         let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-        crate::working::discard(t.path(), &paths, &|f| fs::remove_file(f).map_err(|e| e.to_string())).unwrap();
+        crate::working::discard(t.path(), &paths, &|files: &[std::path::PathBuf]| files.iter().try_for_each(|f| fs::remove_file(f).map_err(|e| e.to_string()))).unwrap();
     }
 
     #[test]
