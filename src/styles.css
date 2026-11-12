@@ -218,6 +218,40 @@
   opacity: 0.6;
 }
 
+/* And a veil fades in over the whole window, lightening the light theme and dimming
+   the dark one a little, so the window in front stands out from the rest. Clicks go
+   through it, to whatever's under it, as a click brings the window to the front. Over
+   everything, dialogs and menus too, as they're the window's. */
+:root {
+  --inactive-veil: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme="dark"] {
+  --inactive-veil: rgba(6, 10, 18, 0.15);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  background: var(--inactive-veil);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+:root[data-inactive] body::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::after,
+  .toolbar > * {
+    transition: none;
+  }
+}
+
 /* Settings › Diffs can switch to the traditional green and red. */
 :root[data-diff-colors="classic"] {
   --diff-added-bg: #dafbe1;
