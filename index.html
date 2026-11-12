@@ -85,7 +85,9 @@ Download
 <button type="button" class="pl-seg" data-shot="dark" aria-pressed="false" style="min-height: 36px; padding: 0 16px; border: 0; border-radius: 7px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;">Dark theme</button>
 </div>
 <figure style="margin: 0; width: 100%; border-radius: 12px; overflow: hidden; line-height: 0; box-shadow: 0 30px 80px rgba(19,26,38,0.22), 0 0 0 1px rgba(19,26,38,0.08)">
-<img id="hero-shot" src="assets/hero-light.webp" alt="Palace in the light theme, showing the lantern repository: the Working Copy with four changed files and a commit message started, the diff for src/components/NoteEditor.vue with Stage Chunk and Discard Chunk on each change, and Claude Code running in a Claude tab in the terminal panel below" width="1600" height="1041" style="display: block; width: 100%; height: auto">
+<!-- Both themes are in the page, so the toggle shows one that has already loaded -->
+<img class="hero-shot" data-shot="light" src="assets/hero-light.webp" alt="Palace in the light theme, showing the lantern repository: the Working Copy with four changed files and a commit message started, the diff for src/components/NoteEditor.vue with Stage Chunk and Discard Chunk on each change, and Claude Code running in a Claude tab in the terminal panel below" width="1600" height="1041" style="display: block; width: 100%; height: auto">
+<img class="hero-shot" data-shot="dark" src="assets/hero-dark.webp" alt="Palace in the dark theme, showing the lantern repository: the Working Copy with four changed files and a commit message started, the diff for src/components/NoteEditor.vue with Stage Chunk and Discard Chunk on each change, and Claude Code running in a Claude tab in the terminal panel below" width="1600" height="1041" style="display: none; width: 100%; height: auto">
 </figure>
 </div>
 </div>
@@ -441,25 +443,27 @@ To github.com:you/your-project.git
 </div>
 <script>
 (function () {
-  var img = document.getElementById('hero-shot');
+  var images = document.querySelectorAll('.hero-shot');
   var buttons = document.querySelectorAll('.pl-seg[data-shot]');
   function show(shot) {
-    img.src = 'assets/hero-' + shot + '.webp';
-    img.alt = img.alt.replace(/the (light|dark) theme/, 'the ' + shot + ' theme');
+    images.forEach(function (i) { i.style.display = i.dataset.shot === shot ? 'block' : 'none'; });
     buttons.forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.shot === shot ? 'true' : 'false'); });
   }
   buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.shot); }); });
   if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) show('dark');
+  // A hidden picture is downloaded but may not be decoded until it's shown, which can
+  // leave the frame blank for a moment on switching; decode both now.
+  images.forEach(function (i) { if (i.decode) i.decode().catch(function () {}); });
 })();
 </script>
 <script>
-// The pictures the toggles switch to, fetched and decoded once the page has loaded, so
-// switching shows them at once rather than after they download. Kept, so the browser
-// keeps them decoded.
+// The pictures the GitHub toggle switches to, fetched and decoded once the page has
+// loaded, so switching shows them at once rather than after they download. Kept, so the
+// browser keeps them decoded.
 (function () {
   var kept = [];
   window.addEventListener('load', function () {
-    ['assets/hero-light.webp', 'assets/hero-dark.webp', 'assets/issues.webp', 'assets/pull-requests.webp'].forEach(function (src) {
+    ['assets/issues.webp', 'assets/pull-requests.webp'].forEach(function (src) {
       var picture = new Image();
       picture.src = src;
       if (picture.decode) picture.decode().catch(function () {});
