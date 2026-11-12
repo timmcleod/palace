@@ -1,7 +1,8 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import CommitDetails from "./CommitDetails.vue";
+import { settings } from "../lib/settings.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 // Avatars listen for pictures fetched in the background.
@@ -156,4 +157,120 @@ test("keeps showing a commit handed over again as a new object with the same id"
   for (let i = 0; i < 4; i++) await nextTick();
   expect(loads()).toBe(1);
   expect(document.querySelector(".heading")).toBe(shown);
+});
+
+// A file's diff, opened, loads as it comes into view, which here is at once.
+class SeenAtOnce {
+  constructor(callback) {
+    this.callback = callback;
+  }
+  observe() {
+    this.callback([{ isIntersecting: true }]);
+  }
+  disconnect() {}
+}
+
+const twoFiles = () => details({ files: ["a.js", "b.js"].map((path) => ({ path, old_path: null, status: "modified", binary: false, additions: 1, deletions: 0 })) });
+const aDiff = { binary: false, total_lines: 1, truncated: false, hunks: [{ header: "@@ -1 +1 @@", lines: [{ kind: "+", old: null, new: 1, text: "x" }] }], images: null };
+// Lets what's awaited, and Vue's updates after it, finish.
+const flush = () => new Promise((resolve) => setTimeout(resolve));
+
+// Mounts a commit of two files, whose diffs come only when `answers` answers them.
+async function mountSliding() {
+  vi.stubGlobal("IntersectionObserver", SeenAtOnce);
+  // Highlighting runs in a Web Worker, which the tests don't have; the diff shows plain.
+  settings.syntaxHighlighting = false;
+  await mount(twoFiles());
+  const answers = [];
+  vi.mocked(invoke).mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+  return answers;
+}
+
+describe("a file's diff", () => {
+  const highlighting = settings.syntaxHighlighting;
+  const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  afterEach(() => {
+    // Gone first, so highlighting turned back on doesn't reach for a Web Worker.
+    app?.unmount();
+    app = null;
+    settings.syntaxHighlighting = highlighting;
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    delete HTMLElement.prototype.animate;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+  });
+
+  test("clicked open, waits for the diff, rather than showing Loading… first; Expand All doesn't wait", async () => {
+    const answers = await mountSliding();
+    document.querySelector(".file-header").click();
+    await nextTick();
+    expect(document.querySelector(".file-diff").classList).toContain("waiting");
+    answers[0](aDiff);
+    await flush();
+    expect(document.querySelector(".file-diff").classList).not.toContain("waiting");
+
+    // Both open, b.js not waiting, its Loading… shown as it is.
+    document.querySelector(".changes-bar .link-button").click();
+    await nextTick();
+    const [, b] = document.querySelectorAll(".file-diff");
+    expect(b.classList).not.toContain("waiting");
+    expect(b.textContent).toContain("Loading…");
+  });
+
+  test("clicked open and closed again with Collapse All before it came, opens at once with Expand All", async () => {
+    await mountSliding();
+    document.querySelector(".file-header").click();
+    await nextTick();
+    // Expand All, the other's not open yet; then Collapse All, and Expand All again.
+    const toggleAll = async () => {
+      document.querySelector(".changes-bar .link-button").click();
+      await flush();
+    };
+    await toggleAll();
+    await toggleAll();
+    await toggleAll();
+    const [a] = document.querySelectorAll(".file-diff");
+    expect(a.classList).not.toContain("waiting");
+  });
+
+  test("taking a while, shows Loading… after a moment rather than seeming to do nothing", async () => {
+    const answers = await mountSliding();
+    vi.useFakeTimers();
+    document.querySelector(".file-header").click();
+    await nextTick();
+    vi.advanceTimersByTime(400);
+    await nextTick();
+    const diff = document.querySelector(".file-diff");
+    expect(diff.classList).not.toContain("waiting");
+    expect(diff.textContent).toContain("Loading…");
+    expect(answers).toHaveLength(1);
+  });
+
+  test("clicked shut, slides closed; Collapse All closes at once", async () => {
+    const answers = await mountSliding();
+    const slides = [];
+    // The tests' page lays nothing out: each element is given a height, to slide from.
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 120 });
+    HTMLElement.prototype.animate = function (frames) {
+      slides.push(frames.at(-1).height);
+      return { finished: Promise.resolve(), cancel() {} };
+    };
+    document.querySelector(".file-header").click();
+    answers.forEach((answer) => answer(aDiff));
+    await flush();
+    document.querySelector(".file-header").click();
+    await flush();
+    expect(slides.at(-1)).toBe("0px");
+    expect(document.querySelectorAll(".file-diff")).toHaveLength(0);
+
+    const before = slides.length;
+    document.querySelector(".changes-bar .link-button").click();
+    await flush();
+    answers.forEach((answer) => answer(aDiff));
+    await flush();
+    document.querySelector(".changes-bar .link-button").click();
+    await flush();
+    expect(slides).toHaveLength(before);
+    expect(document.querySelectorAll(".file-diff")).toHaveLength(0);
+  });
 });

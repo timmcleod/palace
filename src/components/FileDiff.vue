@@ -1,6 +1,7 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { slideOpen } from "../lib/slide.js";
 import DiffTable from "./DiffTable.vue";
 
 // One file's diff within a commit, or within a comparison of two revisions.
@@ -12,6 +13,9 @@ const props = defineProps({
   index: { type: Number, required: true },
   // The file's path in the repository.
   file: { type: String, default: null },
+  // Opened by a click on it: it slides open once its diff has come, rather than showing
+  // "Loading…" first and then the diff in its place, each moving what's below.
+  slide: { type: Boolean, default: false },
 });
 
 // "loaded" says the diff has come, as when it shows after "Loading…".
@@ -31,6 +35,22 @@ const where = computed(() =>
   props.comparison ? `compare:${props.comparison.base}..${props.comparison.head}` : props.commitId ? `commit:${props.commitId}` : null,
 );
 
+// Hidden, at no height, until there's something to slide open to: the diff, why it
+// couldn't be read, or, should it take a while, "Loading…", rather than seeming to do
+// nothing.
+const WAIT_MS = 400;
+const shown = ref(!props.slide);
+let waiting = props.slide ? setTimeout(reveal, WAIT_MS) : null;
+async function reveal() {
+  clearTimeout(waiting);
+  if (shown.value) return;
+  shown.value = true;
+  await nextTick();
+  // Not an image's: its height isn't known until the picture's loaded, so it would slide
+  // open short of it and then jump the rest of the way.
+  if (root.value && !diff.value?.images) slideOpen(root.value);
+}
+
 async function load(maxLines) {
   loading.value = true;
   try {
@@ -44,6 +64,7 @@ async function load(maxLines) {
     error.value = String(e);
   } finally {
     loading.value = false;
+    reveal();
   }
 }
 
@@ -63,18 +84,33 @@ onMounted(() => {
   );
   observer.observe(root.value);
 });
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  clearTimeout(waiting);
+});
 </script>
 
 <template>
-  <div ref="root" class="file-diff">
-    <DiffTable v-if="diff" :diff="diff" :file="file" :repo="path" :where="where" :loading-all="loading" @show-all="load(null)" />
-    <p v-else class="notice" :class="{ error }">{{ error || "Loading…" }}</p>
+  <div ref="root" class="file-diff" :class="{ waiting: !shown }">
+    <div class="inner">
+      <DiffTable v-if="diff" :diff="diff" :file="file" :repo="path" :where="where" :loading-all="loading" @show-all="load(null)" />
+      <p v-else class="notice" :class="{ error }">{{ error || "Loading…" }}</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .file-diff {
+  /* Holds the margin below inside it, so it slides open and closed with the rest. */
+  display: flow-root;
+}
+
+.file-diff.waiting {
+  height: 0;
+  overflow: hidden;
+}
+
+.inner {
   margin: 0 16px 12px;
 }
 

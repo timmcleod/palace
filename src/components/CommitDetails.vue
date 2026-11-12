@@ -13,6 +13,7 @@ import { howCommitted, readMessage } from "../lib/commitMessage.js";
 import { signingAgent } from "../lib/agents.js";
 import { formatBeside, shortHash } from "../lib/format.js";
 import { handoff } from "../lib/scrollHandoff.js";
+import { slideClosed } from "../lib/slide.js";
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -34,6 +35,13 @@ const emit = defineEmits(["show-issue"]);
 const details = shallowRef(null);
 const error = ref("");
 const expanded = reactive(new Set());
+// A file opened or closed with a click slides, one at a time (see slide.js). Expand All
+// and Collapse All don't: hundreds of diffs sliding at once would stutter. `opening`
+// holds the one clicked open until its diff's drawn, which it reads as it's made, and
+// `closing` the one clicked shut. A file drawn again as it's scrolled back to, as in a
+// long list, doesn't slide.
+const opening = new Set();
+let closing = null;
 // File diffs load as they scroll into view within this element.
 const scroller = ref(null);
 provide("diffScroller", scroller);
@@ -53,6 +61,8 @@ async function load() {
   details.value = null;
   error.value = "";
   expanded.clear();
+  opening.clear();
+  closing = null;
 
   try {
     const result = props.comparison
@@ -215,15 +225,25 @@ function toggleAll() {
   }
 }
 
+function onLeave(index, el, done) {
+  if (index !== closing) return done();
+  closing = null;
+  slideClosed(el).then(done);
+}
+
 function toggle(index) {
   if (expanded.has(index)) {
+    closing = index;
+    opening.delete(index);
     expanded.delete(index);
     // Its kept height goes with it (see "Drawing only the files in view").
     heights[index] = ROW_HEIGHT;
     held.delete(index);
     layout.value++;
   } else {
+    opening.add(index);
     expanded.add(index);
+    nextTick(() => opening.delete(index));
   }
 }
 
@@ -370,15 +390,18 @@ function splitPath(path) {
                   <span v-if="file.deletions" class="minus">−{{ file.deletions }}</span>
                 </span>
               </div>
-              <FileDiff
-                v-if="expanded.has(i)"
-                :path="path"
-                :commit-id="details.id ?? null"
-                :comparison="comparison"
-                :index="i"
-                :file="file.path"
-                @loaded="held.delete(i)"
-              />
+              <Transition :css="false" @leave="(el, done) => onLeave(i, el, done)">
+                <FileDiff
+                  v-if="expanded.has(i)"
+                  :path="path"
+                  :commit-id="details.id ?? null"
+                  :comparison="comparison"
+                  :index="i"
+                  :file="file.path"
+                  :slide="opening.has(i)"
+                  @loaded="held.delete(i)"
+                />
+              </Transition>
             </div>
           </div>
         </div>
