@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeJson } from "../lib/storage.js";
+import { listedOrder } from "../lib/workingOrder.js";
 import WorkingCopy from "./WorkingCopy.vue";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -174,6 +175,24 @@ describe("the changed files", () => {
 
 describe("in the tree, the arrow keys", () => {
   afterEach(() => writeJson("palace.workingCopyTree", false));
+
+  // What goes by the files in the order they're listed, as going on to the next
+  // conflicted file does, takes it from listedOrder: it's the order the tree draws.
+  test("go through the files in the order listedOrder gives", async () => {
+    writeJson("palace.workingCopyTree", true);
+    const { statusFiles } = show();
+    // As git gives them: by path, capitals first.
+    const files = ["README.md", "Z.txt", "docs/Guide.md", "src/b.js", "src/lib/a.js", "src/a.js"].map((path) => file(path));
+    statusFiles.value = files;
+    await settle();
+    const list = document.querySelector(".files");
+    for (let i = 0; i < document.querySelectorAll(".file").length; i++) {
+      list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      await settle();
+    }
+    // Folders chosen on the way show no file.
+    expect(selected.filter(Boolean)).toEqual(listedOrder(files, true).map((f) => f.path));
+  });
 
   test("go through folders and files, open and close folders, and go up to the one a file's in", async () => {
     writeJson("palace.workingCopyTree", true);

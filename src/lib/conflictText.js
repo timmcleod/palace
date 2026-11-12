@@ -2,6 +2,8 @@
 // a conflict each line is in, and how many conflicts are left. And, among the working
 // copy's files, which conflicted one comes next.
 
+import { listedOrder } from "./workingOrder.js";
+
 // Whether a line is one of git's markers: exactly seven of `char`, then the end of the
 // line or, except for =======, a space and a label. A Markdown underline isn't one.
 function isMarker(line, char) {
@@ -52,16 +54,19 @@ export const conflictCount = (text) => conflictLines(text).filter((line) => line
  * show next, or null to stay, with none left, or with another file chosen meanwhile,
  * `shown` no longer the one resolved.
  */
-export function afterResolving(files, from, shown) {
+export function afterResolving(files, from, shown, asTree) {
   if (files.find((f) => f.path === from)?.conflicted) return undefined;
-  return shown === from ? nextConflicted(files, from) : null;
+  return shown === from ? nextConflicted(files, from, asTree) : null;
 }
 
 /**
  * The conflicted file to go to after the one at `path`, among the working copy's
- * `files`: the next one after it, or the first, past the end; null for none left.
+ * `files`: the next one after it as Working Copy lists them (see listedOrder), or the
+ * first, past the end; null for none left.
  */
-export function nextConflicted(files, path) {
-  const conflicted = (files ?? []).filter((f) => f.conflicted && f.path !== path);
-  return conflicted.find((f) => f.path > path) ?? conflicted[0] ?? null;
+export function nextConflicted(files, path, asTree) {
+  const listed = listedOrder(files ?? [], asTree);
+  const at = listed.findIndex((f) => f.path === path);
+  const after = [...listed.slice(at + 1), ...listed.slice(0, Math.max(at, 0))];
+  return after.find((f) => f.conflicted && f.path !== path) ?? null;
 }

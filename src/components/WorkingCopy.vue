@@ -10,7 +10,8 @@ import { useIssueSuggestions } from "../lib/issueSuggestions.js";
 import IssueSuggestions from "./IssueSuggestions.vue";
 import FileIcon from "./FileIcon.vue";
 import { useWindowed } from "../lib/windowed.js";
-import { onSavedElsewhere, readJson, writeJson } from "../lib/storage.js";
+import { onSavedElsewhere, writeJson } from "../lib/storage.js";
+import { TREE_KEY, listsAsTree } from "../lib/workingOrder.js";
 
 // The list of changed files with staging checkboxes, and the commit form below it.
 const props = defineProps({
@@ -325,8 +326,7 @@ function goToRow(index) {
 // with the button above them and kept for next time, in every window. A folder's box
 // stages or unstages every file in it; its row opens and closes it.
 
-const TREE_KEY = "palace.workingCopyTree";
-const asTree = ref(readJson(TREE_KEY, false) === true);
+const asTree = ref(listsAsTree());
 watch(asTree, (on) => {
   writeJson(TREE_KEY, on);
   folderCursor.value = null;

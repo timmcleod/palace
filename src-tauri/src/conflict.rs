@@ -45,10 +45,8 @@ pub async fn conflict_sides(path: String, file: String) -> Result<Sides, String>
 
 fn sides(repo: &Repository, file: &str) -> Sides {
     let operation = operation(repo);
-    // A rebase or the like keeps what it's doing in the repository's own .git, which
-    // for a worktree is its own, not the one shared.
     let gitdir = repo.path();
-    let rebase_file = |name: &str| ["rebase-merge", "rebase-apply"].iter().find_map(|dir| first_line(&gitdir.join(dir).join(name)));
+    let rebase_file = |name: &str| rebase_file(gitdir, name);
     let current = if operation == Some("rebase") {
         rebase_file("onto").and_then(|onto| resolve(repo, &onto)).map(|onto| {
             let mut side = named(repo, onto, rebased_onto(repo));
@@ -58,22 +56,41 @@ fn sides(repo: &Repository, file: &str) -> Sides {
     } else {
         head_side(repo)
     };
-    let incoming = match operation {
-        // Merging several branches at once, git stops at the first that conflicts, the
-        // last listed: those before it are merged already, into the current side.
-        Some("merge") => last_line(&gitdir.join("MERGE_HEAD")).and_then(|id| resolve(repo, &id)).map(|oid| named(repo, oid, merged(gitdir))),
-        // REBASE_HEAD, as git has written since 2.17; stopped-sha before that.
-        Some("rebase") => first_line(&gitdir.join("REBASE_HEAD")).or_else(|| rebase_file("stopped-sha")).and_then(|id| commit(repo, &id)),
-        Some("cherry-pick") => first_line(&gitdir.join("CHERRY_PICK_HEAD")).and_then(|id| commit(repo, &id)),
-        Some("revert") => first_line(&gitdir.join("REVERT_HEAD")).and_then(|id| commit(repo, &id)),
-        _ => None,
-    };
+    // The branch merged in, by name; a commit replayed, picked or reverted, by itself,
+    // though a branch may be at it too.
+    let incoming = stopped_at(repo).map(|oid| if operation == Some("merge") { named(repo, oid, merged(gitdir)) } else { commit_side(repo, oid) });
     let rebasing = (operation == Some("rebase"))
         .then(|| rebase_file("head-name"))
         .flatten()
         .and_then(|name| name.strip_prefix("refs/heads/").map(String::from));
     let (deleted_in, added) = missing_from(repo, file);
     Sides { operation, current, incoming, rebasing, deleted_in, added }
+}
+
+/// The commit the merge, rebase, cherry-pick or revert under way has stopped at: its
+/// incoming side. A rebase or cherry-pick of several commits moves on to the next one
+/// on Skip, or on Continue, which may drop one left empty without moving HEAD, so undo
+/// keeps this too, to put a conflict back only at the commit it was resolved at.
+pub(crate) fn stopped_at(repo: &Repository) -> Option<Oid> {
+    // Kept in the repository's own .git, which for a worktree is its own, not the one
+    // shared.
+    let gitdir = repo.path();
+    let id = match operation(repo)? {
+        // Merging several branches at once, git stops at the first that conflicts, the
+        // last listed: those before it are merged already, into the current side.
+        "merge" => last_line(&gitdir.join("MERGE_HEAD")),
+        // REBASE_HEAD, as git has written since 2.17; stopped-sha before that.
+        "rebase" => first_line(&gitdir.join("REBASE_HEAD")).or_else(|| rebase_file(gitdir, "stopped-sha")),
+        "cherry-pick" => first_line(&gitdir.join("CHERRY_PICK_HEAD")),
+        "revert" => first_line(&gitdir.join("REVERT_HEAD")),
+        _ => None,
+    }?;
+    resolve(repo, &id)
+}
+
+/// A file a rebase keeps of what it's doing, by either of git's ways of rebasing.
+fn rebase_file(gitdir: &Path, name: &str) -> Option<String> {
+    ["rebase-merge", "rebase-apply"].iter().find_map(|dir| first_line(&gitdir.join(dir).join(name)))
 }
 
 /// Which side doesn't have `file`, and whether it was added rather than deleted: in the
@@ -115,6 +132,10 @@ fn head_side(repo: &Repository) -> Option<Side> {
 /// branch at it, local first; or else by its short hash and subject. Of several branches
 /// at one commit, the one typed is what the user had in mind.
 fn named(repo: &Repository, oid: Oid, typed: Option<String>) -> Side {
+    // A commit's id, as a pull rebasing writes, names nothing; a full ref, as a rebase
+    // onto the upstream writes, is named as the sidebar names it: "main", not
+    // "refs/heads/main".
+    let typed = typed.filter(|name| Oid::from_str(name).map_or(true, |id| id.to_string() != *name)).map(|name| short_ref(&name));
     if let Some(name) = typed.filter(|name| resolve(repo, name) == Some(oid)) {
         return Side { name, subject: None, ahead: 0 };
     }
@@ -130,11 +151,18 @@ fn named(repo: &Repository, oid: Oid, typed: Option<String>) -> Side {
     }
 }
 
-/// What the rebase was started onto, as typed: HEAD's reflog says, as
-/// "rebase (start): checkout main".
+fn short_ref(name: &str) -> String {
+    ["refs/heads/", "refs/remotes/", "refs/tags/"].iter().find_map(|prefix| name.strip_prefix(prefix)).unwrap_or(name).to_string()
+}
+
+/// What the rebase was started onto, as typed: HEAD's reflog says, as "rebase (start):
+/// checkout main", or "pull --rebase (start): checkout …" for one a pull started. Only
+/// the latest start is this rebase's, so the search stops there, rather than going on
+/// through the whole reflog on each look, as the view looks on every refresh.
 fn rebased_onto(repo: &Repository) -> Option<String> {
     let reflog = repo.reflog("HEAD").ok()?;
-    reflog.iter().find_map(|entry| entry.message().ok().flatten().and_then(|m| m.strip_prefix("rebase (start): checkout ")).map(String::from))
+    let start = reflog.iter().find_map(|entry| entry.message().ok().flatten().filter(|m| m.contains("(start): checkout ")).map(String::from))?;
+    start.split_once("(start): checkout ").map(|(_, name)| name.to_string())
 }
 
 /// The branch being merged, last of those named, as MERGE_MSG names them: "Merge
@@ -145,11 +173,6 @@ fn merged(gitdir: &Path) -> Option<String> {
     let quoted: Vec<&str> = subject.split('\'').collect();
     // Between quotes, the names: every other piece, from the second.
     quoted.iter().skip(1).step_by(2).rfind(|name| !name.is_empty()).map(|name| name.to_string())
-}
-
-/// A commit picked, reverted or replayed: by itself, though a branch may be at it too.
-fn commit(repo: &Repository, id: &str) -> Option<Side> {
-    resolve(repo, id).map(|oid| commit_side(repo, oid))
 }
 
 fn commit_side(repo: &Repository, oid: Oid) -> Side {
@@ -247,6 +270,17 @@ mod tests {
         assert!(git(t.path(), &["revert", "--no-edit", "HEAD~1"], None).is_err());
         let s = sides(&t.repo, "a.txt");
         assert_eq!((s.operation, s.incoming), (Some("revert"), side(&reverted, Some("Change on main"))));
+    }
+
+    // As git writes it rebasing onto the upstream, or pulling: a full ref, named as the
+    // sidebar names it, or a commit's id, which names nothing.
+    #[test]
+    fn a_full_ref_is_named_short_and_a_commit_id_not_at_all() {
+        let (t, main) = diverged("conflict-typed");
+        let at = t.repo.revparse_single(&main).unwrap().id();
+        assert_eq!(named(&t.repo, at, Some(format!("refs/heads/{main}"))).name, main);
+        // Some other name for it, a branch at it, rather than its 40 characters.
+        assert_eq!(named(&t.repo, at, Some(at.to_string())).name, main);
     }
 
     #[test]

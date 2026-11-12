@@ -31,6 +31,10 @@ pub struct Snapshot {
     /// branch::operation): a conflict resolved in one is only put back while it is.
     #[serde(default)]
     operation: Option<String>,
+    /// The commit that's stopped at, if any (see conflict::stopped_at): with a rebase or
+    /// cherry-pick of several, a conflict's put back only at the one it was resolved at.
+    #[serde(default)]
+    stopped: Option<String>,
 }
 
 /// One file in the index and the working copy. The contents are saved in the
@@ -122,6 +126,7 @@ fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
     let stashes = stash_list(&mut repo).map_err(message)?;
     let files = read_files(&repo, cover)?;
     let operation = crate::branch::operation(&repo).map(String::from);
+    let stopped = crate::conflict::stopped_at(&repo).map(|id| id.to_string());
     // Every changed file is covered for a step on the whole working copy, as Reset
     // keeping changes, which ends the merge or the like under way. Its conflicts would
     // be put back only while that's under way (see restore), so undo would always
@@ -132,7 +137,7 @@ fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
     {
         return Err(format!("{} has conflicts.", file.path));
     }
-    Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files, operation })
+    Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files, operation, stopped })
 }
 
 type Refs = (Option<String>, Option<String>, BTreeMap<String, String>, BTreeMap<String, (String, String)>);
@@ -302,6 +307,11 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
         }
         if head_now != to.head_id {
             return Err(format!("{STALE_STEP}HEAD has moved on since it was resolved, as a rebase does to its next commit, so its conflict can't be put back."));
+        }
+        // HEAD stays where it is when a commit is skipped, or dropped on continuing as
+        // resolving left it empty, though the rebase has moved on to the next one.
+        if crate::conflict::stopped_at(&repo).map(|id| id.to_string()) != to.stopped {
+            return Err(format!("{STALE_STEP}The rebase or the like has moved on to another commit since it was resolved, so its conflict can't be put back."));
         }
     }
     if !files.is_empty() {
@@ -1038,6 +1048,30 @@ mod tests {
         let refused = undo(&t, &step, "keep").unwrap_err();
         assert!(refused.starts_with(STALE_STEP), "{refused}");
         assert_eq!(read(&t, "a.txt"), "both\n");
+    }
+
+    // Resolved to the side rebased onto, the commit's skipped, as it might be dropped
+    // too, being left empty: HEAD stays where it was, but the rebase is at the next
+    // commit, where the conflict, put back, would be in the wrong place.
+    #[test]
+    fn a_conflict_isnt_put_back_once_its_rebase_has_moved_on() {
+        use crate::cli::git;
+        let t = TempRepo::new("undo-conflict-skipped");
+        t.commit(&[("a.txt", Some("base\n")), ("b.txt", Some("base\n"))], "Base");
+        let main = t.branch();
+        git(t.path(), &["switch", "-qc", "feature"], None).unwrap();
+        t.commit(&[("a.txt", Some("feature\n"))], "Change a");
+        t.commit(&[("b.txt", Some("feature\n"))], "Change b");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("main\n")), ("b.txt", Some("main\n"))], "Change both on main");
+        git(t.path(), &["switch", "-q", "feature"], None).unwrap();
+        assert!(git(t.path(), &["rebase", &main], None).is_err());
+
+        let step = covering(&t, files(&["a.txt"]), || crate::working::resolve(t.path(), "a.txt", "current", &|_: &Path| Ok(())).unwrap());
+        assert!(git(t.path(), &["rebase", "--skip"], None).is_err(), "it stops again, at b.txt");
+        let refused = undo(&t, &step, "keep").unwrap_err();
+        assert!(refused.starts_with(STALE_STEP), "{refused}");
+        assert_eq!(read(&t, "a.txt"), "main\n");
     }
 
     // A step on every changed file, as Reset keeping changes, ends the merge, so its

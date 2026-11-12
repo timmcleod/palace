@@ -41,6 +41,16 @@ test("the next conflicted file is the one after, or the first past the end", () 
   expect(nextConflicted([{ path: "a.js", conflicted: true }], "a.js")).toBeNull();
 });
 
+// In the tree, as Working Copy can show them, folders first: as it's seen, rather than
+// jumping from README.md to Z.txt and back up to src/a.js.
+test("the next conflicted file is the next as Working Copy lists them", () => {
+  const files = ["README.md", "Z.txt", "src/a.js"].map((path) => ({ path, conflicted: true }));
+  expect(nextConflicted(files, "src/a.js", true).path).toBe("README.md");
+  expect(nextConflicted(files, "README.md", true).path).toBe("Z.txt");
+  expect(nextConflicted(files, "Z.txt", true).path).toBe("src/a.js");
+  expect(nextConflicted(files, "README.md", false).path).toBe("Z.txt");
+});
+
 test("once one's resolved, the next shows, while it's still the one shown", () => {
   const resolved = [
     { path: "a.js", conflicted: false },
