@@ -35,18 +35,18 @@ const icon = computed(() => REF_ICONS[props.kind]);
   align-items: center;
   gap: 4px;
   min-width: 0;
-  padding: 1px 8px 1px 6px;
-  border-radius: 10px;
+  padding: 1px 5px 1px 4px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--tint) 18%, transparent);
   overflow-wrap: anywhere;
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-weight: 500;
   line-height: 16px;
   color: var(--text-primary);
 }
 
 .ref-name.plain {
-  padding: 1px 8px;
+  padding: 1px 5px;
 }
 
 .ref-name.fit {
@@ -76,8 +76,8 @@ const icon = computed(() => REF_ICONS[props.kind]);
 
 .head-pill {
   flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
   background: var(--accent-fill);
   font-size: var(--font-xs);
   font-weight: 700;

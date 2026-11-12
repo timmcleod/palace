@@ -830,8 +830,8 @@ function showRefs(badges, event) {
   gap: 2px;
   height: 17px;
   margin-top: 1px;
-  padding: 0 5px;
-  border-radius: 9px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--tint) 18%, transparent);
   font-size: var(--font-xs);
   font-weight: 600;
