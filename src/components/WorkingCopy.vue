@@ -907,6 +907,13 @@ input[type="checkbox"] {
   background: var(--status);
 }
 
+/* In a window in the background, a badge mutes with the accent, keeping a little of
+   its color to tell it apart, into the gray the accent's fill turns, which white reads
+   on (see styles.css). */
+:root[data-inactive] .badge {
+  background: color-mix(in srgb, var(--status) 30%, var(--accent-fill));
+}
+
 .modified {
   --status: var(--accent-steady);
 }

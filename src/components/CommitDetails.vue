@@ -645,6 +645,25 @@ function splitPath(path) {
   background: var(--status);
 }
 
+/* In a window in the background, the statuses and counts mute with the accent, keeping
+   a little of their color to tell them apart: into the gray the accent turns as text,
+   and for a badge, with white on it, as a fill (see styles.css). */
+:root[data-inactive] .status {
+  color: color-mix(in srgb, var(--status) 30%, var(--accent));
+}
+
+:root[data-inactive] .badge {
+  background: color-mix(in srgb, var(--status) 30%, var(--accent-fill));
+}
+
+:root[data-inactive] .plus {
+  color: color-mix(in srgb, var(--diff-added-text) 30%, var(--accent));
+}
+
+:root[data-inactive] .minus {
+  color: color-mix(in srgb, var(--diff-removed-text) 30%, var(--accent));
+}
+
 .file-path {
   flex: 1;
   min-width: 0;

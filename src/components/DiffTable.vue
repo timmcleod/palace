@@ -721,6 +721,19 @@ td {
   background: var(--diff-removed-gutter);
 }
 
+/* In a window in the background, the gutters' tints fade mostly to the gutter's own
+   gray, as the accent does elsewhere (see styles.css): the lines keep theirs, to be
+   read. A picked line's gutter is the accent's fill, which mutes as it is. */
+:root[data-inactive] .added:not(.picked) .gutter,
+:root[data-inactive] :not(.picked) > .gutter.added {
+  background: color-mix(in srgb, var(--diff-added-gutter) 30%, var(--diff-gutter-bg));
+}
+
+:root[data-inactive] .removed:not(.picked) .gutter,
+:root[data-inactive] :not(.picked) > .gutter.removed {
+  background: color-mix(in srgb, var(--diff-removed-gutter) 30%, var(--diff-gutter-bg));
+}
+
 .gap {
   background: var(--diff-gutter-bg);
 }

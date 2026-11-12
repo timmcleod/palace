@@ -34,7 +34,8 @@
      accent as text, white on the accent fill, and the tertiary gray. */
   /* The accent's own color. Where it means something, as a modified file's status or
      where a file dragged in would drop, it's used as this, which a window in the
-     background keeps; everywhere else as --accent, which it mutes (see below). */
+     background keeps, or mutes only partly, as for a status, for it still to be told
+     apart; everywhere else as --accent, which it mutes (see below). */
   --accent-steady: #1769d1;
   --accent: var(--accent-steady);
   /* What's filled with the accent, with white on it: buttons, pills, checkboxes. The
