@@ -25,8 +25,9 @@ function setUp() {
   const runs = [];
   const offers = [];
   const settle = vi.fn(async () => {});
+  const overview = ref({ path: "/repo" });
   const undo = useUndo({
-    overview: ref({ path: "/repo" }),
+    overview,
     draft,
     busy: () => false,
     settle,
@@ -36,7 +37,7 @@ function setUp() {
     },
     offer: (label) => offers.push(label),
   });
-  return { undo, draft, runs, offers, settle };
+  return { undo, draft, runs, offers, settle, overview };
 }
 
 describe("stepFor", () => {
@@ -134,6 +135,28 @@ describe("a step that stopped for conflicts", () => {
     const resumed = undo.stepFor("control_operation", { action: "continue" });
     expect(resumed).toMatchObject({ label: "Merge", resumed: { path: "/repo" } });
     expect(undo.stepFor("control_operation", { action: "abort" })).toBeNull();
+    expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
+  });
+
+  test("is still finished as one step after files in it are resolved, each a step of its own", async () => {
+    const { undo, overview } = setUp();
+    overview.value.operation = "merge";
+    await expect(undo.undoable(undo.stepFor("merge", {}), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
+      "CONFLICT: stopped",
+    );
+    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] } }, async () => null);
+    expect(undo.stepFor("control_operation", { action: "continue" })).toMatchObject({ label: "Merge" });
+    // Something else, as a reset, leaves it behind.
+    await undo.undoable({ label: "Reset", mode: "mixed", cover: { changed: true } }, async () => null);
+    expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
+  });
+
+  test("with nothing under way, as for a stash applied, is left behind by resolving", async () => {
+    const { undo } = setUp();
+    await expect(undo.undoable(undo.stepFor("stash_apply", { index: 0 }), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
+      "CONFLICT: stopped",
+    );
+    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] } }, async () => null);
     expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
   });
 });

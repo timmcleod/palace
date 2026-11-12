@@ -88,7 +88,13 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
   async function undoable({ cover, resumed, ...step }, work) {
     await settle();
     const path = overview.value.path;
-    stopped = null;
+    // A step on only some files while an operation is under way, as resolving or
+    // discarding them, is part of getting what stopped for conflicts to where it can go
+    // on: continuing still finishes that as one step. Anything else leaves it behind,
+    // as does a step with nothing under way, as for a stash applied, with nothing to
+    // continue.
+    const within = overview.value.operation && cover?.files && !cover.changed && cover.stash == null;
+    if (!within) stopped = null;
     let reason = "";
     const snapshot = (cover) =>
       invoke("take_snapshot", { path, cover }).catch((e) => {

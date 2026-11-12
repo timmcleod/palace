@@ -27,6 +27,10 @@ pub struct Snapshot {
     stashes: Vec<(String, String)>,
     /// The files the operation may change, as they were.
     files: Vec<FileState>,
+    /// The merge, rebase, cherry-pick or revert under way, if any (see
+    /// branch::operation): a conflict resolved in one is only put back while it is.
+    #[serde(default)]
+    operation: Option<String>,
 }
 
 /// One file in the index and the working copy. The contents are saved in the
@@ -34,8 +38,14 @@ pub struct Snapshot {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FileState {
     path: String,
-    /// The index entry's mode and blob, or None when the file isn't in the index.
+    /// The index entry's mode and blob, or None when the file isn't in the index, or
+    /// is there only as a conflict's sides.
     index: Option<(u32, String)>,
+    /// A conflict's sides in the index, as git leaves them, each as its stage (1 the
+    /// base, 2 the current side, 3 the incoming), mode and blob: for resolving one to be
+    /// undone, bringing the conflict back. Empty for a file that's not in conflict.
+    #[serde(default)]
+    conflict: Vec<(i32, u32, String)>,
     /// The working copy's file as a mode and blob, or None when there's no file.
     worktree: Option<(u32, String)>,
 }
@@ -111,7 +121,8 @@ fn snapshot(path: &str, cover: &Cover) -> Result<Snapshot, String> {
     let (head_branch, head_id, refs, upstreams) = read_refs(&repo).map_err(message)?;
     let stashes = stash_list(&mut repo).map_err(message)?;
     let files = read_files(&repo, cover)?;
-    Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files })
+    let operation = crate::branch::operation(&repo).map(String::from);
+    Ok(Snapshot { head_branch, head_id, refs, upstreams, stashes, files, operation })
 }
 
 type Refs = (Option<String>, Option<String>, BTreeMap<String, String>, BTreeMap<String, (String, String)>);
@@ -206,9 +217,10 @@ fn covered(repo: &Repository, cover: &Cover) -> Result<BTreeSet<String>, git2::E
 /// Where `path` stands in the index and the working copy. With `save`, the contents
 /// are written to the repository so they can be put back later.
 fn file_state(repo: &Repository, workdir: &Path, index: &Index, path: &str, save: bool, total: &mut u64) -> Result<FileState, String> {
-    if (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some()) {
-        return Err(format!("{path} has conflicts."));
-    }
+    // Already in the repository, as git wrote them.
+    let conflict = (1..=3)
+        .filter_map(|stage| index.get_path(Path::new(path), stage).map(|entry| (stage, entry.mode, entry.id.to_string())))
+        .collect();
     let blob = |bytes: &[u8]| {
         let id = if save { repo.blob(bytes) } else { Oid::hash_object(ObjectType::Blob, bytes) };
         id.map(|id| id.to_string()).map_err(message)
@@ -232,7 +244,7 @@ fn file_state(repo: &Repository, workdir: &Path, index: &Index, path: &str, save
         Ok(_) => return Err(format!("{path} isn't a file.")),
     };
     let index = index.get_path(Path::new(path), 0).map(|entry| (entry.mode, entry.id.to_string()));
-    Ok(FileState { path: path.to_string(), index, worktree })
+    Ok(FileState { path: path.to_string(), index, worktree, conflict })
 }
 
 #[cfg(unix)]
@@ -267,6 +279,21 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
         return Err(format!("{STALE_STEP}The stash list has changed since, so it can't be put back safely."));
     }
     let files: Vec<&FileState> = to.files.iter().filter(|file| !from.files.contains(file)).collect();
+    // A conflict put back belongs to where it was resolved: the merge, rebase or the
+    // like under way then, and HEAD where it was. With that finished or aborted, it
+    // would be a conflict with nothing to continue or abort, and committing would commit
+    // its markers; with HEAD moved on, as a rebase does to its next commit, it would be
+    // a conflict in the wrong place. One a stash applied left, with nothing under way,
+    // comes back while nothing is.
+    if files.iter().any(|file| !file.conflict.is_empty()) {
+        let head_now = repo.head().ok().and_then(|head| head.target()).map(|id| id.to_string());
+        if crate::branch::operation(&repo).map(String::from) != to.operation {
+            return Err(format!("{STALE_STEP}The merge, rebase or other operation it was resolved in is over, so its conflict can't be put back."));
+        }
+        if head_now != to.head_id {
+            return Err(format!("{STALE_STEP}HEAD has moved on since it was resolved, as a rebase does to its next commit, so its conflict can't be put back."));
+        }
+    }
     if !files.is_empty() {
         let workdir = repo.workdir().ok_or("This repository has no working copy.")?;
         let index = repo.index().map_err(message)?;
@@ -276,8 +303,9 @@ fn restore(path: &str, from: &Snapshot, to: &Snapshot, mode: &str) -> Result<Str
             if was.is_none() || now.as_ref() != was {
                 return Err(format!("{STALE_STEP}{} has changed since, so it can't be put back safely.", file.path));
             }
-            for (_, id) in file.index.iter().chain(&file.worktree) {
-                Oid::from_str(id).ok().and_then(|id| repo.find_blob(id).ok()).ok_or_else(|| {
+            let sides = file.conflict.iter().map(|(_, mode, id)| (*mode, id.clone()));
+            for (_, id) in file.index.iter().cloned().chain(file.worktree.iter().cloned()).chain(sides) {
+                Oid::from_str(&id).ok().and_then(|id| repo.find_blob(id).ok()).ok_or_else(|| {
                     format!("{STALE_STEP}The saved copy of {} is gone; git removes unused copies after a while.", file.path)
                 })?;
             }
@@ -448,8 +476,12 @@ fn put_files(repo: &Repository, path: &str, files: &[&FileState]) -> Result<(), 
         }
         let (mode, id) = file.index.clone().unwrap_or((0, Oid::ZERO_SHA1.to_string()));
         entries.push_str(&format!("{mode:o} {id}\t{}\0", file.path));
+        // A conflict's sides go back in after it's out of the index, as it is then.
+        for (stage, mode, id) in &file.conflict {
+            entries.push_str(&format!("{mode:o} {id} {stage}\t{}\0", file.path));
+        }
     }
-    // Mode 0 takes a file out of the index.
+    // Mode 0 takes a file out of the index, and an entry for it, its conflict's sides.
     git(path, &["update-index", "-z", "--index-info"], Some(&entries))?;
     // The rewritten files' entries need fresh timestamps to show as unchanged.
     let _ = git(path, &["update-index", "-q", "--refresh"], None);
@@ -932,5 +964,94 @@ mod tests {
         assert!(error.starts_with("It would overwrite your uncommitted changes."), "{error}");
         assert_eq!(t.branch(), main);
         assert_eq!(read_to_string(t.dir.join("a.txt")).unwrap(), "mine\n");
+    }
+
+    // Resolving a conflicted file, by taking a side, as edited, or by deleting it, is
+    // undone, bringing the conflict back as git left it, markers and all, and redone.
+    #[test]
+    fn resolving_a_conflict_is_undone_and_redone() {
+        use crate::cli::git;
+        let t = TempRepo::new("undo-conflict");
+        t.commit(&[("a.txt", Some("base\n")), ("gone.txt", Some("x\n"))], "Base");
+        let main = t.branch();
+        git(t.path(), &["switch", "-qc", "theirs"], None).unwrap();
+        t.commit(&[("a.txt", Some("theirs\n")), ("gone.txt", None)], "Theirs");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours\n")), ("gone.txt", Some("x, changed\n"))], "Ours");
+        assert!(git(t.path(), &["merge", "theirs"], None).is_err());
+        let conflicted = read(&t, "a.txt");
+        let unmerged = || git(t.path(), &["diff", "--name-only", "--diff-filter=U"], None).unwrap();
+        assert_eq!(unmerged().lines().collect::<Vec<_>>(), ["a.txt", "gone.txt"]);
+        let keep = |_: &Path| Ok(());
+
+        // As edited, then marked as resolved.
+        let step = covering(&t, files(&["a.txt"]), || {
+            t.write(&[("a.txt", Some("both\n"))]);
+            crate::working::resolve(t.path(), "a.txt", "resolved", &keep).unwrap();
+        });
+        assert!(!unmerged().contains("a.txt"));
+        undo(&t, &step, "keep").unwrap();
+        assert!(unmerged().contains("a.txt"), "the conflict's back");
+        assert_eq!(read(&t, "a.txt"), conflicted);
+        redo(&t, &step, "keep").unwrap();
+        assert!(!unmerged().contains("a.txt"));
+        assert_eq!(read(&t, "a.txt"), "both\n");
+
+        // Deleted, as the side that deleted it would.
+        let step = covering(&t, files(&["gone.txt"]), || crate::working::resolve(t.path(), "gone.txt", "deleted", &keep).unwrap());
+        assert!(unmerged().is_empty());
+        undo(&t, &step, "keep").unwrap();
+        assert_eq!(unmerged().trim(), "gone.txt");
+        assert_eq!(read(&t, "gone.txt"), "x, changed\n");
+        redo(&t, &step, "keep").unwrap();
+        assert!(unmerged().is_empty() && !t.dir.join("gone.txt").exists());
+    }
+
+    // Resolved, and the merge committed: the conflict, put back, would have no merge
+    // to continue or abort, so it isn't.
+    #[test]
+    fn a_conflict_isnt_put_back_once_its_merge_is_over() {
+        use crate::cli::git;
+        let t = TempRepo::new("undo-conflict-over");
+        t.commit(&[("a.txt", Some("base\n"))], "Base");
+        let main = t.branch();
+        git(t.path(), &["switch", "-qc", "theirs"], None).unwrap();
+        t.commit(&[("a.txt", Some("theirs\n"))], "Theirs");
+        git(t.path(), &["switch", "-q", &main], None).unwrap();
+        t.commit(&[("a.txt", Some("ours\n"))], "Ours");
+        assert!(git(t.path(), &["merge", "theirs"], None).is_err());
+        let step = covering(&t, files(&["a.txt"]), || {
+            t.write(&[("a.txt", Some("both\n"))]);
+            crate::working::resolve(t.path(), "a.txt", "resolved", &|_: &Path| Ok(())).unwrap();
+        });
+        git(t.path(), &["commit", "-q", "--no-edit"], None).unwrap();
+        let refused = undo(&t, &step, "keep").unwrap_err();
+        assert!(refused.starts_with(STALE_STEP), "{refused}");
+        assert_eq!(read(&t, "a.txt"), "both\n");
+    }
+
+    // A stash applied over changes it conflicts with leaves a conflict with nothing
+    // under way: resolved, it comes back, as nothing is under way still.
+    #[test]
+    fn a_conflict_a_stash_left_is_put_back() {
+        use crate::cli::git;
+        let t = TempRepo::new("undo-conflict-stash");
+        t.commit(&[("a.txt", Some("base\n"))], "Base");
+        t.write(&[("a.txt", Some("stashed\n"))]);
+        git(t.path(), &["stash", "-q"], None).unwrap();
+        t.commit(&[("a.txt", Some("committed\n"))], "Since");
+        assert!(git(t.path(), &["stash", "apply", "-q"], None).is_err());
+        let conflicted = read(&t, "a.txt");
+        let unmerged = || git(t.path(), &["diff", "--name-only", "--diff-filter=U"], None).unwrap();
+        assert_eq!(unmerged().trim(), "a.txt");
+        let step = covering(&t, files(&["a.txt"]), || {
+            t.write(&[("a.txt", Some("both\n"))]);
+            crate::working::resolve(t.path(), "a.txt", "resolved", &|_: &Path| Ok(())).unwrap();
+        });
+        undo(&t, &step, "keep").unwrap();
+        assert_eq!(unmerged().trim(), "a.txt");
+        assert_eq!(read(&t, "a.txt"), conflicted);
+        redo(&t, &step, "keep").unwrap();
+        assert!(unmerged().is_empty());
     }
 }

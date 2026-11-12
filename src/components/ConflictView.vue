@@ -2,15 +2,23 @@
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm } from "../lib/overlays.js";
+import { CANCELED } from "../lib/errors.js";
 import { deletion, namedSides } from "../lib/conflictSides.js";
+import { conflictCount as countConflicts, conflictLines } from "../lib/conflictText.js";
+import { isUnsaved } from "../lib/editing.js";
 
 // A conflicted file with each side of every conflict highlighted, and the ways to
 // resolve it.
 const props = defineProps({
   path: { type: String, required: true },
   file: { type: Object, required: true },
+  // undoable(step, work): runs `work`, remembering how to undo it.
+  undoable: { type: Function, default: (step, work) => work() },
 });
-const emit = defineEmits(["changed"]);
+// "changed" after anything's done to the file, and "resolved" too, with its path, when
+// that resolved it, for the next conflicted file to show; "open-file" to edit it in the
+// Files view.
+const emit = defineEmits(["changed", "resolved", "open-file"]);
 
 const text = ref(null);
 const error = ref("");
@@ -41,58 +49,18 @@ watch(
 // Who's who, on hover: a side's name, and what it is.
 const describe = (side) => `${side.label}, ${side.says}`;
 
-// Whether a line is one of git's markers: exactly seven of `char`, then the end of the
-// line or, except for =======, a space and a label. A Markdown underline isn't one.
-function isMarker(line, char) {
-  const rest = line.replace(/\r$/, "");
-  if (!rest.startsWith(char.repeat(7))) return false;
-  const after = rest.slice(7);
-  return after === "" || (char !== "=" && after.startsWith(" "));
-}
-
-// Tags each line with the part of a conflict it's in, and numbers each conflict where
-// it starts. Git writes:
-//   <<<<<<< current … ||||||| base (diff3 style only) … ======= … >>>>>>> incoming
-const lines = computed(() => {
-  if (text.value == null) return [];
-  let region = null;
-  let blocks = 0;
-  return text.value.split("\n").map((line, i) => {
-    let kind = region;
-    let block = null;
-    if (isMarker(line, "<") && !region) {
-      kind = "marker";
-      region = "current";
-      block = blocks++;
-    } else if (isMarker(line, "|") && region === "current") {
-      kind = "marker";
-      region = "base";
-    } else if (isMarker(line, "=") && (region === "current" || region === "base")) {
-      kind = "marker";
-      region = "incoming";
-    } else if (isMarker(line, ">") && region === "incoming") {
-      kind = "marker";
-      region = null;
-    }
-    return { number: i + 1, text: line, kind, block };
-  });
-});
-
-const conflictCount = computed(() => lines.value.filter((l) => l.block != null).length);
+const lines = computed(() => conflictLines(text.value));
+const conflictCount = computed(() => countConflicts(text.value));
 
 // Settles one conflict, leaving the rest of the file to resolve.
 async function resolveBlock(block, side) {
-  busy.value = true;
-  error.value = "";
-  try {
-    text.value = await invoke("resolve_conflict_block", { path: props.path, file: props.file.path, block, side });
-    emit("changed");
-  } catch (e) {
-    error.value = String(e);
-  } finally {
-    busy.value = false;
-  }
+  const resolved = await run("resolve_conflict_block", { block, side }, "Resolve Conflict");
+  if (resolved != null) text.value = resolved;
 }
+
+// What's undone is the file, in the index and on disk: with a conflict's sides there,
+// undoing brings it back (see undo.rs).
+const step = (label) => ({ label, mode: "keep", cover: { files: [props.file.path] } });
 
 // Taking one side replaces the whole file.
 async function useSide(side) {
@@ -102,7 +70,7 @@ async function useSide(side) {
     confirmLabel: "Replace",
     danger: true,
   });
-  if (ok) await run("resolve_conflict", { side });
+  if (ok) await resolve(side);
 }
 
 // A side doesn't have the file: keeping it takes the side that does, and deleting it
@@ -114,17 +82,58 @@ async function deleteFile() {
     confirmLabel: "Delete",
     danger: true,
   });
-  if (ok) await run("resolve_conflict", { side: "deleted" });
+  if (ok) await resolve("deleted");
 }
 
-async function run(command, args) {
+// Staged as it is, which may not be what was meant: with conflicts still in it, as
+// when one was missed, or with edits in Palace's editor not saved yet. It's read again
+// first, as it may have been edited elsewhere since it was shown.
+async function markResolved() {
+  // Busy while it's read and asked about, so a second click doesn't resolve it twice.
+  busy.value = true;
+  const now = await invoke("conflict_file", { path: props.path, file: props.file.path }).catch(() => null);
+  const left = countConflicts(now);
+  const unsaved = isUnsaved(props.path, props.file.path);
+  if (left || unsaved) {
+    const why = [
+      left && `It still has ${left === 1 ? "a conflict" : `${left} conflicts`} in it, which would be committed as ${left === 1 ? "it is" : "they are"}, markers and all.`,
+      unsaved && "It has edits in Palace's editor that aren't saved, which would be left out.",
+    ];
+    const ok = await askConfirm({
+      title: "Mark as Resolved",
+      message: `Mark “${fileName.value}” as resolved anyway?\n\n${why.filter(Boolean).join("\n\n")}`,
+      confirmLabel: "Mark as Resolved",
+    }).finally(() => (busy.value = false));
+    if (!ok) return;
+  }
+  busy.value = false;
+  await resolve("resolved");
+}
+
+// What resolving it each way is called, for undoing it.
+const RESOLVING = { current: "Use Side", incoming: "Use Side", deleted: "Delete File", resolved: "Mark as Resolved" };
+
+// Resolves the file: by taking a side, deleting it, or as it is. Keeping a file one
+// side deleted takes the other side.
+async function resolve(side) {
+  const label = deleted.value?.keep === side ? "Keep File" : RESOLVING[side];
+  if ((await run("resolve_conflict", { side }, label)) !== undefined) emit("resolved", props.file.path);
+}
+
+// Runs `command` on the file, as a step to undo called `label`, or with none, as
+// opening it elsewhere, not. Resolves to what it returns (null for nothing), or
+// undefined if it failed or was canceled.
+async function run(command, args, label = null) {
   busy.value = true;
   error.value = "";
   try {
-    await invoke(command, { path: props.path, file: props.file.path, ...args });
-    if (command !== "open_in_editor") emit("changed");
+    const work = () => invoke(command, { path: props.path, file: props.file.path, ...args });
+    const result = await (label ? props.undoable(step(label), work) : work());
+    if (label) emit("changed");
+    return result ?? null;
   } catch (e) {
-    error.value = String(e);
+    if (String(e) !== CANCELED) error.value = String(e);
+    return undefined;
   } finally {
     busy.value = false;
   }
@@ -138,15 +147,16 @@ async function run(command, args) {
     <template v-if="deleted">
       <p class="intro">{{ deleted.message }}</p>
       <div class="actions">
-        <button v-if="deleted.keep" class="secondary-button" :disabled="busy" :title="`Keep the file from ${describe(named[deleted.keep])}`" @click="run('resolve_conflict', { side: deleted.keep })">
+        <button v-if="deleted.keep" class="secondary-button" :disabled="busy" :title="`Keep the file from ${describe(named[deleted.keep])}`" @click="resolve(deleted.keep)">
           Keep File
         </button>
         <button class="secondary-button" :disabled="busy" @click="deleteFile">Delete File</button>
         <!-- What's on disk can be edited too, as to say why the other side deleted it,
              and kept as it is then. -->
         <template v-if="text != null">
-          <button class="secondary-button" :disabled="busy" @click="run('open_in_editor')">Open in Editor</button>
-          <button class="primary-button" :disabled="busy" title="Stage the file as it is now" @click="run('resolve_conflict', { side: 'resolved' })">
+          <button class="secondary-button" :disabled="busy" title="Edit it in the Files view" @click="emit('open-file', file.path)">Edit</button>
+          <button class="secondary-button" :disabled="busy" title="Open it in your editor" @click="run('open_in_editor')">Open in Editor</button>
+          <button class="primary-button" :disabled="busy" title="Stage the file as it is now" @click="markResolved">
             Mark as Resolved
           </button>
         </template>
@@ -165,8 +175,9 @@ async function run(command, args) {
         <button class="secondary-button" :disabled="busy" :title="`Keep the whole file from ${describe(named.incoming)}`" @click="useSide('incoming')">
           Use <span class="side-name">{{ named.incoming.label }}</span>
         </button>
-        <button class="secondary-button" :disabled="busy" @click="run('open_in_editor')">Open in Editor</button>
-        <button class="primary-button" :disabled="busy" title="Stage the file as it is now" @click="run('resolve_conflict', { side: 'resolved' })">
+        <button class="secondary-button" :disabled="busy" title="Edit it in the Files view" @click="emit('open-file', file.path)">Edit</button>
+        <button class="secondary-button" :disabled="busy" title="Open it in your editor" @click="run('open_in_editor')">Open in Editor</button>
+        <button class="primary-button" :disabled="busy" title="Stage the file as it is now" @click="markResolved">
           Mark as Resolved
         </button>
       </div>

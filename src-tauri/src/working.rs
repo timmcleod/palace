@@ -525,7 +525,7 @@ pub(crate) fn discard(path: &str, files: &[String], backup: &dyn Fn(&[PathBuf]) 
 
 /// Taking a side replaces the whole file, so it goes to `backup` first, along with
 /// any merging done in it by hand.
-fn resolve(path: &str, file: &str, side: &str, backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+pub(crate) fn resolve(path: &str, file: &str, side: &str, backup: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
     let flag = match side {
         "current" => Some("--ours"),
         "incoming" => Some("--theirs"),

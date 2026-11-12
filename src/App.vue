@@ -110,6 +110,7 @@ import { githubRemoteOf } from "./lib/githubRemote.js";
 import { issueError } from "./lib/issues.js";
 import { pullRequestPlan } from "./lib/pullRequests.js";
 import { updateNoticeShown } from "./lib/updates.js";
+import { afterResolving } from "./lib/conflictText.js";
 
 // --- State shared across views -----------------------------------------------------
 
@@ -126,6 +127,9 @@ const historyRef = ref(null);
 const selectedCommit = ref(null);
 const refreshKey = ref(0);
 const workingFile = ref(null);
+// The conflicted file just resolved, from which the next one shows, once the working
+// copy's files say it's resolved (see the watch on them below).
+let resolvedFrom = null;
 // The commit being written, kept while switching between views. While amending,
 // `saved` holds the draft that was there before, to restore if amending is undone.
 const draft = reactive({ subject: "", body: "", amend: false, saved: null });
@@ -646,7 +650,18 @@ const { newest, stepFor, undoable, undo, redo, switchRepository } = useUndo({
 // the notice the toolbar's operations get (see runGit), offering to undo it. Undo and
 // redo are there and on Cmd+Z and Cmd+Shift+Z (Ctrl on Linux), not in the toolbar,
 // where they sat greyed out beside text whose own undo they don't touch.
-const DONE = { Discard: "Discarded", Commit: "Committed", Amend: "Amended", Stash: "Stashed" };
+const DONE = {
+  Discard: "Discarded",
+  Commit: "Committed",
+  Amend: "Amended",
+  Stash: "Stashed",
+  // Resolving conflicts (see ConflictView).
+  "Resolve Conflict": "Resolved the conflict",
+  "Use Side": "Resolved the file",
+  "Keep File": "Kept the file",
+  "Delete File": "Deleted the file",
+  "Mark as Resolved": "Marked as resolved",
+};
 const UNDO_OFFERED_FOR = 8000;
 
 async function undoableWithNotice(step, work) {
@@ -906,6 +921,19 @@ function startResize(event, pane, min, max) {
   });
 }
 
+// With a conflicted file resolved, the next one shows, so they're gone through one after
+// another (see afterResolving).
+watch(
+  () => overview.value?.files,
+  (files) => {
+    if (!resolvedFrom || !files) return;
+    const next = afterResolving(files, resolvedFrom, workingFile.value?.path);
+    if (next === undefined) return;
+    resolvedFrom = null;
+    if (next) workingFile.value = next;
+  },
+);
+
 // --- Files view --------------------------------------------------------------------
 
 // The Files view's tree, which takes keyboard focus as its file closes (see closeFile).
@@ -1072,6 +1100,7 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     historyRef.value = null;
     selectedCommit.value = null;
     workingFile.value = null;
+    resolvedFrom = null;
     fileFilter.value = null;
     selectedStash.value = null;
     stashQuery.value = "";
@@ -1722,7 +1751,15 @@ const breadcrumb = computed(() => {
         <div class="subheader">
           <span class="file-title">{{ workingFile?.path }}</span>
         </div>
-        <ConflictView v-if="workingFile?.conflicted" :path="overview.path" :file="workingFile" @changed="refresh" />
+        <ConflictView
+          v-if="workingFile?.conflicted"
+          :path="overview.path"
+          :file="workingFile"
+          :undoable="undoableWithNotice"
+          @changed="refresh"
+          @resolved="resolvedFrom = $event"
+          @open-file="openInFiles"
+        />
         <WorkingFileDiff v-else-if="workingFile" :path="overview.path" :file="workingFile" :undoable="undoableWithNotice" @changed="refresh" />
         <div v-else class="empty-state">
           <p>Select a file to see its changes.</p>
