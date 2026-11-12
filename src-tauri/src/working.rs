@@ -132,16 +132,6 @@ pub async fn resolve_conflict_block(path: String, file: String, block: usize, si
     Ok(resolved)
 }
 
-#[tauri::command]
-pub async fn open_in_editor(app: tauri::AppHandle, path: String, file: String) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-    let repo = Repository::discover(&path).map_err(message)?;
-    let full = repo.workdir().ok_or("This repository has no working copy.")?.join(&file);
-    app.opener()
-        .open_path(full.to_string_lossy(), None::<&str>)
-        .map_err(|e| format!("Couldn't open {file}: {e}"))
-}
-
 #[derive(Serialize)]
 pub struct HeadCommit {
     message: String,

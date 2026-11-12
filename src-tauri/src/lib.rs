@@ -163,6 +163,7 @@ pub fn run() {
 
             open::open_folder,
             open::show_in_folder,
+            open::open_in_editor,
 
             pulls::github_branch_pull,
             pulls::github_branches,
@@ -262,7 +263,6 @@ pub fn run() {
             working::conflict_file,
             working::resolve_conflict,
             working::resolve_conflict_block,
-            working::open_in_editor,
 
             worktree::add_worktree,
             worktree::remove_worktree,
