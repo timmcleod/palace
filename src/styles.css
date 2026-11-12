@@ -37,6 +37,9 @@
      accent itself in the light theme; deeper in the dark one, whose accent is light
      enough to read as text on the dark page, and too light for white on it. */
   --accent-fill: var(--accent);
+  /* The accent where it means something, which a window in the background keeps: a
+     modified file's status, where a file dragged in would drop. */
+  --accent-steady: #1769d1;
   --danger: #d4342c;
 
   --text-primary: #262626;
@@ -111,6 +114,7 @@
   color-scheme: dark;
   --accent: #4f9bf8;
   --accent-fill: #2672d6;
+  --accent-steady: #4f9bf8;
   --danger: #ff6b61;
 
   --text-primary: #e8edf5;
@@ -164,6 +168,49 @@
 }
 
 /* Settings › Diffs can switch to the traditional green and red. */
+/* A window in the background (see windowFocus.js) is muted, as macOS and GNOME mute
+   their own: the accent turns gray, still reading at 4.5:1 as text and with white on
+   it, so the window in front is the one in color. */
+:root[data-inactive] {
+  --accent: #707070;
+  --accent-fill: #707070;
+}
+
+:root[data-theme="dark"][data-inactive] {
+  --accent: #a3adbe;
+  --accent-fill: #5f6b7f;
+}
+
+/* The history's branch lines turn mostly gray, keeping enough of their color to tell
+   them apart. Their own names, as the lane colors also mark what a file's status is,
+   which the window keeps. */
+:root {
+  --graph-1: var(--lane-1);
+  --graph-2: var(--lane-2);
+  --graph-3: var(--lane-3);
+  --graph-4: var(--lane-4);
+  --graph-5: var(--lane-5);
+  --graph-6: var(--lane-6);
+}
+
+:root[data-inactive] {
+  --graph-1: color-mix(in srgb, var(--lane-1) 35%, var(--text-tertiary));
+  --graph-2: color-mix(in srgb, var(--lane-2) 35%, var(--text-tertiary));
+  --graph-3: color-mix(in srgb, var(--lane-3) 35%, var(--text-tertiary));
+  --graph-4: color-mix(in srgb, var(--lane-4) 35%, var(--text-tertiary));
+  --graph-5: color-mix(in srgb, var(--lane-5) 35%, var(--text-tertiary));
+  --graph-6: color-mix(in srgb, var(--lane-6) 35%, var(--text-tertiary));
+}
+
+/* The toolbars fade a little too, as the system's own title bars do. */
+.toolbar > * {
+  transition: opacity 0.15s;
+}
+
+:root[data-inactive] .toolbar > * {
+  opacity: 0.6;
+}
+
 :root[data-diff-colors="classic"] {
   --diff-added-bg: #dafbe1;
   --diff-added-gutter: #aceebb;

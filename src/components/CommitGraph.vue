@@ -12,7 +12,8 @@ const props = defineProps({
   through: { type: Boolean, default: false },
 });
 
-const COLORS = ["--lane-1", "--lane-2", "--lane-3", "--lane-4", "--lane-5", "--lane-6"];
+// The lanes' colors, which a window in the background mutes (see styles.css).
+const COLORS = ["--graph-1", "--graph-2", "--graph-3", "--graph-4", "--graph-5", "--graph-6"];
 
 const layout = computed(() => graphLayout(props.lanes));
 const width = computed(() => layout.value.width);

@@ -908,7 +908,7 @@ input[type="checkbox"] {
 }
 
 .modified {
-  --status: var(--accent);
+  --status: var(--accent-steady);
 }
 .added,
 .untracked {

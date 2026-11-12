@@ -615,14 +615,14 @@ function startResize(event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px dashed var(--accent);
+  border: 2px dashed var(--accent-steady);
   border-radius: var(--radius-lg);
   /* Mostly the panel's own background, so the terminal's text under it doesn't compete
      with what it says. */
-  background: color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, var(--content-bg) 88%, transparent));
+  background: color-mix(in srgb, var(--accent-steady) 10%, color-mix(in srgb, var(--content-bg) 88%, transparent));
   font-size: var(--font-md);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-steady);
   pointer-events: none;
 }
 

@@ -621,7 +621,7 @@ function splitPath(path) {
 }
 
 .modified {
-  --status: var(--accent);
+  --status: var(--accent-steady);
 }
 .added {
   --status: var(--lane-4);

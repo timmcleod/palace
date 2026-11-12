@@ -2,6 +2,7 @@ import { createApp } from "vue";
 import "./styles.css";
 import { loadStore } from "./lib/storage.js";
 import { draggingFiles } from "./lib/fileDrag.js";
+import { followWindowFocus } from "./lib/windowFocus.js";
 
 // Right-clicking where Palace has no menu of its own would show the web view's (Back,
 // Reload, Inspect Element). Keep it only where it's useful: in text fields, for Cut,
@@ -27,6 +28,9 @@ window.addEventListener("dragover", (event) => {
 window.addEventListener("drop", (event) => {
   if (draggingFiles(event.dataTransfer)) event.preventDefault();
 });
+
+// A window in the background shows muted, as the system's own do (see styles.css).
+followWindowFocus();
 
 // The saved settings are read first: the rest of Palace reads them as it loads.
 loadStore().then(async () => {
