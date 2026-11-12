@@ -117,3 +117,29 @@ test("a refresh while Show All is reading reads in full too, rather than cutting
   expect(vi.mocked(invoke).mock.calls.at(-1)[1].maxLines).toBeNull();
   expect(document.querySelector(".notice")).toBeNull();
 });
+
+test("Show All for both sides, one soon after the other, shows both in full", async () => {
+  const pending = [];
+  vi.mocked(invoke).mockImplementation(async (command, { maxLines }) => {
+    if (command !== "working_diff") return null;
+    if (maxLines != null) return { ...diff(), truncated: true, hunks: [] };
+    // Each read in full is slow, answered once both are asked for.
+    return new Promise((resolve) => pending.push(() => resolve(diff())));
+  });
+  const root = document.createElement("div");
+  document.body.append(root);
+  const file = { ...changed("src/notes.js"), staged: "modified" };
+  app = createApp({ render: () => h(WorkingFileDiff, { path: "/repo", file }) });
+  app.mount(root);
+  await settle();
+  expect(document.querySelectorAll(".notice")).toHaveLength(2);
+
+  // Each side's notice stays, reading, until its diff shows in full.
+  document.querySelectorAll(".notice .link-button")[0].click();
+  await settle();
+  document.querySelectorAll(".notice .link-button")[1].click();
+  await settle();
+  pending.forEach((answer) => answer());
+  await settle();
+  expect(document.querySelectorAll(".notice")).toHaveLength(0);
+});

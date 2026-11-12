@@ -41,6 +41,9 @@ function fetchDiff(staged, maxLines) {
   });
 }
 
+// Reads the diffs, each side cut short unless it's asked for in full. Returns whether
+// it shows what it read, or false for an error; undefined when a newer read took its
+// place. Show All's spinner stops with the read that's last asked for.
 async function load() {
   const seq = ++loadSeq;
   try {
@@ -55,8 +58,13 @@ async function load() {
     const next = { staged: keepUnchanged(before.staged, staged), unstaged: keepUnchanged(before.unstaged, unstaged) };
     if (next.staged !== before.staged || next.unstaged !== before.unstaged) diffs.value = next;
     error.value = "";
+    return true;
   } catch (e) {
-    if (seq === loadSeq) error.value = String(e);
+    if (seq !== loadSeq) return;
+    error.value = String(e);
+    return false;
+  } finally {
+    if (seq === loadSeq) loadingAll.value = null;
   }
 }
 
@@ -64,25 +72,15 @@ async function load() {
 // exactly when the diffs may have changed.
 watch(() => props.file, load, { immediate: true });
 
+// Asked for in full from now, the diffs are read again: as a refresh would read them,
+// so one meanwhile, or Show All for the other side, reads this one in full too, rather
+// than either undoing the other. Another file chosen meanwhile starts cut short again
+// (see inFull). If it can't be read in full, it goes back to being cut short.
 async function showAll(staged) {
-  loadingAll.value = staged;
   const side = staged ? "staged" : "unstaged";
-  // Asked for in full from now, so a refresh meanwhile reads it in full too, and wins.
-  // Another file chosen meanwhile starts cut short again (see inFull), and reads its
-  // own: this one, read for the file before, mustn't show in its place.
   inFull = { ...inFull, [side]: true };
-  const seq = ++loadSeq;
-  try {
-    const full = await fetchDiff(staged, null);
-    if (seq !== loadSeq) return;
-    diffs.value = { ...diffs.value, [side]: full };
-  } catch (e) {
-    if (seq !== loadSeq) return;
-    inFull = { ...inFull, [side]: false };
-    error.value = String(e);
-  } finally {
-    loadingAll.value = null;
-  }
+  loadingAll.value = staged;
+  if ((await load()) === false) inFull = { ...inFull, [side]: false };
 }
 
 async function run(command, args, step) {

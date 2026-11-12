@@ -331,7 +331,8 @@ pub(crate) fn ignored(repo: &Repository, relative: &Path, is_dir: bool) -> bool 
         let prefix = format!("{}/", relative.to_string_lossy().replace('\\', "/"));
         index.find_prefix(prefix.as_str()).is_err()
     } else {
-        index.get_path(relative, 0).is_none()
+        // In a conflict a tracked file is in the index only as its sides, stages 1 to 3.
+        (0..=3).all(|stage| index.get_path(relative, stage).is_none())
     }
 }
 
@@ -435,6 +436,22 @@ mod tests {
             [("logs".into(), false), (".env".into(), true), (".gitignore".into(), false), ("debug.log".into(), true), ("kept.log".into(), false)]
         );
         assert_eq!(marks("logs"), [(".gitkeep".into(), false), ("today.txt".into(), true)]);
+    }
+
+    #[test]
+    fn a_tracked_file_a_rule_matches_isnt_ignored_while_its_conflicted() {
+        use crate::cli::git;
+        let t = TempRepo::new("files-ignored-conflict");
+        t.commit(&[("kept.log", Some("base\n")), (".gitignore", Some("*.log\n"))], "First");
+        git(t.path(), &["checkout", "-qb", "other"], None).unwrap();
+        t.commit(&[("kept.log", Some("theirs\n"))], "Theirs");
+        git(t.path(), &["checkout", "-q", "-"], None).unwrap();
+        t.commit(&[("kept.log", Some("ours\n"))], "Ours");
+        assert!(git(t.path(), &["merge", "-q", "other"], None).is_err(), "the merge conflicts");
+
+        let entries = block_on(working_entries(path(&t), "".into())).unwrap();
+        let kept = entries.iter().find(|e| e.name == "kept.log").unwrap();
+        assert!(!kept.ignored);
     }
 
     #[test]

@@ -109,8 +109,10 @@ pub(crate) fn start(path: &str, on_change: impl Fn() + Send + 'static) -> Result
                     changed = true;
                     // A new folder needs watching too, unless git ignores it: its coming
                     // shows in the Files view, but what's made in it, as npm install
-                    // fills a new node_modules, would refresh on every file.
-                    if event.kind.is_create() && p.is_dir() && !p.starts_with(&gitdir) && !ignored(&repo, &workdir, p, true) {
+                    // fills a new node_modules, would refresh on every file. Not one
+                    // linked to, as `ln -s ~ home` is: that's elsewhere, maybe all of it.
+                    let folder = p.symlink_metadata().is_ok_and(|m| m.is_dir());
+                    if event.kind.is_create() && folder && !p.starts_with(&gitdir) && !ignored(&repo, &workdir, p, true) {
                         let Some(watcher) = weak.upgrade() else { return };
                         watch_tree(&mut watcher.lock().unwrap(), &repo, &workdir, &gitdir, p);
                     }
@@ -164,13 +166,21 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     if !path.starts_with(workdir) {
         return false;
     }
+    // In a folder git ignores, as one watched before a rule for it was added, such as
+    // dist/ once a build's output is seen: what's made there isn't shown, and a build
+    // watching for changes would otherwise refresh the window every time it writes.
+    if path.parent().is_some_and(|folder| folder != workdir && ignored(repo, workdir, folder, true)) {
+        return false;
+    }
+    // Whether it's there, as itself, as git sees it: a link, to a folder or to nothing,
+    // is a file.
+    let meta = path.symlink_metadata();
+    let there = meta.is_ok();
     // Gone, it's no longer a folder on disk, so a folder-only rule such as "node_modules/"
     // wouldn't match it: one known to be there is asked about as a folder. A rule that
     // isn't folder-only matches files and folders alike, so a file asked about that way
     // still matches as it did.
-    // Whether it's there, as itself: a link to something missing is there too.
-    let there = path.symlink_metadata().is_ok();
-    let is_dir = path.is_dir() || (!there && present.contains(path));
+    let is_dir = meta.is_ok_and(|m| m.is_dir()) || (!there && present.contains(path));
     if !ignored(repo, workdir, path, is_dir) {
         return true;
     }
@@ -179,8 +189,7 @@ fn relevant(repo: &Repository, workdir: &Path, gitdir: &Path, common: &Path, pat
     // them apart: macOS goes on calling each write to a file it saw made a creation, so
     // a log written on every request would refresh each time. Whether it's there now,
     // as against before, can. One made and gone again, as SQLite's journal is, isn't
-    // reported. Events only come from folders that are watched, which aren't ignored,
-    // even new ones (see start), so nothing inside an ignored folder gets here.
+    // reported. Nothing inside an ignored folder gets here (see above).
     if there {
         present.insert(path.to_path_buf())
     } else {
@@ -349,5 +358,23 @@ mod tests {
 
         t.write(&[("a.txt", Some("edited\n"))]);
         assert!(rx.recv_timeout(Duration::from_secs(2)).is_err());
+    }
+
+    #[test]
+    fn a_folder_ignored_while_watched_is_quiet_after() {
+        let t = TempRepo::new("watch-ignored-later");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let (_watcher, rx) = watch(&t);
+        settle(&rx);
+
+        // A build's output seen, then ignored, as it's added to .gitignore.
+        t.write(&[("dist/app.js", Some("1\n"))]);
+        assert!(reported(&rx), "a new folder, not ignored yet");
+        assert!(quiet(&rx));
+        t.write(&[(".gitignore", Some("dist/\n"))]);
+        assert!(reported(&rx), "the rule added");
+        assert!(quiet(&rx));
+        t.write(&[("dist/chunk.js", Some("2\n"))]);
+        assert!(!reported(&rx), "a file made in it once it's ignored");
     }
 }

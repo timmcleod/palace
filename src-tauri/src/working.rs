@@ -626,8 +626,18 @@ pub(crate) fn move_to_trash(file: &Path) -> Result<(), String> {
 pub(crate) fn move_all_to_trash(files: &[PathBuf]) -> Result<(), String> {
     match files {
         [file] => move_to_trash(file),
-        _ => trash::delete_all(files).map_err(|e| format!("Couldn't move the files to the Trash: {e}")),
+        _ => in_batches(files, &|batch| trash::delete_all(batch).map_err(|e| format!("Couldn't move the files to the Trash: {e}"))),
     }
+}
+
+/// How many files go to the Trash in one request. On macOS a request is one command
+/// naming every file, and a command's arguments are limited to 1MB, about ten thousand
+/// paths: more, and it would fail outright. A few hundred keeps well under that, and
+/// the Finder's sound to once for most discards.
+const TRASH_BATCH: usize = 500;
+
+fn in_batches(files: &[PathBuf], each: &dyn Fn(&[PathBuf]) -> Result<(), String>) -> Result<(), String> {
+    files.chunks(TRASH_BATCH).try_for_each(each)
 }
 
 /// Removes directories left empty by discarding new files, as git clean would.
@@ -920,6 +930,18 @@ mod tests {
             std::fs::create_dir_all(dir).unwrap();
             std::fs::rename(file, dir.join(file.file_name().unwrap())).map_err(|e| e.to_string())
         }
+    }
+
+    #[test]
+    fn files_go_to_the_trash_a_few_hundred_at_a_time() {
+        let files: Vec<PathBuf> = (0..TRASH_BATCH * 2 + 1).map(|i| PathBuf::from(format!("{i}.txt"))).collect();
+        let sizes = std::cell::RefCell::new(Vec::new());
+        in_batches(&files, &|batch| {
+            sizes.borrow_mut().push(batch.len());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*sizes.borrow(), [TRASH_BATCH, TRASH_BATCH, 1]);
     }
 
     /// As backup_into, for files moved together, as discarding does.
