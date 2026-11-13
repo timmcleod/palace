@@ -17,11 +17,12 @@ export function setDragImage(event, image, at = null) {
 }
 
 /**
- * A copy of `element`, a tab, to show as it's dragged: as it looks in its row, at its
- * width there, but for the line of where a drag would land, and inert, so neither the
- * keyboard nor a screen reader takes it for another tab while it's on the page.
+ * A copy of `element`, a tab or a row, to show as it's dragged: as it looks where it
+ * is, at its width there, but for the line of where a drag would land, and inert, so
+ * neither the keyboard nor a screen reader takes it for another one while it's on the
+ * page.
  */
-export function tabCopy(element) {
+export function dragCopy(element) {
   const copy = element.cloneNode(true);
   copy.classList.remove("drop-before", "drop-after");
   copy.setAttribute("inert", "");

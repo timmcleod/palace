@@ -28,11 +28,12 @@ import {
   tabLabel as label,
   tabsFor,
 } from "../lib/terminals.js";
-import { grabPoint, setDragImage, tabCopy } from "../lib/dragImage.js";
+import { dragCopy } from "../lib/dragImage.js";
 import { draggingFiles, onFilesDropped } from "../lib/fileDrag.js";
 import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
 import { tallestTerminal } from "../lib/panes.js";
+import { useTabRowDrag } from "../lib/tabRowDrag.js";
 
 // The panel below the history and details: the repository's terminals, in tabs. An
 // agent tab runs the command set for the repository: Claude Code unless it says
@@ -99,55 +100,30 @@ const observer = new ResizeObserver(() => {
 onMounted(() => observer.observe(body.value));
 onBeforeUnmount(() => observer.disconnect());
 
-// Dragging a tab moves it along the row: a line shows where it would land, between
-// the tabs, as when arranging branches in the sidebar.
-const TAB_TYPE = "application/x-palace-terminal-tab";
-const draggedTab = ref(null);
-// The index in the row the tab would be put at, or null.
-const dropAt = ref(null);
-let dragImage = null;
+// Dragging a tab moves it along the row, as the window's tabs are along theirs (see
+// tabRowDrag.js). Its copy is shown as the active one, of a piece with a terminal,
+// whichever it is.
+const tabRow = ref(null);
+const { press, dragging, classOf } = useTabRowDrag({
+  row: tabRow,
+  list: tabList,
+  keys: () => group.value.tabs.map((tab) => tab.key),
+  move(key, to) {
+    const tabs = group.value.tabs;
+    const from = tabs.findIndex((tab) => tab.key === key);
+    if (from < 0) return;
+    tabs.splice(to, 0, ...tabs.splice(from, 1));
+  },
+  image(element) {
+    const copy = dragCopy(element);
+    copy.classList.add("active");
+    return copy;
+  },
+});
 
-function onTabDragStart(event, tab) {
-  draggedTab.value = tab;
-  event.dataTransfer.setData(TAB_TYPE, tab.key);
-  event.dataTransfer.effectAllowed = "move";
-
-  // A copy of the tab itself, as the shown one looks, held where it was grabbed.
-  // Shown as the active one, of a piece with a terminal, whichever it is.
-  const el = event.currentTarget;
-  dragImage = tabCopy(el);
-  dragImage.classList.add("active", "dragged");
-  document.body.append(dragImage);
-  setDragImage(event, dragImage, grabPoint(el, event.clientX, event.clientY));
-}
-
-function onTabDragEnd() {
-  draggedTab.value = null;
-  dropAt.value = null;
-  dragImage?.remove();
-  dragImage = null;
-}
-
-// Before or after the tab under the pointer, by which half it's over; past the last
-// tab, at the end. Nowhere, where the tab already is.
-function onTabListDragOver(event) {
-  const tab = draggedTab.value;
-  if (!tab) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
-  const tabs = group.value.tabs;
-  const elements = [...tabList.value.children];
-  let at = elements.findIndex((el) => {
-    const rect = el.getBoundingClientRect();
-    return event.clientX < rect.left + rect.width / 2;
-  });
-  if (at === -1) at = tabs.length;
-  const from = tabs.indexOf(tab);
-  dropAt.value = at === from || at === from + 1 ? null : at;
-}
-
-function onTabListDragLeave(event) {
-  if (!tabList.value.contains(event.relatedTarget)) dropAt.value = null;
+function onTabPointerDown(event, tab) {
+  if (event.button !== 0 || event.target.closest(".tab-close")) return;
+  press(event, tab.key);
 }
 
 // Files dragged in from the desktop and dropped on the terminal: their paths are typed
@@ -199,26 +175,6 @@ onBeforeUnmount(() => {
   stopDrops();
 });
 
-function onTabListDrop(event) {
-  const tab = draggedTab.value;
-  const at = dropAt.value;
-  if (!tab || at == null) return;
-  event.preventDefault();
-  const tabs = group.value.tabs;
-  const from = tabs.indexOf(tab);
-  if (from === -1) return;
-  tabs.splice(from, 1);
-  tabs.splice(at > from ? at - 1 : at, 0, tab);
-  onTabDragEnd();
-}
-
-// The line's place: before a tab, or after the last one.
-function dropClass(index) {
-  if (dropAt.value === index) return "drop-before";
-  if (dropAt.value === group.value.tabs.length && index === group.value.tabs.length - 1) return "drop-after";
-  return null;
-}
-onBeforeUnmount(onTabDragEnd);
 
 /** Focuses the shown terminal, as when the panel is shown again. */
 function focus() {
@@ -370,23 +326,16 @@ function startResize(event) {
 <template>
   <section class="terminal-panel" :style="{ height: `${height}px` }">
     <div class="resize-edge" @pointerdown="startResize" />
-    <header class="terminal-tabs">
-      <div
-        ref="tabList"
-        class="tab-list"
-        @dragover="onTabListDragOver"
-        @dragleave="onTabListDragLeave"
-        @drop="onTabListDrop"
-      >
+    <header ref="tabRow" class="terminal-tabs">
+      <div ref="tabList" class="tab-list tab-row" :class="{ sorting: dragging != null }">
         <div
-          v-for="(tab, index) in group.tabs"
+          v-for="tab in group.tabs"
           :key="tab.key"
           class="tab"
-          :class="[{ active: tab.key === group.active }, dropClass(index)]"
+          :class="[{ active: tab.key === group.active }, classOf(tab.key)]"
+          :data-key="tab.key"
           :title="[label(tab), statusText(tab.status)].filter(Boolean).join(': ')"
-          draggable="true"
-          @dragstart="onTabDragStart($event, tab)"
-          @dragend="onTabDragEnd"
+          @pointerdown="onTabPointerDown($event, tab)"
           @click="group.active = tab.key"
           @auxclick.middle="closeTab(tab)"
           @contextmenu.prevent="tabMenu($event, tab)"
@@ -455,11 +404,13 @@ function startResize(event) {
   background: var(--sidebar-bg);
 }
 
+/* See .tab-row in styles.css, for dragging a tab along it. */
 .tab-list {
+  --tab-gap: 2px;
+  --drop-line-inset: 3px;
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 2px;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -484,39 +435,6 @@ function startResize(event) {
 
 .tab:hover {
   background: var(--button-hover);
-}
-
-/* Where a dragged tab would land: a line in the gap before or after a tab. */
-.tab.drop-before::before,
-.tab.drop-after::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  width: 2px;
-  border-radius: var(--radius-xs);
-  background: var(--accent-fill);
-  pointer-events: none;
-}
-
-.tab.drop-before::before {
-  left: -2px;
-}
-
-.tab.drop-after::before {
-  right: -2px;
-}
-
-/* The row scrolls, so clips anything outside it: at the start, the line goes inside. */
-.tab:first-child.drop-before::before {
-  left: 0;
-}
-
-/* The copy of a tab that follows the pointer while it's dragged, kept off the page. */
-.tab.dragged {
-  position: fixed;
-  top: -100px;
-  left: 0;
 }
 
 .tab.active {

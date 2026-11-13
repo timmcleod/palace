@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowDown,
@@ -25,6 +25,10 @@ import { repositoryFolder } from "../lib/recents.js";
 import { splitKey } from "../lib/sidebarKeys.js";
 import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
 import { pointerDrag } from "../lib/rowDrag.js";
+import { inMiddle, nearestPlace, placesAmong } from "../lib/branchDrag.js";
+import { dragCopy, grabPoint } from "../lib/dragImage.js";
+import { slideFrom } from "../lib/slide.js";
+import { dropPlace } from "../lib/tabRowDrag.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -108,13 +112,28 @@ function toggleSection(id) {
 // starting there.
 //
 // It's done with pointer events rather than the web view's drag and drop, so Alt is
-// heard (see rowDrag.js).
+// heard (see rowDrag.js). As with tabs, where a row would be moved to, the rows there
+// slide apart, a line in the gap, and let go of, they slide into their new order (see
+// branchDrag.js).
 
 // The name of the branch being dragged, if it can be merged; the row being dragged;
-// and where it would land: { key, merge } or { key, after }.
+// where it would land: { key, merge } or { key, after }; and where the gap opens for
+// it, { key, after }, by that row.
 const dragging = ref(null);
 const dragRow = ref(null);
 const dropAt = ref(null);
+const gapAt = ref(null);
+
+// How far beyond the first or last of the rows a row's moved among it can still land,
+// half a row.
+const MOVE_REACH = 14;
+
+// Where each row was down the list, scrolled or not, as the drag started, and the
+// places the row dragged can land (see placesAmong).
+let spans = [];
+let places = [];
+// Where the row moved was let go, down the page, to slide into its place from.
+let droppedAt = null;
 
 const ARRANGEABLE = /^branch(-folder|-divider)?:/;
 const canMerge = (row) => !row.folder && !row.divider && (row.key.startsWith("branch:") || row.key.startsWith("remote-branch:"));
@@ -154,19 +173,15 @@ let scrolling = 0;
 
 // See rowDrag.js for what's the same as dragging a tab.
 const drag = pointerDrag({
-  // What follows the pointer: the row's icon and name. What dropping would do is told
-  // below where it'd land (see .drop-sentence).
-  image({ data: row, element }) {
-    const image = document.createElement("div");
-    image.className = "drag-image";
-    const icon = element.querySelector(".row-icon")?.cloneNode(true);
-    if (icon) image.append(icon);
-    image.append(row.divider ? row.label || "Divider" : row.label);
-    return image;
-  },
+  // What follows the pointer: a copy of the row, as it looks in the list, held where it
+  // was grabbed (see .row.following). What dropping would do is told below where it'd
+  // land (see .drop-sentence).
+  image: ({ element }) => dragCopy(element),
+  hold: ({ element, x, y }) => grabPoint(element, x, y),
   start({ data: row }) {
     dragRow.value = row;
     dragging.value = canMerge(row) && !row.head ? splitKey(row.key)[1] : null;
+    measure();
     if (isMac) altPoll = setInterval(updateAlt, 100);
   },
   move(event) {
@@ -181,7 +196,7 @@ const drag = pointerDrag({
     event.stopPropagation();
     altHeld.value = event.type === "keydown";
   },
-  drop(event) {
+  drop(event, image) {
     const row = dragRow.value;
     const at = dropAt.value;
     if (overBranches.value) {
@@ -190,10 +205,21 @@ const drag = pointerDrag({
       emit(altHeld.value || (!isMac && event.altKey) ? "rebase-head-onto" : "merge-into-head", dragging.value);
     } else if (at) {
       const siblings = branchRows.value.filter((r) => r.parent === row.parent).map((r) => r.key);
+      droppedAt = image.getBoundingClientRect().top;
       moveKey(arrangedIn.value, row.key, at.key, at.after, siblings);
     }
   },
   end() {
+    // Where each row is, the one moved where it was let go, to slide from into where
+    // it's put, the gap closing at once (see .sorting).
+    const before = new Map(rowElements().map((element) => [element, element.getBoundingClientRect()]));
+    const moved = droppedAt != null && rowElements().find((element) => element.dataset.row === dragRow.value?.key);
+    if (moved) before.set(moved, { left: before.get(moved).left, top: droppedAt });
+    nextTick(() => slideFrom(before));
+    droppedAt = null;
+    spans = [];
+    places = [];
+    gapAt.value = null;
     pointer = null;
     cancelAnimationFrame(scrolling);
     scrolling = 0;
@@ -212,14 +238,34 @@ function onPointerDown(row, event) {
   drag.press(event, row);
 }
 
-// What's under the pointer, for where a drop would land.
+const rowElements = () => [...(scroller.value?.querySelectorAll("[data-row]") ?? [])];
+// How far down the list, from its top, scrolled or not, `y` on the page is.
+const downList = (y) => y - scroller.value.getBoundingClientRect().top + scroller.value.scrollTop;
+// Whether the HEAD branch's row is one the branch dragged can merge into: not while a
+// merge or rebase is waiting.
+const mergesInto = (row) => !!(row.head && dragging.value && !props.overview.operation);
+
+// Where the rows are as the drag starts, and where among its siblings the row dragged
+// can land.
+function measure() {
+  spans = rowElements().map((element) => {
+    const { top, bottom } = element.getBoundingClientRect();
+    return { key: element.dataset.row, depth: rowsByKey.value.get(element.dataset.row)?.depth ?? 0, top: downList(top), bottom: downList(bottom) };
+  });
+  const dragged = dragRow.value;
+  const siblings = new Set(canMove(dragged) ? branchRows.value.filter((r) => r.parent === dragged.parent && ARRANGEABLE.test(r.key)).map((r) => r.key) : []);
+  places = placesAmong(spans, (key) => siblings.has(key));
+}
+
+// What's under the pointer, for where a drop would land: the Branches header, or
+// among the rows (see landing).
 function aim() {
   const target = pointer && document.elementFromPoint(pointer.x, pointer.y);
   const header = target?.closest?.(".section-header");
   overBranches.value = !!(header && header.dataset.section === "branches" && draggedBranch());
-  const element = target?.closest?.("[data-row]");
-  const row = element && rowsByKey.value.get(element.dataset.row);
-  dropAt.value = row ? landing(row, element.getBoundingClientRect(), pointer.y) : null;
+  const at = pointer && !overBranches.value ? landing(pointer) : null;
+  dropAt.value = at?.merge ? at : (at?.at ?? null);
+  gapAt.value = at?.gap ?? null;
 }
 
 // Near the top or bottom of the list, it scrolls, faster the nearer the edge.
@@ -251,26 +297,26 @@ function placeSentence() {
   sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
 }
 
-// Where a drop on `row` would land, from how far down the row the pointer is.
-function landing(row, rect, pointerY) {
-  const dragged = dragRow.value;
-  if (!dragged) return null;
-  const y = (pointerY - rect.top) / rect.height;
-  // Not while a merge or rebase is waiting.
-  const merges = row.head && dragging.value && !props.overview.operation;
-  const moves =
-    canMove(dragged) && ARRANGEABLE.test(row.key) && row.key !== dragged.key && row.parent === dragged.parent;
-  if (merges && (!moves || (y > 0.25 && y < 0.75))) return { key: row.key, merge: true };
-  // Below an open folder's row are its own rows, so a row can't land straight after it.
-  if (moves) return { key: row.key, after: y >= 0.5 && !(row.folder && row.open) };
-  return null;
+// Where a drop at `pointer` would land: merged into the HEAD branch, over the middle of
+// its row, or all of it when the row dragged can't be moved there; or moved to the
+// place among its siblings nearest it, unless that leaves it where it is. Null for
+// neither.
+function landing(pointer) {
+  const rect = scroller.value?.getBoundingClientRect();
+  if (!rect || pointer.x < rect.left || pointer.x > rect.right) return null;
+  const y = downList(pointer.y);
+  const head = spans.find((span) => y >= span.top && y < span.bottom && mergesInto(rowsByKey.value.get(span.key) ?? {}));
+  const siblings = places.slice(0, -1).map((place) => place.at.key);
+  if (head && (!siblings.includes(head.key) || inMiddle(head, y))) return { key: head.key, merge: true };
+  const place = nearestPlace(places, y, MOVE_REACH);
+  return place && dropPlace(siblings, dragRow.value.key, place.at) != null ? place : null;
 }
 
 const dropClass = (row) => {
   if (commitOver.value === row.key) return "drop-target";
-  const at = dropAt.value;
-  if (at?.key !== row.key) return null;
-  return at.merge ? "drop-target" : at.after ? "drop-after" : "drop-before";
+  if (dropAt.value?.merge && dropAt.value.key === row.key) return "drop-target";
+  if (gapAt.value?.key !== row.key) return null;
+  return gapAt.value.after ? "drop-after" : "drop-before";
 };
 
 // --- Commits dropped on the current branch --------------------------------------------
@@ -352,7 +398,7 @@ function onRowClick(row, event) {
       </button>
     </header>
 
-    <nav ref="scroller" class="sidebar-scroll" @scroll.passive="dragRow && placeSentence()">
+    <nav ref="scroller" class="sidebar-scroll" :class="{ sorting: dragRow }" @scroll.passive="dragRow && placeSentence()">
       <section v-for="section in sections" :key="section.id" class="section">
         <button
           class="section-header"
@@ -604,7 +650,26 @@ function onRowClick(row, event) {
   position: relative;
 }
 
-/* Where a dragged row would land. */
+/* While a row's dragged (see branchDrag.js): where it would be moved to, the rows
+   slide apart, with a line in the middle of the gap, as between tabs (see .tab-row in
+   styles.css). Let go of, it closes at once, as the rows slide into place from where
+   they were. */
+.sidebar-scroll {
+  --drop-gap: 12px;
+}
+
+.sidebar-scroll.sorting .row {
+  transition: margin 150ms ease;
+}
+
+.row.drop-before {
+  margin-top: var(--drop-gap);
+}
+
+.row.drop-after {
+  margin-bottom: var(--drop-gap);
+}
+
 .row.drop-before::before,
 .row.drop-after::before {
   content: "";
@@ -617,12 +682,19 @@ function onRowClick(row, event) {
   pointer-events: none;
 }
 
+/* In the middle of the gap, 1px back for its own height. */
 .row.drop-before::before {
-  top: -1px;
+  top: calc(-1 * var(--drop-gap) / 2 - 1px);
 }
 
 .row.drop-after::before {
-  bottom: -1px;
+  bottom: calc(-1 * var(--drop-gap) / 2 - 1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-scroll.sorting .row {
+    transition: none;
+  }
 }
 
 /* A line between groups of branches, after an optional label, both lined up with
@@ -716,6 +788,16 @@ function onRowClick(row, event) {
 
 .row.selected {
   background: var(--row-selected);
+}
+
+/* A copy of a row following the pointer as it's dragged, on the sidebar's color, as the
+   row is, its own over it where it has one, as when it's selected. */
+.row.following {
+  background-color: var(--sidebar-bg);
+}
+
+.row.following.selected {
+  background: linear-gradient(var(--row-selected), var(--row-selected)) var(--sidebar-bg);
 }
 
 .row.current {

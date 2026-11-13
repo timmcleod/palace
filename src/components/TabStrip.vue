@@ -1,12 +1,10 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import Spinner from "./Spinner.vue";
 import { shortcut } from "../lib/platform.js";
-import { grabPoint, tabCopy } from "../lib/dragImage.js";
-import { pointerDrag } from "../lib/rowDrag.js";
-import { slideFrom } from "../lib/slide.js";
-import { dropPlace, landingAt, tabNames } from "../lib/tabs.js";
+import { useTabRowDrag } from "../lib/tabRowDrag.js";
+import { tabNames } from "../lib/tabs.js";
 
 // The window's tabs, across its top (see tabs.js): each a card naming its repository,
 // with the branch checked out there and what its agents are doing below, as Worktrees
@@ -31,79 +29,23 @@ const titleOf = (tab) => [tab.path ?? "Choose a repository to open", agentOf(tab
 const detailOf = (tab) => [tab.branch, STATUS[agentOf(tab)]].filter(Boolean).join(" · ");
 
 // --- Dragging a tab to move it ------------------------------------------------------
-// As a branch is dragged in the sidebar (see rowDrag.js): a copy of it follows the
-// pointer, and a line shows where it would land, in a gap the tabs there slide apart
-// to make; dropped there, the tabs slide into their new order. Escape, or dropping it
-// anywhere else, leaves it.
+// Along the row, as a terminal's tab is along its (see tabRowDrag.js).
 
 // The tabs' row, across the window, which a tab can be dropped on, and their list in it.
 const strip = ref(null);
 const list = ref(null);
 
-// How far above or below the row a tab let go of still lands in it, about a tab's
-// height: a drag along the row wanders, and missing it by a little shouldn't lose it.
-const DROP_REACH = 40;
-
-// The tab being dragged, and where it would land: { id, after }, before or after the
-// tab `id`, or null for nowhere.
-const dragging = ref(null);
-const dropAt = ref(null);
-// Where each tab was along the row, scrolled or not, as the drag started (see landingAt).
-let spans = [];
-
-const drag = pointerDrag({
-  // A copy of the tab itself, as it looks in the row, rather than only its name, held
-  // where it was grabbed, so it doesn't jump under the pointer.
-  image: ({ element }) => tabCopy(element),
-  hold: ({ element, x, y }) => grabPoint(element, x, y),
-  start({ data: tab }) {
-    dragging.value = tab.id;
-    spans = [...list.value.querySelectorAll(".tab")].map((element) => {
-      const { left, right } = element.getBoundingClientRect();
-      return { id: Number(element.dataset.id), left: alongRow(left), right: alongRow(right) };
-    });
-  },
-  move: (event) => (dropAt.value = landing(event)),
-  drop(event, image) {
-    const at = dropAt.value;
-    const id = dragging.value;
-    const to = at && dropPlace({ list: props.tabs }, id, at.id, at.after);
-    if (to == null) return;
-    // Where each tab is now, the dropped one where its copy was let go, to slide from
-    // into the new order, the gap closing at once (see .sorting).
-    const tabs = [...list.value.querySelectorAll(".tab")];
-    const before = new Map(tabs.map((element) => [element, element.getBoundingClientRect()]));
-    const dropped = tabs.find((element) => Number(element.dataset.id) === id);
-    if (dropped) before.set(dropped, image.getBoundingClientRect());
-    emit("move", id, to);
-    nextTick(() => slideFrom(before));
-  },
-  end() {
-    dragging.value = null;
-    dropAt.value = null;
-    spans = [];
-  },
+const { press, dragging, classOf } = useTabRowDrag({
+  row: strip,
+  list,
+  keys: () => props.tabs.map((tab) => tab.id),
+  move: (id, to) => emit("move", id, to),
 });
 
 function onPointerDown(event, tab) {
   if (event.button !== 0 || event.target.closest(".close")) return;
-  drag.press(event, tab);
+  press(event, tab.id);
 }
-
-// How far along the row, from its start, scrolled or not, `x` on the page is.
-const alongRow = (x) => x - list.value.getBoundingClientRect().left + list.value.scrollLeft;
-
-// Where it would land, with the pointer on the row or near it, anywhere across: at the
-// place between tabs nearest it, past either end at that end, unless that leaves it
-// where it is.
-function landing(event) {
-  const row = strip.value?.getBoundingClientRect();
-  if (!row || event.clientY < row.top - DROP_REACH || event.clientY > row.bottom + DROP_REACH) return null;
-  const at = landingAt(spans, alongRow(event.clientX));
-  return at && dropPlace({ list: props.tabs }, dragging.value, at.id, at.after) != null ? at : null;
-}
-
-onBeforeUnmount(() => drag.cancel());
 
 // --- The row scrolling -----------------------------------------------------------------
 // With more tabs than fit, the row scrolls sideways, its scrollbar hidden.
@@ -125,19 +67,17 @@ function onWheel(event) {
   list.value.scrollLeft += event.deltaY;
 }
 
-// The line where it would land, on the tab it's next to.
-const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? "drop-after" : "drop-before") : null);
 </script>
 
 <template>
   <nav ref="strip" class="tab-strip" aria-label="Tabs">
-    <div ref="list" class="tabs" :class="{ sorting: dragging != null }" role="tablist" @wheel="onWheel">
+    <div ref="list" class="tabs tab-row" :class="{ sorting: dragging != null }" role="tablist" @wheel="onWheel">
       <div
         v-for="tab in tabs"
         :key="tab.id"
         class="tab"
-        :class="[{ active: tab.id === active, dragging: tab.id === dragging }, dropClass(tab)]"
-        :data-id="tab.id"
+        :class="[{ active: tab.id === active }, classOf(tab.id)]"
+        :data-key="tab.id"
         role="tab"
         :aria-selected="tab.id === active"
         tabindex="0"
@@ -187,12 +127,10 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
   padding-left: 86px;
 }
 
+/* See .tab-row in styles.css, for dragging a tab along it. */
 .tabs {
-  /* How wide the gap the tabs slide apart to make is, where a dragged one would land. */
-  --drop-gap: 20px;
   --tab-gap: 6px;
   display: flex;
-  gap: var(--tab-gap);
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -224,12 +162,6 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
   cursor: default;
 }
 
-/* The gap where a dragged tab would land opens and closes as it moves; dropped, it
-   closes at once, as the tabs slide into their new order from where they were. */
-.tabs.sorting .tab {
-  transition: margin 150ms ease;
-}
-
 .tab:hover {
   background: var(--button-hover);
 }
@@ -240,68 +172,9 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
   color: var(--text-primary);
 }
 
-.tab.dragging {
-  opacity: 0.5;
-}
-
 .tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-
-/* Where a dragged tab would land: the tabs there slide apart, and a line, as in the
-   sidebar, grows in the middle of the gap. Only the last tab has a gap after it, as
-   anywhere else, it's before the next. */
-.tab.drop-before {
-  margin-left: var(--drop-gap);
-}
-
-.tab.drop-after {
-  margin-right: var(--drop-gap);
-}
-
-.tab.drop-before::before,
-.tab.drop-after::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  border-radius: var(--radius-xs);
-  background: var(--accent-fill);
-  pointer-events: none;
-  animation: drop-line 150ms ease-out;
-}
-
-/* In the middle of the gap and the space between tabs, 1px back for its own width. */
-.tab.drop-before::before {
-  left: calc(-1 * (var(--drop-gap) + var(--tab-gap)) / 2 - 1px);
-}
-
-/* At the row's ends, there's only the gap. */
-.tab:first-child.drop-before::before {
-  left: calc(-1 * var(--drop-gap) / 2 - 1px);
-}
-
-.tab.drop-after::before {
-  right: calc(-1 * var(--drop-gap) / 2 - 1px);
-}
-
-@keyframes drop-line {
-  from {
-    transform: scaleY(0.4);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tabs.sorting .tab {
-    transition: none;
-  }
-
-  .tab.drop-before::before,
-  .tab.drop-after::before {
-    animation: none;
-  }
 }
 
 .mark {

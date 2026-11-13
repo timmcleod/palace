@@ -652,8 +652,8 @@ kbd {
   --tab-row-height: 48px;
 }
 
-/* A compact image of what's dragged, its icon and name, as a branch or commits (see
-   Sidebar.vue and HistoryList.vue). */
+/* A compact image of commits dragged from the history, what the web view's own drag
+   shows (see HistoryList.vue). */
 .drag-image {
   position: fixed;
   top: -100px;
@@ -675,9 +675,65 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.drag-image svg {
-  flex-shrink: 0;
-  color: var(--icon);
+/* A row of tabs a tab can be dragged along (see tabRowDrag.js): the one dragged is
+   faded where it was, and where it would land, the tabs slide apart, with a line in
+   the middle of the gap. Only the last tab has a gap after it, as anywhere else,
+   it's before the next. Dropped, the gap closes at once, as the tabs slide into their
+   new order from where they were. Each row says how far apart its tabs are, as
+   --tab-gap, and how far in from their top and bottom the line stops. */
+.tab-row {
+  --drop-gap: 20px;
+  --tab-gap: 0px;
+  --drop-line-inset: 6px;
+  gap: var(--tab-gap);
+}
+
+.tab-row.sorting > * {
+  transition: margin 150ms ease;
+}
+
+.tab-row > .dragging {
+  opacity: 0.5;
+}
+
+.tab-row > .drop-before {
+  margin-left: var(--drop-gap);
+}
+
+.tab-row > .drop-after {
+  margin-right: var(--drop-gap);
+}
+
+.tab-row > .drop-before::before,
+.tab-row > .drop-after::before {
+  content: "";
+  position: absolute;
+  top: var(--drop-line-inset);
+  bottom: var(--drop-line-inset);
+  width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-fill);
+  pointer-events: none;
+}
+
+/* In the middle of the gap and the space between tabs, 1px back for its own width. */
+.tab-row > .drop-before::before {
+  left: calc(-1 * (var(--drop-gap) + var(--tab-gap)) / 2 - 1px);
+}
+
+/* At the row's ends, there's only the gap. */
+.tab-row > .drop-before:first-child::before {
+  left: calc(-1 * var(--drop-gap) / 2 - 1px);
+}
+
+.tab-row > .drop-after::before {
+  right: calc(-1 * var(--drop-gap) / 2 - 1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-row.sorting > * {
+    transition: none;
+  }
 }
 
 body.dragging-row,

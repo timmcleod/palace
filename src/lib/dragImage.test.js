@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { grabPoint, tabCopy } from "./dragImage.js";
+import { grabPoint, dragCopy } from "./dragImage.js";
 
 afterEach(() => (document.body.innerHTML = ""));
 
@@ -13,8 +13,8 @@ function tab() {
   return element;
 }
 
-test("a tab's copy looks as it does, at its width, without the line of where a drag would land", () => {
-  const copy = tabCopy(tab());
+test("a copy looks as the tab it's of does, at its width, without the line of where a drag would land", () => {
+  const copy = dragCopy(tab());
   expect(copy.classList.contains("active")).toBe(true);
   expect(copy.classList.contains("drop-before")).toBe(false);
   expect(copy.querySelector(".name").textContent).toBe("palace");
@@ -22,7 +22,7 @@ test("a tab's copy looks as it does, at its width, without the line of where a d
 });
 
 test("and isn't one to the keyboard or a screen reader", () => {
-  const copy = tabCopy(tab());
+  const copy = dragCopy(tab());
   expect(copy.hasAttribute("inert")).toBe(true);
   expect(copy.getAttribute("aria-hidden")).toBe("true");
 });

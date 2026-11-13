@@ -143,6 +143,7 @@ describe("a branch dragged by the pointer", () => {
     rows().forEach((el, i) => {
       el.getBoundingClientRect = () => ({ top: i * ROW, height: ROW, bottom: (i + 1) * ROW, left: 0, right: 240, width: 240 });
     });
+    document.querySelector(".sidebar-scroll").getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 240, height: 600, width: 240 });
     document.elementFromPoint = (_, y) => rows()[Math.floor(y / ROW)] ?? null;
   }
   const at = (key) => rows().indexOf(row(key)) * ROW;
@@ -159,14 +160,18 @@ describe("a branch dragged by the pointer", () => {
     await nextTick();
   }
 
-  test("shows its name following the pointer, and onto the middle of HEAD's row, merges it there", async () => {
+  test("shows a copy of its row following the pointer, and onto the middle of HEAD's row, merges it there", async () => {
     const { onMergeIntoHead } = sidebar();
     layOut();
     await drag("branch:feature", at("branch:main") + 14, { release: false });
-    expect(document.querySelector(".drag-image.following")?.textContent).toContain("feature");
+    // A copy of its row, as it looks in the list.
+    const image = document.querySelector(".following");
+    expect(image.classList.contains("row")).toBe(true);
+    expect(image.querySelector(".row-label").textContent).toBe("feature");
+    expect(image.hasAttribute("inert")).toBe(true);
     window.dispatchEvent(pointer("pointerup", at("branch:main") + 14));
     expect(onMergeIntoHead).toHaveBeenCalledWith("feature");
-    expect(document.querySelector(".drag-image")).toBeNull();
+    expect(document.querySelector(".following")).toBeNull();
   });
 
   test("onto the edge of another branch's row, moves it there", async () => {
@@ -180,6 +185,38 @@ describe("a branch dragged by the pointer", () => {
     expect(branchOrder()).toEqual([second, first]);
   });
 
+  test("where it would be moved, a gap opens, by the row it'd go before or after", async () => {
+    sidebar();
+    // At the top edge of HEAD's row, where it doesn't merge: before it.
+    await drag("branch:feature", at("branch:main") + 3, { release: false });
+    expect(row("branch:main").classList.contains("drop-before")).toBe(true);
+    expect(row("branch:main").classList.contains("drop-target")).toBe(false);
+    // Just below its own row, where it is: no gap.
+    window.dispatchEvent(pointer("pointermove", at("branch:feature") + 20));
+    await nextTick();
+    expect(document.querySelector(".row.drop-before, .row.drop-after")).toBeNull();
+    // Well below the branches, nowhere.
+    window.dispatchEvent(pointer("pointermove", at("branch:main") + 200));
+    await nextTick();
+    expect(document.querySelector(".row.drop-before, .row.drop-after")).toBeNull();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+  });
+
+  test("let go, the row moved slides into its place from where it was let go", async () => {
+    sidebar();
+    layOut();
+    for (const el of rows()) el.animate = vi.fn();
+    const moved = row("branch:main");
+    const was = at("branch:main");
+    await drag("branch:main", at("branch:feature") + 24, { release: false });
+    document.querySelector(".following").getBoundingClientRect = () => ({ top: 300, left: 40 });
+    window.dispatchEvent(pointer("pointerup", at("branch:feature") + 24));
+    await nextTick();
+    await nextTick();
+    // Laid out here as it was, it's put nowhere else: only that it slides from there.
+    expect(moved.animate.mock.calls[0][0]).toEqual([{ transform: `translate(0px, ${300 - was}px)` }, { transform: "none" }]);
+  });
+
   test("Escape leaves it where it was, and its release isn't a drop", async () => {
     const { onMergeIntoHead } = sidebar();
     layOut();
@@ -190,6 +227,6 @@ describe("a branch dragged by the pointer", () => {
     await nextTick();
     expect(onMergeIntoHead).not.toHaveBeenCalled();
     expect(branchOrder()).toEqual(before);
-    expect(document.querySelector(".drag-image")).toBeNull();
+    expect(document.querySelector(".following")).toBeNull();
   });
 });

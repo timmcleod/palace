@@ -168,6 +168,6 @@ test("a mouse wheel scrolls the row, and the tab that comes to show is scrolled 
   await nextTick();
   await nextTick();
   expect(shown).toHaveBeenCalled();
-  expect(shown.mock.contexts.at(-1).dataset.id).toBe("3");
+  expect(shown.mock.contexts.at(-1).dataset.key).toBe("3");
   delete Element.prototype.scrollIntoView;
 });
