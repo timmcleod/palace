@@ -24,7 +24,7 @@ import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { repositoryFolder } from "../lib/recents.js";
 import { splitKey } from "../lib/sidebarKeys.js";
 import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
-import { pointerDrag } from "../lib/rowDrag.js";
+import { edgeScroll, pointerDrag } from "../lib/rowDrag.js";
 import { inMiddle, nearestPlace, placesAmong } from "../lib/branchDrag.js";
 import { dragCopy, grabPoint } from "../lib/dragImage.js";
 import { slideFrom } from "../lib/slide.js";
@@ -211,11 +211,14 @@ const drag = pointerDrag({
   },
   end() {
     // Where each row is, the one moved where it was let go, to slide from into where
-    // it's put, the gap closing at once (see .sorting).
-    const before = new Map(rowElements().map((element) => [element, element.getBoundingClientRect()]));
-    const moved = droppedAt != null && rowElements().find((element) => element.dataset.row === dragRow.value?.key);
-    if (moved) before.set(moved, { left: before.get(moved).left, top: droppedAt });
-    nextTick(() => slideFrom(before));
+    // it's put, the gap closing at once (see .sorting). Not after a click, which isn't
+    // a drag: nothing's moved, and measuring every row would be for nothing.
+    if (dragRow.value) {
+      const before = new Map(rowElements().map((element) => [element, element.getBoundingClientRect()]));
+      const moved = droppedAt != null && rowElements().find((element) => element.dataset.row === dragRow.value.key);
+      if (moved) before.set(moved, { left: before.get(moved).left, top: droppedAt });
+      nextTick(() => slideFrom(before));
+    }
     droppedAt = null;
     spans = [];
     places = [];
@@ -274,11 +277,10 @@ function autoScroll() {
   const el = scroller.value;
   if (!dragRow.value || !el || !pointer) return;
   const rect = el.getBoundingClientRect();
-  const EDGE = 28;
-  const step = pointer.y < rect.top + EDGE ? -(rect.top + EDGE - pointer.y) : pointer.y > rect.bottom - EDGE ? pointer.y - (rect.bottom - EDGE) : 0;
+  const step = edgeScroll(pointer.y, rect.top, rect.bottom);
   if (!step || pointer.x < rect.left || pointer.x > rect.right) return;
   const before = el.scrollTop;
-  el.scrollTop += Math.sign(step) * Math.min(EDGE, Math.abs(step)) / 2;
+  el.scrollTop += step;
   if (el.scrollTop === before) return;
   aim();
   scrolling = requestAnimationFrame(autoScroll);
@@ -422,6 +424,7 @@ function onRowClick(row, event) {
             :key="row.key"
             class="row"
             :class="[dropClass(row), {
+              dragging: row.key === dragRow?.key,
               selected: row.key === selected || compared.includes(row.key),
               current: switching ? row.key === switching : row.current,
               gone: row.gone,
@@ -650,16 +653,20 @@ function onRowClick(row, event) {
   position: relative;
 }
 
-/* While a row's dragged (see branchDrag.js): where it would be moved to, the rows
-   slide apart, with a line in the middle of the gap, as between tabs (see .tab-row in
-   styles.css). Let go of, it closes at once, as the rows slide into place from where
-   they were. */
+/* While a row's dragged (see branchDrag.js): it's faded where it was, and where it
+   would be moved to, the rows slide apart, with a line in the middle of the gap, as
+   between tabs (see .tab-row in styles.css). Let go of, it closes at once, as the rows
+   slide into place from where they were. */
 .sidebar-scroll {
   --drop-gap: 12px;
 }
 
 .sidebar-scroll.sorting .row {
   transition: margin 150ms ease;
+}
+
+.row.dragging {
+  opacity: 0.5;
 }
 
 .row.drop-before {

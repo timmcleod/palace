@@ -6,6 +6,7 @@ let app;
 afterEach(() => {
   app?.unmount();
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
 });
 
 test("a dragged tab lands at the place between tabs nearest the pointer, or at an end", () => {
@@ -101,4 +102,57 @@ test("let go well away from the row, or over where it was, it isn't moved", asyn
   window.dispatchEvent(pointer("pointermove", 20));
   window.dispatchEvent(pointer("pointerup", 20));
   expect(move).not.toHaveBeenCalled();
+});
+
+test("let go of with Escape, the gap slides shut, and a click isn't measured as a drag", async () => {
+  const { root, move } = render(["k1", "k2", "k3"]);
+  const tabs = [...root.querySelectorAll(".tab")];
+  for (const el of tabs) el.animate = vi.fn();
+  tabs[0].dispatchEvent(pointer("pointerdown", 50));
+  window.dispatchEvent(pointer("pointerup", 50));
+  await nextTick();
+  expect(tabs[0].animate).not.toHaveBeenCalled();
+
+  tabs[0].dispatchEvent(pointer("pointerdown", 50));
+  window.dispatchEvent(pointer("pointermove", 210));
+  await nextTick();
+  // The gap open, k3 is laid out further along than it will be once it's shut.
+  tabs[2].getBoundingClientRect = () => ({ left: 220, right: 320, top: 0, bottom: 30 });
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+  tabs[2].getBoundingClientRect = () => ({ left: 200, right: 300, top: 0, bottom: 30 });
+  await nextTick();
+  await nextTick();
+  expect(move).not.toHaveBeenCalled();
+  expect(tabs[2].animate.mock.calls[0][0]).toEqual([{ transform: "translate(20px, 0px)" }, { transform: "none" }]);
+});
+
+test("near either end of a row that scrolls, it scrolls, and where it'd land goes with it", async () => {
+  const frames = [];
+  vi.stubGlobal("requestAnimationFrame", (frame) => frames.push(frame));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const { root, drag } = render(["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"]);
+  const list = root.querySelector(".list");
+  // 300 wide, showing three of the eight tabs, 500 to scroll.
+  list.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 30 });
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollLeft", {
+    get: () => scrolled,
+    set: (to) => {
+      scrolled = Math.max(0, Math.min(500, to));
+    },
+  });
+  root.querySelector('[data-key="k1"]').dispatchEvent(pointer("pointerdown", 50));
+  window.dispatchEvent(pointer("pointermove", 298));
+  while (frames.length) frames.shift()();
+  expect(scrolled).toBe(500);
+  await nextTick();
+  // Scrolled to the end, at its right edge is the end of the row: after the last tab.
+  expect(root.querySelector('[data-key="k8"]').classList.contains("drop-after")).toBe(true);
+  // In the middle, it doesn't; well below the row, nor near an end.
+  window.dispatchEvent(pointer("pointermove", 150));
+  window.dispatchEvent(pointer("pointermove", 2, 200));
+  while (frames.length) frames.shift()();
+  expect(scrolled).toBe(500);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+  expect(drag.dragging.value).toBeNull();
 });

@@ -1,6 +1,6 @@
 import { nextTick, onBeforeUnmount, ref } from "vue";
 import { grabPoint, dragCopy } from "./dragImage.js";
-import { pointerDrag } from "./rowDrag.js";
+import { edgeScroll, pointerDrag } from "./rowDrag.js";
 import { slideFrom } from "./slide.js";
 
 // Dragging a tab along a row of them to put it elsewhere, as the window's tabs and a
@@ -8,7 +8,8 @@ import { slideFrom } from "./slide.js";
 // rowDrag.js): a copy of the tab follows it, held where it was grabbed; the tabs slide
 // apart where it would land, a line in the gap (see .tab-row in styles.css);
 // and dropped there, they slide into their new order. Escape, or dropping it well away
-// from the row, leaves it.
+// from the row, leaves it, the gap sliding shut. Near either end of a row that scrolls,
+// it scrolls, to reach the tabs out of sight.
 
 // How far beyond the row a tab let go of still lands in it, about a tab's height: a
 // drag along the row wanders, and missing it by a little shouldn't lose it.
@@ -61,6 +62,11 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
   const dropAt = ref(null);
   // Where each tab was along the row, scrolled or not, as the drag started.
   let spans = [];
+  // Where the tab dropped was let go, on the page, to slide into its place from.
+  let droppedAt = null;
+  // Where the pointer is, for the scrolling it does near the row's ends.
+  let pointer = null;
+  let scrolling = 0;
 
   // Keys as data-key has them, whatever they were.
   const keysNow = () => keys().map(String);
@@ -68,13 +74,14 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
   // How far along the row, from its start, scrolled or not, `x` on the page is.
   const alongRow = (x) => x - list.value.getBoundingClientRect().left + list.value.scrollLeft;
 
+  // Whether `y` down the page is on the row, or near enough it.
+  const nearRow = (rect, y) => y >= rect.top - DROP_REACH && y <= rect.bottom + DROP_REACH;
+
   // With the pointer on the row or near it: at the place between tabs nearest it, past
   // either end at that end, unless that leaves it where it is.
-  function landing(event) {
+  function landing({ x, y }) {
     const rect = row.value?.getBoundingClientRect();
-    if (!rect) return null;
-    const { clientX: x, clientY: y } = event;
-    if (x < rect.left - DROP_REACH || x > rect.right + DROP_REACH || y < rect.top - DROP_REACH || y > rect.bottom + DROP_REACH) return null;
+    if (!rect || x < rect.left - DROP_REACH || x > rect.right + DROP_REACH || !nearRow(rect, y)) return null;
     const at = landingAt(spans, alongRow(x));
     return at && dropPlace(keysNow(), String(dragging.value), at) != null ? at : null;
   }
@@ -89,27 +96,53 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
         return { key: element.dataset.key, left: alongRow(left), right: alongRow(right) };
       });
     },
-    move: (event) => (dropAt.value = landing(event)),
+    move(event) {
+      pointer = { x: event.clientX, y: event.clientY };
+      dropAt.value = landing(pointer);
+      if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
+    },
     drop(event, followed) {
-      const key = dragging.value;
-      const to = dropAt.value && dropPlace(keysNow(), String(key), dropAt.value);
+      const to = dropAt.value && dropPlace(keysNow(), String(dragging.value), dropAt.value);
       if (to == null) return;
-      // Where each tab is now, the dropped one where its copy was let go, to slide from
-      // into the new order, the gap closing at once (see .tab-row.sorting).
-      const elements = tabElements();
-      const before = new Map(elements.map((element) => [element, element.getBoundingClientRect()]));
-      const dropped = elements.find((element) => element.dataset.key === String(key));
-      if (dropped) before.set(dropped, followed.getBoundingClientRect());
-      move(key, to);
-      nextTick(() => slideFrom(before));
+      droppedAt = followed.getBoundingClientRect();
+      move(dragging.value, to);
     },
     end() {
+      // Where each tab is, the gap still open, and the one dropped where its copy was let
+      // go, to slide from: into their new order, or with none, back together, the gap
+      // closing at once (see .tab-row.sorting). Not after a click, which isn't a drag.
+      if (dragging.value != null && list.value) {
+        const elements = tabElements();
+        const before = new Map(elements.map((element) => [element, element.getBoundingClientRect()]));
+        const dropped = droppedAt && elements.find((element) => element.dataset.key === String(dragging.value));
+        if (dropped) before.set(dropped, droppedAt);
+        nextTick(() => slideFrom(before));
+      }
+      cancelAnimationFrame(scrolling);
+      scrolling = 0;
+      pointer = null;
+      droppedAt = null;
       dragging.value = null;
       dropAt.value = null;
       spans = [];
     },
   });
   onBeforeUnmount(() => drag.cancel());
+
+  // Near either end of the row, on it or near it, it scrolls, faster the nearer the end,
+  // or the further past it, and where it'd land goes with it.
+  function autoScroll() {
+    scrolling = 0;
+    const el = list.value;
+    const rect = row.value?.getBoundingClientRect();
+    if (dragging.value == null || !el || !pointer || !rect || !nearRow(rect, pointer.y)) return;
+    const { left, right } = el.getBoundingClientRect();
+    const before = el.scrollLeft;
+    el.scrollLeft += edgeScroll(pointer.x, left, right);
+    if (el.scrollLeft === before) return;
+    dropAt.value = landing(pointer);
+    scrolling = requestAnimationFrame(autoScroll);
+  }
 
   function classOf(key) {
     if (dragging.value == null) return null;

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { pointerDrag } from "./rowDrag.js";
+import { SCROLL_EDGE, edgeScroll, pointerDrag } from "./rowDrag.js";
 
 afterEach(() => (document.body.innerHTML = ""));
 
@@ -111,4 +111,14 @@ test("a drop that fails still ends the drag", () => {
   expect(end).toHaveBeenCalled();
   expect(document.querySelector(".following")).toBeNull();
   expect(document.body.classList.contains("dragging-row")).toBe(false);
+});
+
+test("near a list's ends, dragging scrolls it, faster the nearer or further past the end", () => {
+  expect(edgeScroll(150, 0, 300)).toBe(0);
+  expect(edgeScroll(SCROLL_EDGE, 0, 300)).toBe(0);
+  expect(edgeScroll(20, 0, 300)).toBe(-4);
+  expect(edgeScroll(0, 0, 300)).toBe(-SCROLL_EDGE / 2);
+  expect(edgeScroll(-100, 0, 300)).toBe(-SCROLL_EDGE / 2);
+  expect(edgeScroll(290, 0, 300)).toBe(9);
+  expect(edgeScroll(900, 0, 300)).toBe(SCROLL_EDGE / 2);
 });

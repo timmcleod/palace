@@ -11,6 +11,19 @@
 // How far the pointer moves, pressed, before it's a drag rather than a click.
 const DRAG_DISTANCE = 4;
 
+// How near a scrolling list's ends the pointer, dragging, scrolls it.
+export const SCROLL_EDGE = 28;
+
+/**
+ * How far a list running from `start` to `end` on the page scrolls in a frame, with the
+ * pointer dragging at `at` along it: toward whichever end it's within SCROLL_EDGE of, or
+ * past, faster the nearer, or further past, that end; 0 away from both.
+ */
+export function edgeScroll(at, start, end) {
+  const into = at < start + SCROLL_EDGE ? at - (start + SCROLL_EDGE) : at > end - SCROLL_EDGE ? at - (end - SCROLL_EDGE) : 0;
+  return (Math.sign(into) * Math.min(SCROLL_EDGE, Math.abs(into))) / 2;
+}
+
 /**
  * A pointer drag, its parts the caller's own:
  *   image(pressed)  the element to follow the pointer, as the drag starts, styled as

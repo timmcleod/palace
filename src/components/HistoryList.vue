@@ -337,7 +337,8 @@ function onDragStart(index, event) {
   event.dataTransfer.effectAllowed = moving ? "move" : "copy";
   event.dataTransfer.setData("text/plain", picking.length > 1 ? picking.map((c) => c.short_id).join(" ") : commit.short_id);
   if (!moving) event.dataTransfer.setData(COMMIT_TYPE, picking.map((c) => c.id).join(" "));
-  // A compact image of what's being dragged, like a branch dragged in the sidebar.
+  // A compact image of what's being dragged: a commit's short hash and summary, or how
+  // many commits there are.
   dragImage = document.createElement("div");
   dragImage.className = "drag-image";
   dragImage.textContent = picking.length > 1 ? `${picking.length} commits` : `${commit.short_id}  ${commit.summary}`;

@@ -169,6 +169,9 @@ describe("a branch dragged by the pointer", () => {
     expect(image.classList.contains("row")).toBe(true);
     expect(image.querySelector(".row-label").textContent).toBe("feature");
     expect(image.hasAttribute("inert")).toBe(true);
+    // Faded where it was; its copy isn't.
+    expect(row("branch:feature").classList.contains("dragging")).toBe(true);
+    expect(image.classList.contains("dragging")).toBe(false);
     window.dispatchEvent(pointer("pointerup", at("branch:main") + 14));
     expect(onMergeIntoHead).toHaveBeenCalledWith("feature");
     expect(document.querySelector(".following")).toBeNull();
@@ -215,6 +218,16 @@ describe("a branch dragged by the pointer", () => {
     await nextTick();
     // Laid out here as it was, it's put nowhere else: only that it slides from there.
     expect(moved.animate.mock.calls[0][0]).toEqual([{ transform: `translate(0px, ${300 - was}px)` }, { transform: "none" }]);
+  });
+
+  test("a click on a row isn't measured as a drag would be", async () => {
+    sidebar();
+    layOut();
+    const measured = vi.spyOn(row("branch:main"), "getBoundingClientRect");
+    row("branch:main").dispatchEvent(pointer("pointerdown", at("branch:main") + 14));
+    window.dispatchEvent(pointer("pointerup", at("branch:main") + 14));
+    await nextTick();
+    expect(measured).not.toHaveBeenCalled();
   });
 
   test("Escape leaves it where it was, and its release isn't a drop", async () => {
