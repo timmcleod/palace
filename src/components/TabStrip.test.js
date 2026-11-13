@@ -32,15 +32,43 @@ function render(props) {
 const pointer = (type, x, y = 20) => new PointerEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
 
 test("names each tab for its repository, its branch and what its agent's doing below, and one with none New Tab", () => {
-  const { root } = render({ tabs: [tab(1, "palace"), tab(2, null, { branch: null })], active: 1, agents: { "/code/palace": "blocked" } });
+  const palace = tab(1, "palace", { ahead: 2, behind: 1, changes: 3 });
+  const { root } = render({ tabs: [palace, tab(2, null, { branch: null })], active: 1, agents: { "/code/palace": "blocked" } });
   const tabs = root.querySelectorAll(".tab");
   expect(tabs[0].querySelector(".name").textContent).toBe("palace");
-  expect(tabs[0].querySelector(".detail").textContent).toBe("main · needs you");
-  expect(tabs[0].querySelector(".dot.blocked")).not.toBeNull();
+  const parts = [...tabs[0].querySelectorAll(".detail > span")].map((part) => [part.className, part.textContent]);
+  expect(parts).toEqual([
+    ["branch", "main"],
+    ["attention", "needs you"],
+    ["sync", "↑2 ↓1"],
+    ["changes", "3 changed"],
+  ]);
+  expect(tabs[0].querySelector(".tile.blocked .badge")).not.toBeNull();
   expect(tabs[0].title).toBe("/code/palace\nIts agent needs you");
   expect(tabs[0].classList.contains("active")).toBe(true);
   expect(tabs[1].textContent).toContain("New Tab");
-  expect(tabs[1].querySelector(".detail")).toBeNull();
+  expect(tabs[1].querySelector(".detail, .tile")).toBeNull();
+});
+
+test("each tab is known by a tile in its repository's color, a worktree's the same as its repository's", () => {
+  const worktree = tab(2, "palace-tabs", { home: "/code/palace" });
+  const { root } = render({ tabs: [tab(1, "palace", { home: "/code/palace" }), worktree, tab(3, "api", { home: "/code/api" })], active: 1, agents: { "/code/palace": "working" } });
+  const [palace, tabs, api] = root.querySelectorAll(".tab");
+  expect(palace.querySelector(".tile").textContent.trim()).toBe("P");
+  expect(palace.querySelector(".tile .trace")).not.toBeNull();
+  expect(palace.style.getPropertyValue("--tab-color")).toMatch(/^var\(--graph-[1-6]\)$/);
+  // The worktree, with the branch mark rather than an initial, in its repository's color.
+  expect(tabs.querySelector(".tile svg")).not.toBeNull();
+  expect(tabs.querySelector(".tile").textContent.trim()).toBe("");
+  expect(tabs.style.getPropertyValue("--tab-color")).toBe(palace.style.getPropertyValue("--tab-color"));
+  expect(api.querySelector(".tile").textContent.trim()).toBe("A");
+});
+
+test("of two tabs named alike, the folder each is in is shown before its name, fainter", () => {
+  const { root } = render({ tabs: [tab(1, "palace", { path: "/work/palace" }), tab(2, "palace", { path: "/oss/palace" })], active: 1 });
+  const names = [...root.querySelectorAll(".name")];
+  expect(names.map((name) => name.textContent)).toEqual(["work/palace", "oss/palace"]);
+  expect(names[1].querySelector(".parent").textContent).toBe("oss/");
 });
 
 test("clicking a tab shows it, its × closes it, and + Open opens one", () => {
@@ -74,7 +102,7 @@ test("a tab dragged shows where it would land, in a gap there, and moves there a
   expect(image.querySelector(".name").textContent).toBe("b");
   expect(image.querySelector(".detail").textContent).toBe("main");
   expect(image.style.width).toBe("200px");
-  expect(image.style.transform).toBe("translate(490px, 0px)");
+  expect(image.style.getPropertyValue("translate")).toBe("490px 0px");
   expect(image.hasAttribute("inert")).toBe(true);
   expect(middle.classList.contains("dragging")).toBe(true);
   expect(last.classList.contains("drop-after")).toBe(true);
@@ -129,7 +157,11 @@ test("dropped, the tab slides into its place from where its copy was let go", as
   for (const element of tabs) element.animate = vi.fn();
   tabs[0].dispatchEvent(pointer("pointerdown", 100));
   window.dispatchEvent(pointer("pointermove", 550));
-  document.querySelector(".following").getBoundingClientRect = () => ({ left: 450, top: 30 });
+  // Its copy, 200 by 40, turned a little: drawn 4 past its box at each side, and 5 above
+  // and below. It slides from its box, where the copy was.
+  const copy = document.querySelector(".following");
+  Object.defineProperties(copy, { offsetWidth: { value: 200 }, offsetHeight: { value: 40 } });
+  copy.getBoundingClientRect = () => ({ left: 446, top: 25, width: 208, height: 50 });
   window.dispatchEvent(pointer("pointerup", 550));
   await nextTick();
   // Not put in its new place here, as the window's tabs are App's: none moved but it.

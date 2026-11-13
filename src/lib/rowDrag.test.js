@@ -40,7 +40,7 @@ test("the image is placed on the window, whatever it's styled as, and held 14px 
   expect(image.style.position).toBe("fixed");
   expect(image.style.pointerEvents).toBe("none");
   // The page under test has no layout: the image is 0 pixels high.
-  expect(image.style.transform).toBe("translate(26px, 10px)");
+  expect(image.style.getPropertyValue("translate")).toBe("26px 10px");
 });
 
 test("or held at the point hold() gives", () => {
@@ -49,7 +49,24 @@ test("or held at the point hold() gives", () => {
   row.dispatchEvent(pointer("pointerdown", 10));
   window.dispatchEvent(pointer("pointermove", 40, 10));
   expect(hold).toHaveBeenCalledWith(expect.objectContaining({ data: "feature", element: row, x: 10, y: 10 }));
-  expect(document.querySelector(".following").style.transform).toBe("translate(10px, 6px)");
+  expect(document.querySelector(".following").style.getPropertyValue("translate")).toBe("10px 6px");
+});
+
+test("turned or scaled, all of it as drawn stays in the window, its corners too", () => {
+  // 200 by 40, drawn 8 wider and 10 higher, as turned a little: 4 and 5 past each side.
+  const image = () => {
+    const el = document.createElement("div");
+    Object.defineProperties(el, { offsetWidth: { value: 200 }, offsetHeight: { value: 40 } });
+    el.getBoundingClientRect = () => ({ left: -4, top: -5, right: 204, bottom: 45, width: 208, height: 50 });
+    return el;
+  };
+  const { row } = setUp({ image, hold: () => ({ x: 0, y: 0 }) });
+  row.dispatchEvent(pointer("pointerdown", 10));
+  window.dispatchEvent(pointer("pointermove", -100, -100));
+  const following = document.querySelector(".following");
+  expect(following.style.getPropertyValue("translate")).toBe("4px 5px");
+  window.dispatchEvent(pointer("pointermove", innerWidth + 100, innerHeight + 100));
+  expect(following.style.getPropertyValue("translate")).toBe(`${innerWidth - 204}px ${innerHeight - 45}px`);
 });
 
 test("released, it drops, then ends, and the click that follows isn't one", () => {

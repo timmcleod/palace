@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { activeTab, closeTab, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabNames, tabWith, tabsForBackend } from "./tabs.js";
+import { activeTab, closeTab, isWorktree, leftBy, makeTab, moveTab, openTab, showIn, showNext, showNumber, tabColor, tabDetails, tabInitial, tabNames, tabWith, tabsForBackend } from "./tabs.js";
 
 // Tabs with the repositories at `paths` open, the first showing.
 function tabsOf(...paths) {
@@ -117,4 +117,53 @@ test("the backend's told the repositories tabs showed before and keep, once each
   showIn(second, { path: "/w", name: "w", branch: "main" });
   showIn(second, { path: "/b", name: "b", branch: "main" });
   expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 0, kept: ["/w"] });
+});
+
+test("a tab notes its repository's home, and its commits and changes, as it shows one", () => {
+  const tab = makeTab("/w");
+  expect(tab).toMatchObject({ home: "/w", ahead: 0, behind: 0, changes: 0 });
+  showIn(tab, { path: "/w", name: "w", branch: "next", home: "/r", ahead: 2, behind: 1, changes: 3 });
+  expect(tab).toMatchObject({ home: "/r", ahead: 2, behind: 1, changes: 3 });
+  expect(isWorktree(tab)).toBe(true);
+  showIn(tab, { path: "/r", name: "r", branch: "main" });
+  expect(tab).toMatchObject({ home: "/r", ahead: 0, behind: 0, changes: 0 });
+  expect(isWorktree(tab)).toBe(false);
+  showIn(tab, null);
+  expect(tab.home).toBeNull();
+});
+
+test("a repository's color is the same every time, its worktrees' its own, and repositories have several", () => {
+  const color = tabColor({ path: "/code/palace", home: "/code/palace" });
+  expect(color).toBeGreaterThanOrEqual(1);
+  expect(color).toBeLessThanOrEqual(6);
+  expect(tabColor({ path: "/code/palace" })).toBe(color);
+  expect(tabColor({ path: "/code/palace-tabs", home: "/code/palace" })).toBe(color);
+  const many = new Set(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((name) => tabColor({ path: `/code/${name}` })));
+  expect(many.size).toBeGreaterThan(3);
+  expect(tabColor({ path: null, home: null })).toBeNull();
+});
+
+test("a repository's tile has its name's first letter or digit", () => {
+  expect(tabInitial("palace")).toBe("P");
+  expect(tabInitial(".dotfiles")).toBe("D");
+  expect(tabInitial("2048-game")).toBe("2");
+  expect(tabInitial("élan")).toBe("É");
+  expect(tabInitial("__")).toBe("_");
+  expect(tabInitial(null)).toBe("");
+});
+
+test("below a tab's name: its branch, its agent, its commits to push and pull, and its changes", () => {
+  const tab = { branch: "main", ahead: 0, behind: 0, changes: 0 };
+  expect(tabDetails(tab)).toEqual([{ text: "main", kind: "branch" }]);
+  expect(tabDetails({ ...tab, ahead: 2, changes: 1 }, "working")).toEqual([
+    { text: "main", kind: "branch" },
+    { text: "agent working", kind: "agent" },
+    { text: "↑2", kind: "sync" },
+    { text: "1 changed", kind: "changes" },
+  ]);
+  expect(tabDetails({ ...tab, behind: 4 }, "error").slice(1)).toEqual([
+    { text: "stopped with an error", kind: "attention" },
+    { text: "↓4", kind: "sync" },
+  ]);
+  expect(tabDetails({ branch: null, ahead: 0, behind: 0, changes: 0 })).toEqual([]);
 });

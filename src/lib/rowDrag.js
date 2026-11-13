@@ -45,6 +45,9 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
   let dragging = false;
   let following = null;
   let held = null;
+  // How far the image, as drawn, reaches past its own box on each side: turned or
+  // scaled, as a tab's copy is, its corners do.
+  let spill = { x: 0, y: 0 };
 
   function press(event, data) {
     if (pressed) cancel();
@@ -67,6 +70,8 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
     Object.assign(following.style, { position: "fixed", top: "0", left: "0", zIndex: "1000", visibility: "hidden", pointerEvents: "none", opacity: "0.9" });
     document.body.append(following);
     held = hold?.(pressed) ?? { x: 14, y: following.offsetHeight / 2 };
+    const drawn = following.getBoundingClientRect();
+    spill = { x: Math.max(0, (drawn.width - following.offsetWidth) / 2), y: Math.max(0, (drawn.height - following.offsetHeight) / 2) };
     document.body.classList.add("dragging-row");
     window.getSelection()?.removeAllRanges();
     start(pressed);
@@ -80,11 +85,14 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
     }
     event.preventDefault();
     // Held where hold() says. With the pointer out of the window, it stays at the
-    // window's edge nearest it, as the page can't draw beyond the window.
+    // window's edge nearest it, as the page can't draw beyond the window, all of it as
+    // drawn. Moved there by `translate`, which comes after any turn or scale its styles
+    // give it, so those are about its own middle: with `transform`, they'd come after,
+    // about where it started, and swing it further off the further it went.
     const { offsetWidth: width, offsetHeight: height } = following;
-    const x = Math.min(Math.max(event.clientX - held.x, 0), innerWidth - width);
-    const y = Math.min(Math.max(event.clientY - held.y, 0), innerHeight - height);
-    following.style.transform = `translate(${x}px, ${y}px)`;
+    const x = Math.min(Math.max(event.clientX - held.x, spill.x), innerWidth - width - spill.x);
+    const y = Math.min(Math.max(event.clientY - held.y, spill.y), innerHeight - height - spill.y);
+    following.style.setProperty("translate", `${x}px ${y}px`);
     following.style.visibility = "visible";
     move(event);
   }
@@ -134,6 +142,7 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
     following?.remove();
     following = null;
     held = null;
+    spill = { x: 0, y: 0 };
     if (was) end();
   }
 

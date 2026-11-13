@@ -104,7 +104,11 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
     drop(event, followed) {
       const to = dropAt.value && dropPlace(keysNow(), String(dragging.value), dropAt.value);
       if (to == null) return;
-      droppedAt = followed.getBoundingClientRect();
+      // Its box, where it's drawn: the copy may be turned or scaled (see TabStrip.vue),
+      // which takes its corners out past where it is.
+      const drawn = followed.getBoundingClientRect();
+      const [left, top] = [drawn.left + (drawn.width - followed.offsetWidth) / 2, drawn.top + (drawn.height - followed.offsetHeight) / 2];
+      droppedAt = { left, top };
       move(dragging.value, to);
     },
     end() {
