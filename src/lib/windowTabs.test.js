@@ -60,7 +60,12 @@ test("starts with the tabs the window had, the one that was showing showing; or 
   mounted.unmount();
   const first = await windowWith({ tabs: { repos: [], active: null }, first: true });
   expect([paths(first), first.first.value]).toEqual([["/code/last"], first.tabs.active]);
-  expect(invoke).toHaveBeenCalledWith("set_window_tabs", { tabs: { repos: ["/code/last"], active: 0, kept: [] } });
+  expect(invoke).toHaveBeenCalledWith("set_window_tabs", { tabs: expect.objectContaining({ repos: ["/code/last"], active: 0, kept: [] }) });
+});
+
+test("a tab behind the one showing reopens known as it was, before it's read its repository", async () => {
+  const w = await windowWith({ tabs: { repos: ["/a", "/a-next"], active: 0, homes: { "/a-next": { path: "/a", worktree: true } } }, first: false });
+  expect(w.tabs.list.map((tab) => [tab.home, tab.worktree])).toEqual([["/a", false], ["/a", true]]);
 });
 
 test("a repository open in another tab shows that tab, and the empty tab it was chosen in goes", async () => {

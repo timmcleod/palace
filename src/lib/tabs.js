@@ -5,10 +5,11 @@ import { folderName } from "./format.js";
 // choose one. Each is kept running while another shows.
 //
 // The tabs are { list, active }: `list` in the order they're shown, each
-//   { id, path, name, branch, home, ahead, behind, changes, task, seen }
+//   { id, path, name, branch, home, worktree, ahead, behind, changes, task, seen }
 // where `path` is the repository it has open, or is opening, or null for none; `name`
-// and `branch` what it shows of it; `home`, for a worktree, the repository it was added
-// to, or else `path` again; `ahead` and `behind`, its branch's commits not pushed and not
+// and `branch` what it shows of it; `home`, the repository's own working copy, as git
+// lists it, the same for its worktrees, and `worktree`, whether `path` is one of those;
+// `ahead` and `behind`, its branch's commits not pushed and not
 // pulled; `changes`, how many files have changes not committed; `task`, given as it
 // opens, what its agent is to start on; and `seen`, every repository it's shown, once it
 // has, whose terminals go on running as it shows another. `active` is the id of the one
@@ -16,20 +17,37 @@ import { folderName } from "./format.js";
 
 let nextId = 1;
 
-/** A new tab, for the repository at `path`, or with none, still to choose one. */
-export function makeTab(path = null, { task = null } = {}) {
-  return { id: nextId++, path, name: path ? folderName(path) : null, branch: null, home: path, ahead: 0, behind: 0, changes: 0, task, seen: [] };
+/**
+ * A new tab, for the repository at `path`, or with none, still to choose one. `home`,
+ * { path, worktree }, is what it was known by before, as it reopens (see Home in
+ * windows.rs), until it's read its repository.
+ */
+export function makeTab(path = null, { task = null, home = null } = {}) {
+  return {
+    id: nextId++,
+    path,
+    name: path ? folderName(path) : null,
+    branch: null,
+    home: home?.path ?? path,
+    worktree: !!home?.worktree,
+    ahead: 0,
+    behind: 0,
+    changes: 0,
+    task,
+    seen: [],
+  };
 }
 
 /**
  * Notes that the tab shows `shown`, or none: { path, name, branch }, and as it can,
- * { home, ahead, behind, changes } (see the tabs, above).
+ * { home, worktree, ahead, behind, changes } (see the tabs, above).
  */
 export function showIn(tab, shown) {
   tab.path = shown?.path ?? null;
   tab.name = shown?.name ?? null;
   tab.branch = shown?.branch ?? null;
   tab.home = shown?.home ?? tab.path;
+  tab.worktree = !!shown?.worktree;
   tab.ahead = shown?.ahead ?? 0;
   tab.behind = shown?.behind ?? 0;
   tab.changes = shown?.changes ?? 0;
@@ -54,7 +72,7 @@ export function tabColor(tab) {
 }
 
 /** Whether the tab shows a worktree, rather than a repository's own working copy. */
-export const isWorktree = (tab) => !!(tab.path && tab.home && tab.home !== tab.path);
+export const isWorktree = (tab) => !!(tab.path && tab.worktree);
 
 /**
  * The letter a tab's repository is known by, on its tile: its name's first letter or
@@ -159,14 +177,16 @@ export function moveTab(tabs, id, to) {
 
 /**
  * The tabs as the backend keeps them (see Tabs in windows.rs): the repositories open,
- * in order, and which of them is showing, by its place among them; and `kept`, those
- * tabs showed before and keep the terminals and edits of, not open now. Tabs with none
- * open are left out, and a repository is open in one tab at a time.
+ * in order, and which of them is showing, by its place among them; `kept`, those tabs
+ * showed before and keep the terminals and edits of, not open now; and `homes`, what each
+ * tab's known by, by its repository, to reopen as it was. Tabs with none open are left
+ * out, and a repository is open in one tab at a time.
  */
 export function tabsForBackend(tabs) {
   const open = tabs.list.filter((tab) => tab.path);
   const at = open.findIndex((tab) => tab.id === tabs.active);
   const repos = open.map((tab) => tab.path);
   const kept = [...new Set(tabs.list.flatMap((tab) => tab.seen))].filter((path) => !repos.includes(path));
-  return { repos, active: at < 0 ? null : at, kept };
+  const homes = Object.fromEntries(open.map((tab) => [tab.path, { path: tab.home ?? tab.path, worktree: tab.worktree }]));
+  return { repos, active: at < 0 ? null : at, kept, homes };
 }

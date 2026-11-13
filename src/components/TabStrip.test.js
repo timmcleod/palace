@@ -51,7 +51,7 @@ test("names each tab for its repository, its branch and what its agent's doing b
 });
 
 test("each tab is known by a tile in its repository's color, a worktree's the same as its repository's", () => {
-  const worktree = tab(2, "palace-tabs", { home: "/code/palace" });
+  const worktree = tab(2, "palace-tabs", { home: "/code/palace", worktree: true });
   const { root } = render({ tabs: [tab(1, "palace", { home: "/code/palace" }), worktree, tab(3, "api", { home: "/code/api" })], active: 1, agents: { "/code/palace": "working" } });
   const [palace, tabs, api] = root.querySelectorAll(".tab");
   expect(palace.querySelector(".tile").textContent.trim()).toBe("P");

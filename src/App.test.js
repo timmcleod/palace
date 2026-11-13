@@ -233,10 +233,19 @@ test("a workspace that isn't the one showing leaves the window's title and keys 
   expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
 });
 
+test("a repository opened through a link is known by its own folder as git lists it, as its worktrees are", async () => {
+  // Opened as /code/palace, a link to where git has it.
+  const main = { path: "/disk/palace", branch: "main", main: true, current: true, locked: false, prunable: false };
+  repositories[PALACE] = repository(PALACE, "palace", { worktrees: [main] });
+  await start();
+  await until(() => !!calls("set_window_tabs").at(-1)?.tabs.homes?.[PALACE]);
+  expect(calls("set_window_tabs").at(-1).tabs.homes).toEqual({ [PALACE]: { path: "/disk/palace", worktree: false } });
+});
+
 test("a repository opened is the window's: the backend's told, the window's titled, and its folder watched", async () => {
   await start();
   await until(() => calls("watch_repo").length > 0);
-  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE], active: 0, kept: [] } });
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: expect.objectContaining({ repos: [PALACE], active: 0, kept: [] }) });
   expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
   expect(calls("watch_repo")).toEqual([{ path: PALACE }]);
 });
@@ -407,7 +416,7 @@ test("a new tab opens to choose a repository in, which opens there, beside the o
   await openInNewTab("other");
   expect(tabNames()).toEqual(["palace", "other"]);
   await until(() => calls("set_window_tabs").at(-1)?.tabs.repos.length === 2);
-  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE, OTHER], active: 1, kept: [] } });
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: expect.objectContaining({ repos: [PALACE, OTHER], active: 1, kept: [] }) });
   // Each keeps its own repository, watched, while the other shows.
   expect(calls("watch_repo")).toEqual([{ path: PALACE }, { path: OTHER }]);
   expect(calls("release_repo")).toEqual([]);
@@ -578,7 +587,7 @@ test("a notice clicked for a tab closed since opens it once, not twice", async (
   await until(() => showingTab() === "other");
   await settle();
   expect(calls("repo_overview").filter((args) => args.path === OTHER).length - before).toBe(1);
-  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE, OTHER], active: 1, kept: [] } });
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: expect.objectContaining({ repos: [PALACE, OTHER], active: 1, kept: [] }) });
 });
 
 test("with git missing, the tabs the window had are kept for when it's found", async () => {

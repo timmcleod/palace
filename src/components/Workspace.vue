@@ -871,17 +871,19 @@ function showTitle() {
 watch(() => props.active, showTitle);
 
 // What it shows, for its tab to say (see showIn), and the window to note, so it's
-// shown here rather than opened again elsewhere: for a worktree, the repository it was
-// added to as its home, whose color its tab has. That it shows none is said once it's
+// shown here rather than opened again elsewhere: as its home, whose color its tab has,
+// the repository's own working copy, as git lists it, so a worktree's is the same
+// however either was opened, through a link or not. That it shows none is said once it's
 // tried to open what it was given (see start): until then, its tab stands for that one.
 watch(
   () => {
     const shown = overview.value;
     if (!shown) return null;
     const main = shown.worktrees.find((worktree) => worktree.main);
-    const home = main && !main.current ? main.path : shown.path;
+    const home = main?.path ?? shown.path;
+    const worktree = !!main && !main.current;
     const { ahead = 0, behind = 0 } = headBranch.value ?? {};
-    return JSON.stringify({ path: shown.path, name: shown.name, branch: shown.head.branch ?? shown.head.short_id, home, ahead, behind, changes: shown.changes });
+    return JSON.stringify({ path: shown.path, name: shown.name, branch: shown.head.branch ?? shown.head.short_id, home, worktree, ahead, behind, changes: shown.changes });
   },
   (shown) => emit("shows", shown && JSON.parse(shown)),
 );

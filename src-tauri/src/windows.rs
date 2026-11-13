@@ -27,6 +27,22 @@ pub struct Tabs {
     /// page: not saved for reopening, as a window starts with none kept.
     #[serde(skip_serializing)]
     pub kept: Vec<String>,
+    /// What each tab is known by, by the repository in `repos` it has open, so it's shown
+    /// in its colors as it reopens, before its repository's read: as a tab behind the one
+    /// showing isn't until it's shown. By repository rather than in order, so it stays
+    /// with its tab as those gone are left out (see reopen::take). Missing, as from a
+    /// version before, it's worked out once each opens.
+    pub homes: std::collections::BTreeMap<String, Home>,
+}
+
+/// A tab's repository as its tile shows it (see tabColor in tabs.js): `path`, the
+/// repository's own working copy, the same for its worktrees; and whether the tab shows
+/// one of those, rather than that.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[serde(default)]
+pub struct Home {
+    pub path: String,
+    pub worktree: bool,
 }
 
 impl Tabs {

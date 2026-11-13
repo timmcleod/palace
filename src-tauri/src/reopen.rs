@@ -380,7 +380,9 @@ mod tests {
     #[test]
     fn a_windows_tabs_are_noted_in_order_with_the_one_showing() {
         let path = note_file("tabs");
-        let tabs = Tabs { repos: vec!["/code/a".into(), "/code/b".into()], active: Some(1), ..Default::default() };
+        let worktree = crate::windows::Home { path: "/code/a".into(), worktree: true };
+        let homes = [("/code/a-next".to_string(), worktree)].into();
+        let tabs = Tabs { repos: vec!["/code/a-next".into(), "/code/b".into()], active: Some(1), homes, ..Default::default() };
         let windows = vec![Placed { tabs, first: true, ..Default::default() }];
         std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
         assert_eq!(take(&path), windows);

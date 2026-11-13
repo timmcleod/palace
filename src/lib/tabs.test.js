@@ -73,9 +73,9 @@ test("the backend's told the repositories open, in order, and which shows among 
   const tabs = tabsOf("/a");
   openTab(tabs);
   openTab(tabs, "/b");
-  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 1, kept: [] });
+  expect(tabsForBackend(tabs)).toMatchObject({ repos: ["/a", "/b"], active: 1, kept: [] });
   showNumber(tabs, 2);
-  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: null, kept: [] });
+  expect(tabsForBackend(tabs)).toMatchObject({ repos: ["/a", "/b"], active: null, kept: [] });
   expect(tabWith(tabs, null)).toBeNull();
 });
 
@@ -116,13 +116,13 @@ test("the backend's told the repositories tabs showed before and keep, once each
   showIn(first, { path: "/a", name: "a", branch: "main" });
   showIn(second, { path: "/w", name: "w", branch: "main" });
   showIn(second, { path: "/b", name: "b", branch: "main" });
-  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 0, kept: ["/w"] });
+  expect(tabsForBackend(tabs)).toMatchObject({ repos: ["/a", "/b"], active: 0, kept: ["/w"] });
 });
 
 test("a tab notes its repository's home, and its commits and changes, as it shows one", () => {
   const tab = makeTab("/w");
   expect(tab).toMatchObject({ home: "/w", ahead: 0, behind: 0, changes: 0 });
-  showIn(tab, { path: "/w", name: "w", branch: "next", home: "/r", ahead: 2, behind: 1, changes: 3 });
+  showIn(tab, { path: "/w", name: "w", branch: "next", home: "/r", worktree: true, ahead: 2, behind: 1, changes: 3 });
   expect(tab).toMatchObject({ home: "/r", ahead: 2, behind: 1, changes: 3 });
   expect(isWorktree(tab)).toBe(true);
   showIn(tab, { path: "/r", name: "r", branch: "main" });
@@ -130,6 +130,15 @@ test("a tab notes its repository's home, and its commits and changes, as it show
   expect(isWorktree(tab)).toBe(false);
   showIn(tab, null);
   expect(tab.home).toBeNull();
+});
+
+test("a tab reopens known as it was, a worktree in its repository's color, until it's read its own", () => {
+  const tabs = { list: [], active: null };
+  const tab = openTab(tabs, "/r-next", { home: { path: "/r", worktree: true } });
+  expect([tab.home, isWorktree(tab), tabColor(tab)]).toEqual(["/r", true, tabColor(makeTab("/r"))]);
+  expect(tabsForBackend(tabs).homes).toEqual({ "/r-next": { path: "/r", worktree: true } });
+  // Known as nothing before, it's its own, until it's read.
+  expect(tabsForBackend({ list: [makeTab("/a")], active: null }).homes).toEqual({ "/a": { path: "/a", worktree: false } });
 });
 
 test("a repository's color is the same every time, its worktrees' its own, and repositories have several", () => {

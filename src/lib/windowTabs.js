@@ -43,7 +43,8 @@ export function useTabs({ window }) {
       const last = await lastRepository();
       if (last) repos.push(last);
     }
-    for (const path of repos) openTab(tabs, path);
+    // Each known as it was, in its colors, though one behind isn't read till it shows.
+    for (const path of repos) openTab(tabs, path, { home: start.tabs?.homes?.[path] });
     if (!tabs.list.length) openTab(tabs);
     tabs.active = (tabs.list[start.tabs?.active ?? 0] ?? tabs.list[0]).id;
     if (start.first) first.value = tabs.active;
