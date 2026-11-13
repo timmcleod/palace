@@ -90,8 +90,8 @@ async function load({ resetScroll }) {
     // shown so none is shown blank.
     const [position, firstPage] = newest
       ? await Promise.all([
-          invoke("history_position", { generation: next.generation, id: newest.id }).catch(() => null),
-          invoke("history_page", { generation: next.generation, offset: 0, limit: PAGE_SIZE }).catch(() => null),
+          invoke("history_position", { path: props.path, generation: next.generation, id: newest.id }).catch(() => null),
+          invoke("history_page", { path: props.path, generation: next.generation, offset: 0, limit: PAGE_SIZE }).catch(() => null),
         ])
       : [];
     if (seq !== loadSeq) return;
@@ -128,7 +128,7 @@ async function loadPage(page) {
 
   inflight.add(key);
   try {
-    const rows = await invoke("history_page", { generation, offset: page * PAGE_SIZE, limit: PAGE_SIZE });
+    const rows = await invoke("history_page", { path: props.path, generation, offset: page * PAGE_SIZE, limit: PAGE_SIZE });
     if (summary.value?.generation === generation) {
       pages.set(page, rows);
     }
@@ -420,7 +420,7 @@ async function reveal() {
   pendingReveal = null;
   const newest = orNewest;
   orNewest = false;
-  const index = await invoke("history_position", { generation, id }).catch(() => null);
+  const index = await invoke("history_position", { path: props.path, generation, id }).catch(() => null);
   if (summary.value?.generation !== generation || props.selectedId !== id) return;
   if (index == null) {
     if (newest && summary.value.total) {

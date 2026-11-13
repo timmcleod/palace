@@ -50,6 +50,12 @@ one window at a time. The backend keeps track of what belongs to which window, a
 it all go when the window closes. Code that keeps per-window state on the backend should
 do the same.
 
+What it keeps for a repository, its file watcher, its history and its network work, is
+kept by window and repository (`per_repo.rs`), not by window alone, and the events they
+send say which repository they're about. So nothing assumes a window holds only one: a
+window done with a repository lets go of its part (`release_repo`), and the page hears
+only its own repository's events.
+
 ## The page
 
 - **`App.vue`** is the window: what's its own whatever it shows. It checks for git at

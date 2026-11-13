@@ -21,6 +21,7 @@ mod markdown;
 mod menu;
 mod notify;
 mod open;
+mod per_repo;
 mod pulls;
 mod quit;
 mod rebase;
@@ -240,6 +241,7 @@ pub fn run() {
 
             windows::window_start,
             windows::set_window_repo,
+            windows::release_repo,
             windows::show_window_with,
             windows::show_notice,
             windows::show_terminal_tab,

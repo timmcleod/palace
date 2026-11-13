@@ -1,25 +1,32 @@
 use crate::cli;
 use git2::{BranchType, ErrorCode, Oid, Repository, Sort};
 use serde::Serialize;
+use crate::per_repo::PerRepo;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{State, WebviewWindow};
 
-/// The most recently loaded history, for each window. Walking and laying out the graph
-/// happens once per load; the list then fetches commit details page by page as it
-/// scrolls. Each window has its own, so one loading doesn't wait for or replace another's.
+/// The most recently loaded history, for each repository a window has open (see
+/// per_repo.rs). Walking and laying out the graph happens once per load; the list then
+/// fetches commit details page by page as it scrolls. Each repository has its own, so one
+/// loading doesn't wait for or replace another's.
 #[derive(Default)]
-pub struct HistoryState(Mutex<HashMap<String, Arc<Mutex<Option<History>>>>>);
+pub struct HistoryState(PerRepo<Arc<Mutex<Option<History>>>>);
 
 impl HistoryState {
-    fn of(&self, window: &WebviewWindow) -> Arc<Mutex<Option<History>>> {
-        self.0.lock().unwrap().entry(window.label().to_string()).or_default().clone()
+    fn of(&self, window: &WebviewWindow, path: &str) -> Arc<Mutex<Option<History>>> {
+        self.0.of(window.label(), path)
     }
 
-    /// Drops the history of a window that's closed.
+    /// Drops the history of the repository at `path` in the window, as it's done with it.
+    pub fn release(&self, window: &str, path: &str) {
+        self.0.release(window, path);
+    }
+
+    /// Drops the histories of a window that's closed.
     pub fn forget(&self, window: &str) {
-        self.0.lock().unwrap().remove(window);
+        self.0.forget(window);
     }
 }
 
@@ -119,7 +126,7 @@ pub async fn load_history(
     let repo = Repository::discover(&path).map_err(message)?;
     let fingerprint = fingerprint(&repo).map_err(message)?;
 
-    let slot = state.of(&window);
+    let slot = state.of(&window, &path);
     let mut cache = slot.lock().unwrap();
     if let Some(h) = cache.as_ref()
         && h.path == path
@@ -145,13 +152,14 @@ pub async fn load_history(
 
 #[tauri::command]
 pub async fn history_page(
+    path: String,
     generation: u64,
     offset: usize,
     limit: usize,
     window: WebviewWindow,
     state: State<'_, HistoryState>,
 ) -> Result<Vec<CommitRow>, String> {
-    let slot = state.of(&window);
+    let slot = state.of(&window, &path);
     let cache = slot.lock().unwrap();
     let history = cache
         .as_ref()
@@ -164,12 +172,13 @@ pub async fn history_page(
 /// it isn't there (or the history has since been reloaded).
 #[tauri::command]
 pub async fn history_position(
+    path: String,
     generation: u64,
     id: String,
     window: WebviewWindow,
     state: State<'_, HistoryState>,
 ) -> Result<Option<usize>, String> {
-    let slot = state.of(&window);
+    let slot = state.of(&window, &path);
     let cache = slot.lock().unwrap();
     let Some(history) = cache.as_ref().filter(|h| h.generation == generation) else { return Ok(None) };
     let oid = Oid::from_str(&id).map_err(message)?;

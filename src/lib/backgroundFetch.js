@@ -23,6 +23,8 @@ export function useBackgroundFetch({ overview, busy, loading, refresh }) {
   const fetchedAt = reactive({});
   const triedAt = {};
   let backgroundFetch = null;
+  // The repository it's fetching, which canceling names.
+  let fetching = null;
   const now = ref(Date.now());
 
   function fetchIfDue() {
@@ -33,6 +35,7 @@ export function useBackgroundFetch({ overview, busy, loading, refresh }) {
     const last = Math.max(fetchedAt[o.path] ?? 0, triedAt[o.path] ?? 0);
     if (now.value - last < settings.fetchMinutes * 60_000) return;
     triedAt[o.path] = now.value;
+    fetching = o.path;
     backgroundFetch = invoke("fetch_in_background", { path: o.path })
       .then(() => {
         fetchedAt[o.path] = Date.now();
@@ -49,7 +52,7 @@ export function useBackgroundFetch({ overview, busy, loading, refresh }) {
   // It also keeps the fetch's new tags out of an undo step's before and after.
   async function stop() {
     if (!backgroundFetch) return;
-    invoke("cancel_remote").catch(() => {});
+    invoke("cancel_remote", { path: fetching }).catch(() => {});
     await backgroundFetch;
   }
 

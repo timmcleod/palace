@@ -831,7 +831,9 @@ async function switchTo(key, kind, name) {
 // anywhere, such as saving a file in an editor or committing from a terminal.
 watch(
   () => overview.value?.path,
-  (path) => {
+  (path, previous) => {
+    // The one before, the backend stops watching, and lets go of its history.
+    if (previous) invoke("release_repo", { path: previous }).catch(() => {});
     // Other windows show this one instead of opening the repository again, and the
     // window's title names it, to tell windows apart when switching between them.
     invoke("set_window_repo", { path: path ?? null }).catch(() => {});
@@ -843,6 +845,9 @@ watch(
 );
 
 // Recent repositories opened in other windows join the list here too.
+// Gone, the backend lets go of the repository it showed too.
+onBeforeUnmount(() => overview.value && invoke("release_repo", { path: overview.value.path }).catch(() => {}));
+
 onBeforeUnmount(onSavedElsewhere((key) => key === RECENTS_KEY && (recents.value = recentRepositories())));
 
 // Opens the worktree at `path` in a window of its own, or
@@ -860,9 +865,10 @@ const newWindow = () =>
     tell("Couldn't Open a Window", String(e)),
   );
 
-// Events for this window only: each window watches its own repository.
+// Events for this window only, each saying which repository: only the open one's are
+// heard here.
 const thisWindow = getCurrentWebviewWindow();
-const unlistenChanges = thisWindow.listen("repo-changed", () => refresh());
+const unlistenChanges = thisWindow.listen("repo-changed", ({ payload }) => payload.path === overview.value?.path && refresh());
 onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 
 // About Palace, from the menu: the top of Settings, in the repository open, or with
@@ -883,7 +889,7 @@ async function showSettings(section) {
 }
 
 const unlistenProgress = thisWindow.listen("remote-progress", (event) => {
-  if (remoteOp.value?.state === "running") {
+  if (remoteOp.value?.state === "running" && event.payload.path === remoteOp.value.path) {
     remoteOp.value.line = event.payload.line;
   }
 });
@@ -1832,7 +1838,7 @@ const breadcrumb = computed(() => {
   <RemoteStatus
     v-if="remoteOp"
     :operation="remoteOp"
-    @cancel="invoke('cancel_remote')"
+    @cancel="invoke('cancel_remote', { path: remoteOp.path })"
     @dismiss="dismissStatus()"
     @action="(action) => { dismissStatus(); action.run(); }"
   />

@@ -108,19 +108,19 @@ fn check_version(output: Option<&str>) -> GitCheck {
 #[derive(Default)]
 pub struct Running(pub(crate) Mutex<Option<u32>>);
 
-/// Each window's network work, by window: one fetch, pull or push at a time in each,
-/// while other windows go on with theirs.
+/// The network work of each repository a window has open (see per_repo.rs): one fetch,
+/// pull or push at a time in each, while other repositories go on with theirs.
 #[derive(Default)]
-pub struct Runnings(Mutex<std::collections::HashMap<String, std::sync::Arc<Running>>>);
+pub struct Runnings(crate::per_repo::PerRepo<std::sync::Arc<Running>>);
 
 impl Runnings {
-    pub(crate) fn of(&self, window: &str) -> std::sync::Arc<Running> {
-        self.0.lock().unwrap().entry(window.to_string()).or_default().clone()
+    pub(crate) fn of(&self, window: &str, path: &str) -> std::sync::Arc<Running> {
+        self.0.of(window, path)
     }
 
     /// Stops the network work of a window that's closed.
     pub fn forget(&self, window: &str) {
-        if let Some(running) = self.0.lock().unwrap().remove(window) {
+        for running in self.0.forget(window) {
             running.cancel();
         }
     }

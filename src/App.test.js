@@ -189,6 +189,8 @@ test("switching repositories starts its views afresh, and keeps each one's commi
 
   await switchTo("other");
   expect(calls("watch_repo").at(-1)).toEqual({ path: OTHER });
+  // The backend lets go of the one before: it isn't watched, and its history goes.
+  expect(calls("release_repo")).toEqual([{ path: PALACE }]);
   expect(window.setTitle).toHaveBeenLastCalledWith("other — Palace");
   // Its history shows, not the Working Copy the other was on.
   expect(subject()).toBeNull();
@@ -201,11 +203,15 @@ test("switching repositories starts its views afresh, and keeps each one's commi
   expect(errors).toEqual([]);
 });
 
-test("a change the backend sees in the folder refreshes the repository", async () => {
+test("a change the backend sees in the folder refreshes the repository, and one in another doesn't", async () => {
   await start();
   const before = calls("repo_overview").length;
+  send("repo-changed", { path: OTHER });
+  await settle();
+  expect(calls("repo_overview")).toHaveLength(before);
+
   repositories[PALACE].tags = ["v1.0.0", "v2.0.0"];
-  send("repo-changed");
+  send("repo-changed", { path: PALACE });
   await until(() => shown("v2.0.0"));
   expect(calls("repo_overview").length).toBeGreaterThan(before);
 });
@@ -213,20 +219,28 @@ test("a change the backend sees in the folder refreshes the repository", async (
 test("a folder that's gone says so, and its Close Window closes the window", async () => {
   await start();
   answers.folder_exists = false;
-  send("repo-changed");
+  send("repo-changed", { path: PALACE });
   await until(() => shown("“palace” was moved or deleted"));
   button("Close Window").click();
   expect(window.close).toHaveBeenCalled();
 });
 
-test("a network operation's progress shows on the status card while it runs", async () => {
+test("a network operation's progress shows on the status card while it runs, and Cancel stops it", async () => {
   await start();
   let finish;
   answers.fetch = () => new Promise((resolve) => (finish = resolve));
   document.querySelector(".toolbar.actions .icon-button").click();
   await until(() => !!finish);
-  send("remote-progress", { line: "Receiving objects: 42%" });
+  send("remote-progress", { path: PALACE, line: "Receiving objects: 42%" });
   await until(() => shown("Receiving objects: 42%"));
+  // Another repository's isn't this one's.
+  send("remote-progress", { path: OTHER, line: "Counting objects: 7" });
+  await settle();
+  expect(shown("Receiving objects: 42%")).toBe(true);
+  expect(shown("Counting objects: 7")).toBe(false);
+
+  button("Cancel").click();
+  expect(calls("cancel_remote")).toEqual([{ path: PALACE }]);
   finish(null);
   await settle();
 });

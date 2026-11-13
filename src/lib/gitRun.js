@@ -43,11 +43,13 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
   async function runGit([running, done, failed], command, args = {}, { quietError, path, undo: undoLabel } = {}) {
     if (status.busy.value) return "Another operation is still running.";
     if (!overview.value && !path) return "No repository is open.";
-    const op = status.show({ command, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
+    // Where it runs, which its progress comes from and canceling names.
+    const where = path ?? overview.value.path;
+    const op = status.show({ command, path: where, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
 
     try {
       await stopBackgroundFetch();
-      const work = () => invoke(command, { path: path ?? overview.value.path, ...args });
+      const work = () => invoke(command, { path: where, ...args });
       // Only what's done in the open repository can be undone.
       const step = path ? null : undo.stepFor(command, args, undoLabel);
       const newestBefore = undo.newest();

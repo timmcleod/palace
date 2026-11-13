@@ -8,14 +8,16 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
 
+/// A line of a network operation's progress, from the repository it's running in.
 #[derive(Serialize, Clone)]
 struct Progress {
+    path: String,
     line: String,
 }
 
 #[tauri::command]
 pub async fn fetch(window: WebviewWindow, path: String, remote: Option<String>) -> Result<String, String> {
-    in_background(window, move |running, report| match remote {
+    in_background(window, path.clone(), move |running, report| match remote {
         Some(remote) => fetch_one(&path, &remote, running, report),
         None => fetch_all(&path, running, report),
     })
@@ -26,7 +28,7 @@ pub async fn fetch(window: WebviewWindow, path: String, remote: Option<String>) 
 /// ahead and behind counts current while Palace is open.
 #[tauri::command]
 pub async fn fetch_in_background(window: WebviewWindow, path: String) -> Result<String, String> {
-    in_background(window, move |running, _| fetch_unattended(&path, running)).await
+    in_background(window, path.clone(), move |running, _| fetch_unattended(&path, running)).await
 }
 
 fn fetch_unattended(path: &str, running: &Running) -> Result<String, String> {
@@ -42,7 +44,7 @@ pub async fn add_remote(window: WebviewWindow, path: String, name: String, url: 
         return Err("Enter a name and a URL for the remote.".into());
     }
     crate::cli::git(&path, &["remote", "add", &name, &url], None).map_err(|e| explain_remote_error(&name, e))?;
-    in_background(window, move |running, report| {
+    in_background(window, path.clone(), move |running, report| {
         fetch_one(&path, &name, running, report)
             .map(|_| format!("Added {name} and fetched its branches."))
             .map_err(|e| format!("Added {name}, but couldn't fetch from it:\n{e}"))
@@ -98,7 +100,7 @@ pub async fn checkout_pull(
     replace: Option<bool>,
 ) -> Result<String, String> {
     let replace = replace.unwrap_or(false);
-    in_background(window, move |running, report| {
+    in_background(window, path.clone(), move |running, report| {
         checkout_pull_from(&path, &remote, number, branch.as_deref(), replace, running, report)
     })
     .await
@@ -198,7 +200,7 @@ fn commits_beyond(repo: &Repository, tip: git2::Oid, base: git2::Oid) -> Result<
 #[tauri::command]
 pub async fn pull(window: WebviewWindow, path: String, options: Option<PullOptions>) -> Result<String, String> {
     let options = options.unwrap_or_default();
-    in_background(window, move |running, report| pull_current(&path, &options, running, report)).await
+    in_background(window, path.clone(), move |running, report| pull_current(&path, &options, running, report)).await
 }
 
 /// Choices from the Pull dialog.
@@ -225,14 +227,14 @@ impl Default for PullOptions {
 #[tauri::command]
 pub async fn push(window: WebviewWindow, path: String, force: Option<bool>) -> Result<String, String> {
     let force = force.unwrap_or(false);
-    in_background(window, move |running, report| push_current(&path, force, running, report)).await
+    in_background(window, path.clone(), move |running, report| push_current(&path, force, running, report)).await
 }
 
 /// Publishes a local branch: pushes it to `remote` as `name` and makes that its
 /// upstream branch, so later pushes and pulls go there.
 #[tauri::command]
 pub async fn publish_branch(window: WebviewWindow, path: String, branch: String, remote: String, name: String) -> Result<String, String> {
-    in_background(window, move |running, report| publish(&path, &branch, &remote, &name, running, report)).await
+    in_background(window, path.clone(), move |running, report| publish(&path, &branch, &remote, &name, running, report)).await
 }
 
 /// Renames a branch on its remote, `name` being the remote branch ("origin/old"): pushes
@@ -240,7 +242,7 @@ pub async fn publish_branch(window: WebviewWindow, path: String, branch: String,
 /// name, as long as it hasn't moved meanwhile. Local branches that tracked it follow.
 #[tauri::command]
 pub async fn rename_remote_branch(window: WebviewWindow, path: String, name: String, new: String) -> Result<String, String> {
-    in_background(window, move |running, report| rename_on_remote(&path, &name, &new, running, report)).await
+    in_background(window, path.clone(), move |running, report| rename_on_remote(&path, &name, &new, running, report)).await
 }
 
 fn rename_on_remote(path: &str, name: &str, new: &str, running: &Running, report: Report) -> Result<String, String> {
@@ -269,7 +271,7 @@ fn rename_on_remote(path: &str, name: &str, new: &str, running: &Running, report
 /// Deletes a branch on its remote. `name` is the remote branch, e.g. "origin/feature".
 #[tauri::command]
 pub async fn delete_remote_branch(window: WebviewWindow, path: String, name: String) -> Result<String, String> {
-    in_background(window, move |running, report| delete_on_remote(&path, &name, running, report)).await
+    in_background(window, path.clone(), move |running, report| delete_on_remote(&path, &name, running, report)).await
 }
 
 fn delete_on_remote(path: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
@@ -300,7 +302,7 @@ fn delete_on_remote(path: &str, name: &str, running: &Running, report: Report) -
 /// does.
 #[tauri::command]
 pub async fn finish_remote_rename(window: WebviewWindow, path: String, remote: String, old: String, new: String) -> Result<String, String> {
-    in_background(window, move |running, report| {
+    in_background(window, path.clone(), move |running, report| {
         let (old_ref, new_ref) = (format!("refs/heads/{old}"), format!("refs/heads/{new}"));
         let mut done = false;
         for _ in 0..15 {
@@ -323,7 +325,7 @@ pub async fn finish_remote_rename(window: WebviewWindow, path: String, remote: S
 
 #[tauri::command]
 pub async fn push_tag(window: WebviewWindow, path: String, name: String) -> Result<String, String> {
-    in_background(window, move |running, report| {
+    in_background(window, path.clone(), move |running, report| {
         let repo = Repository::discover(&path).map_err(|e| e.message().to_string())?;
         let remote = default_remote(&repo)?;
         git_with_progress(&path, &["push", "--progress", &remote, &format!("refs/tags/{name}")], running, report)?;
@@ -336,7 +338,7 @@ pub async fn push_tag(window: WebviewWindow, path: String, name: String) -> Resu
 /// it are created as needed.
 #[tauri::command]
 pub async fn clone_repo(window: WebviewWindow, url: String, dest: String) -> Result<String, String> {
-    in_background(window, move |running, report| clone_into(&url, Path::new(dest.trim()), running, report)).await
+    in_background(window, dest.clone(), move |running, report| clone_into(&url, Path::new(dest.trim()), running, report)).await
 }
 
 fn clone_into(url: &str, dest: &Path, running: &Running, report: Report) -> Result<String, String> {
@@ -362,7 +364,7 @@ fn clone_into(url: &str, dest: &Path, running: &Running, report: Report) -> Resu
 /// Deletes a tag from the default remote. A tag that isn't there counts as done.
 #[tauri::command]
 pub async fn delete_remote_tag(window: WebviewWindow, path: String, name: String) -> Result<String, String> {
-    in_background(window, move |running, report| delete_tag_on_remote(&path, &name, running, report)).await
+    in_background(window, path.clone(), move |running, report| delete_tag_on_remote(&path, &name, running, report)).await
 }
 
 fn delete_tag_on_remote(path: &str, name: &str, running: &Running, report: Report) -> Result<String, String> {
@@ -379,24 +381,28 @@ fn delete_tag_on_remote(path: &str, name: &str, running: &Running, report: Repor
     }
 }
 
+/// Stops the network operation running in the repository at `path` in the window.
 #[tauri::command]
-pub fn cancel_remote(window: WebviewWindow, runnings: tauri::State<'_, Runnings>) {
-    runnings.of(window.label()).cancel();
+pub fn cancel_remote(window: WebviewWindow, runnings: tauri::State<'_, Runnings>, path: String) {
+    runnings.of(window.label(), &path).cancel();
 }
 
 type Report<'a> = &'a mut dyn FnMut(&str);
 
-/// Runs a network operation off the async runtime, forwarding progress to the window
-/// that asked as `remote-progress` events. Each window runs one at a time.
+/// Runs a network operation in the repository at `path` off the async runtime,
+/// forwarding progress to the window that asked as `remote-progress` events, saying
+/// which repository. Each repository in each window runs one at a time.
 async fn in_background(
     window: WebviewWindow,
+    path: String,
     work: impl FnOnce(&Running, Report) -> Result<String, String> + Send + 'static,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let running = window.state::<Runnings>().of(window.label());
+        let running = window.state::<Runnings>().of(window.label(), &path);
         let target = EventTarget::webview_window(window.label());
         let mut report = |line: &str| {
-            let _ = window.emit_to(target.clone(), "remote-progress", Progress { line: line.to_string() });
+            let progress = Progress { path: path.clone(), line: line.to_string() };
+            let _ = window.emit_to(target.clone(), "remote-progress", progress);
         };
         work(&running, &mut report)
     })

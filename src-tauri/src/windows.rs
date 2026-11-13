@@ -331,6 +331,15 @@ fn saved_theme(app: &AppHandle, window: &WebviewWindow) -> (Option<Theme>, bool)
     (theme, dark)
 }
 
+/// The window is done with the repository at `path`, as on switching to another: its
+/// watcher stops and its history goes. Network work under way in it goes on to the end,
+/// as a push does on switching away, and its terminals go on running.
+#[tauri::command]
+pub fn release_repo(app: AppHandle, window: WebviewWindow, path: String) {
+    app.state::<crate::watch::RepoWatcher>().release(window.label(), &path);
+    app.state::<crate::history::HistoryState>().release(window.label(), &path);
+}
+
 /// Lets go of everything a closed window had: its terminals, the watch on its
 /// repository, its history and network work, its edits, and its notifications.
 pub fn forget(app: &AppHandle, window: &str) {

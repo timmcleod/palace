@@ -96,13 +96,13 @@ describe("useBackgroundFetch", () => {
     expect(fetches()).toBe(2);
   });
 
-  test("stop cancels a fetch under way and waits for it", async () => {
+  test("stop cancels a fetch under way, in the repository it's fetching, and waits for it", async () => {
     const { result } = setUp();
     state.overview.value = { path: "/repo", remotes: [{}] };
     await nextTick();
     await vi.advanceTimersByTimeAsync(3000);
     await result.stop();
-    expect(invoke).toHaveBeenCalledWith("cancel_remote");
+    expect(invoke).toHaveBeenCalledWith("cancel_remote", { path: "/repo" });
     // With nothing under way, it returns at once.
     vi.mocked(invoke).mockClear();
     await result.stop();
