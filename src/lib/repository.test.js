@@ -133,6 +133,19 @@ describe("loading a repository", () => {
     expect(repo.loading.value).toBe(false);
   });
 
+  test("closed while it opens, does nothing more with it", async () => {
+    const slow = waiting();
+    overviews["/a"] = slow.answer;
+    openElsewhere.add("/a");
+    const repo = repository();
+    const opening = repo.loadRepository("/a");
+    mounted.unmount();
+    slow.release(overviewOf("/a"));
+    await opening;
+    expect(invoke).not.toHaveBeenCalledWith("show_window_with", expect.anything());
+    expect(repo.onLoaded).not.toHaveBeenCalled();
+  });
+
   test("a folder that isn't a repository is offered to be made one", async () => {
     overviews["/notes"] = () => {
       throw `${NOT_A_REPOSITORY}/notes`;

@@ -32,10 +32,12 @@ pub enum Why {
 /// as its windows close.
 static RESTARTING: AtomicBool = AtomicBool::new(false);
 
-/// The windows about to close, by label, their closing not held: once every window
-/// open is, Palace is about to quit with them, and they're noted. Several can close at
-/// once, as with Close All, each before the others have gone.
-static CLOSING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The windows about to close, their closing not held, by label, each as it was then:
+/// once every window open is, Palace is about to quit with them, and they're noted.
+/// Several can close at once, as with Close All, each before the others have gone; by
+/// the last, the others can't say where they are any more, so each is placed as it
+/// starts to close.
+static CLOSING: Mutex<Vec<(String, Placed)>> = Mutex::new(Vec::new());
 
 /// The note: when it was written, and the windows. Written by one version and read by
 /// the next, so what a field's missing from reads as its default, rather than the whole
@@ -82,8 +84,12 @@ pub fn remember(app: &AppHandle, why: Why) {
     if why == Why::Restart {
         RESTARTING.store(true, Ordering::Relaxed);
     }
+    write(app, app.webview_windows().iter().map(|(label, window)| placed(app, label, window)).collect());
+}
+
+/// Writes the note, of `windows`; with none, the note there is kept.
+fn write(app: &AppHandle, windows: Vec<Placed>) {
     let Some(path) = file(app) else { return };
-    let windows: Vec<Placed> = app.webview_windows().iter().map(|(label, window)| placed(app, label, window)).collect();
     if windows.is_empty() {
         return;
     }
@@ -97,21 +103,32 @@ pub fn remember(app: &AppHandle, why: Why) {
 /// The window labeled `window` is about to close, nothing holding it: once every window
 /// open is, they're noted, as Palace quits with the last.
 pub fn closing(app: &AppHandle, window: &str) {
-    let all_closing = {
-        let mut closing = CLOSING.lock().unwrap();
-        if !closing.iter().any(|w| w == window) {
-            closing.push(window.to_string());
-        }
-        app.webview_windows().keys().all(|label| closing.contains(label))
-    };
-    if all_closing {
-        remember(app, Why::Quit);
+    if RESTARTING.load(Ordering::Relaxed) {
+        return;
     }
+    let open = app.webview_windows();
+    // Placed now, while it can still say where it is: see CLOSING.
+    let Some(placing) = open.get(window).map(|w| placed(app, window, w)) else { return };
+    let open: Vec<&String> = open.keys().collect();
+    let all = add_closing(&mut CLOSING.lock().unwrap(), window, placing, &open);
+    if let Some(windows) = all {
+        write(app, windows);
+    }
+}
+
+/// Adds the window labeled `window`, placed as `placing`, to those `closing`; once every
+/// window `open` is, they're returned, each as it was as it started to close.
+fn add_closing(closing: &mut Vec<(String, Placed)>, window: &str, placing: Placed, open: &[&String]) -> Option<Vec<Placed>> {
+    if !closing.iter().any(|(w, _)| w == window) {
+        closing.push((window.to_string(), placing));
+    }
+    let placed = |label: &str| closing.iter().find(|(w, _)| w == label).map(|(_, p)| p.clone());
+    open.iter().map(|label| placed(label)).collect()
 }
 
 /// The window labeled `window` has closed.
 pub fn closed(window: &str) {
-    CLOSING.lock().unwrap().retain(|w| w != window);
+    CLOSING.lock().unwrap().retain(|(w, _)| w != window);
 }
 
 fn placed(app: &AppHandle, label: &str, window: &WebviewWindow) -> Placed {
@@ -308,6 +325,19 @@ mod tests {
 
     fn repos(windows: &[Placed]) -> Vec<Vec<&str>> {
         windows.iter().map(|w| w.tabs.repos.iter().map(String::as_str).collect()).collect()
+    }
+
+    #[test]
+    fn windows_closing_together_are_noted_as_each_was_as_it_started_to_close() {
+        let (main, second) = ("main".to_string(), "second".to_string());
+        let open = [&main, &second];
+        let mut closing = Vec::new();
+        assert_eq!(add_closing(&mut closing, "main", window(&["/a"]), &open), None);
+        // Asked again, as a close held and then confirmed is, it's still placed as before.
+        assert_eq!(add_closing(&mut closing, "main", Placed::default(), &open), None);
+        let noted = add_closing(&mut closing, "second", window(&["/b"]), &open).unwrap();
+        assert_eq!(repos(&noted), vec![vec!["/a"], vec!["/b"]]);
+        assert_eq!(noted[0].size, Some((1200.0, 800.0)));
     }
 
     #[test]

@@ -131,6 +131,33 @@ describe("watching for lost commits", () => {
     expect(show).toHaveBeenCalledOnce();
   });
 
+  test("forgets what it kept once another repository's opened, as its card would be over that one", async () => {
+    let answer;
+    vi.mocked(invoke).mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    const { busy, refresh, show, overview } = watching([branch("main", "c3")]);
+    refresh([branch("main", "c1")]);
+    await settle();
+    busy.value = true;
+    answer(2);
+    await settle();
+    overview.value = { ...overviewOf([branch("main", "x1")], "/other"), readAt: Infinity };
+    busy.value = false;
+    await settle();
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  test("restores no more once another repository's opened", async () => {
+    const { refresh, show, run, overview } = watching([branch("main", "c3"), branch("spike", "s2")]);
+    refresh([branch("main", "c1")]);
+    await settle();
+    run.mockImplementationOnce(async () => {
+      overview.value = { ...overviewOf([], "/other"), readAt: Infinity };
+      return null;
+    });
+    await show.mock.calls[0][0].actions[0].run();
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   test("checks each change in turn, so a loss isn't missed for the next", async () => {
     // The backend slow to answer: the second change comes while the first's checked.
     // Each answer's given in turn, rather than after a wait, which the whole suite

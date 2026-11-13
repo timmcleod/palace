@@ -62,14 +62,15 @@ export function useLostCommits({ overview, loadsStarted, busy, show, run }) {
   // from the one showing, if any, as watching starts.
   let baseline = overview.value ? { path: overview.value.path, branches: overview.value.branches } : null;
   // Checks take turns, so none is lost to the next; a card found while an operation
-  // runs waits for it, rather than take its place.
+  // runs waits for it, rather than take its place: { path, card }, shown only if its
+  // repository's still the one open.
   let checks = Promise.resolve();
   let waiting = null;
 
   watch(busy, (now) => {
     readBefore = now ? Infinity : loadsStarted();
     if (!now && waiting) {
-      show(waiting);
+      if (overview.value?.path === waiting.path) show(waiting.card);
       waiting = null;
     }
   });
@@ -91,13 +92,16 @@ export function useLostCommits({ overview, loadsStarted, busy, show, run }) {
     // Another repository opened meanwhile: it's about the one before.
     if (!lost.length || overview.value?.path !== path) return;
     const card = { ...describeLost(lost), state: "conflict", actions: [{ label: lost.length > 1 ? "Restore as Branches" : "Restore as Branch", run: () => restore(lost) }] };
-    if (busy()) waiting = card;
+    if (busy()) waiting = { path, card };
     else show(card);
   }
 
   async function restore(lost) {
+    const path = overview.value.path;
     const taken = new Set(overview.value.branches.map((b) => b.name));
     for (const { name, old } of lost) {
+      // Another repository opened meanwhile: the rest are this one's, not that one's.
+      if (overview.value?.path !== path) return;
       const branch = restoredName(name, taken);
       taken.add(branch);
       await run(["Restoring…", `Restored as “${branch}”`, "Couldn't restore the commits"], "create_branch", { name: branch, start: old, checkout: false });

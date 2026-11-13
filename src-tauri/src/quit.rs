@@ -80,7 +80,15 @@ pub fn hold(app: &AppHandle, window: Option<&str>) -> bool {
         return false;
     }
     unanswered.get_or_insert_with(Instant::now);
-    let _ = app.emit_to(EventTarget::webview_window(asking), "quit-requested", held);
+    drop(unanswered);
+    // Asked where it's seen: quitting with every window minimized, or hidden, the one
+    // asked would otherwise ask out of sight, and Palace seem not to quit.
+    if let Some(window) = app.get_webview_window(&asking) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit_to(EventTarget::webview_window(&asking), "quit-requested", held);
     true
 }
 

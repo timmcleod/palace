@@ -120,12 +120,13 @@ export function useGitActions({
     if (start && values.checkout && !(await leaveDetached())) return;
     const name = values.name.trim();
     if (remote) writeJson(PUBLISH_KEY, values.publish);
+    const here = stillHere();
     const error = await run(["Creating branch…", "Created branch", "Couldn't create the branch"], "create_branch", {
       name,
       start,
       checkout: values.checkout,
     });
-    if (!error && values.publish) await publish(name, remote, name);
+    if (!error && values.publish && here()) await publish(name, remote, name);
   }
 
   function publish(branch, remote, name) {
@@ -169,11 +170,12 @@ export function useGitActions({
       confirmLabel: "Rename",
     });
     if (!values || values.name.trim() === name) return;
+    const arranged = arrangedIn();
     const error = await run(["Renaming…", "Renamed", "Couldn't rename the branch"], "rename_branch", {
       old: name,
       new: values.name.trim(),
     });
-    if (!error) renameKey(arrangedIn(), name, values.name.trim());
+    if (!error) renameKey(arranged, name, values.name.trim());
   }
 
   // Renames a branch on its remote (`name` is e.g. "origin/old"). On GitHub, GitHub
@@ -200,6 +202,7 @@ export function useGitActions({
     const branches = overview.value.branches;
     const followsLocally = branches.some((b) => b.name === old && b.upstream === name) && !branches.some((b) => b.name === to);
     const titles = ["Renaming…", "Renamed", "Couldn't rename the branch"];
+    const arranged = arrangedIn();
     let error;
     if (github) {
       const here = stillHere();
@@ -211,12 +214,13 @@ export function useGitActions({
     } else {
       error = await run(titles, "rename_remote_branch", { name, new: to });
     }
-    if (!error && followsLocally) renameKey(arrangedIn(), old, to);
+    if (!error && followsLocally) renameKey(arranged, old, to);
   }
 
   async function deleteBranch(name) {
     if (!(await confirm(`Delete the branch “${name}”?`, "Delete Branch", "Delete"))) return;
     const here = stillHere();
+    const arranged = arrangedIn();
     const titles = ["Deleting branch…", "Deleted branch", "Couldn't delete the branch"];
     const notMerged = (e) => e.includes("not fully merged");
     let error = await run(titles, "delete_branch", { name, force: false }, { quietError: notMerged });
@@ -229,15 +233,16 @@ export function useGitActions({
       if (!force || !here()) return;
       error = await run(titles, "delete_branch", { name, force: true });
     }
-    if (!error) removeKey(arrangedIn(), `branch:${name}`);
+    if (!error) removeKey(arranged, `branch:${name}`);
   }
 
   // Deletes a branch whose pull request was merged on GitHub, if everything on it was
   // in the merged `commit`. A squash or rebase leaves it looking unmerged to git, so
   // it's forced; Undo brings it back.
   async function deleteMergedBranch(name, commit) {
+    const arranged = arrangedIn();
     const error = await run(["Deleting branch…", "Deleted branch", "Couldn't delete the branch"], "delete_merged_branch", { name, commit });
-    if (!error) removeKey(arrangedIn(), `branch:${name}`);
+    if (!error) removeKey(arranged, `branch:${name}`);
     return error;
   }
 
@@ -372,12 +377,13 @@ export function useGitActions({
       hasRemote: o.remotes.length > 0,
     });
     if (!values) return;
+    const here = stillHere();
     const error = await run(["Creating tag…", "Created tag", "Couldn't create the tag"], "create_tag", {
       name: values.name,
       target: values.revision,
       message: values.message || null,
     });
-    if (!error && values.push) await pushTag(values.name);
+    if (!error && values.push && here()) await pushTag(values.name);
   }
 
   // Moves HEAD, and the branch it's on, to another commit. With `branch`, a branch
@@ -569,8 +575,9 @@ export function useGitActions({
       danger: true,
     });
     if (!values) return;
+    const here = stillHere();
     const error = await run(["Deleting tag…", "Deleted tag", "Couldn't delete the tag"], "delete_tag", { name });
-    if (!error && values.remote) await deleteRemoteTag(name);
+    if (!error && values.remote && here()) await deleteRemoteTag(name);
   }
 
   function deleteRemoteTag(name) {
@@ -960,6 +967,8 @@ export function useGitActions({
   // --- Arranging branches ------------------------------------------------------------
 
   // Where the branches' arrangement is kept: the repository's, from any of its worktrees.
+  // Taken before an operation, so what it changes is changed there, whichever's open
+  // once it's done.
   const arrangedIn = () => repositoryFolder(overview.value);
 
   // A divider in the sidebar's Branches, after `afterKey` or at the end.

@@ -152,13 +152,17 @@ unlistenAgents
 // Quitting, or closing the window, with programs still running in terminals or edits
 // not saved asks first, naming them (see quit.rs).
 // Closing a window asks about its own; quitting, about every window's.
-let askingToQuit = false;
+// Asked once each, closing or quitting, while it's showing; quitting while closing's
+// asked, as with ⌘Q, comes first, the window's own question back after if it's said not
+// to.
+const asking = { close: false, quit: false };
 const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => {
   // Palace goes ahead anyway on a second try if the page doesn't say it's asking.
   invoke("quit_asking").catch(() => {});
-  if (askingToQuit) return;
-  askingToQuit = true;
   const { quitting } = payload;
+  const kind = quitting ? "quit" : "close";
+  if (asking.quit || asking[kind]) return;
+  asking[kind] = true;
   // Saving automatically, edits are saved first, and only those that couldn't be are
   // asked about.
   if (settings.autoSave) await finishSaving();
@@ -177,7 +181,7 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
     lines.push(`In other windows, ${said}. Quitting ${payload.other_edits.length ? "loses" : "stops"} ${elsewhere.length === 1 ? "it" : "them"}.`);
   }
   if (!lines.length) {
-    askingToQuit = false;
+    asking[kind] = false;
     invoke("quit_confirmed", { quitting }).catch(() => {});
     return;
   }
@@ -189,7 +193,7 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
     confirmLabel: quitting ? "Quit" : "Close",
     danger: true,
   });
-  askingToQuit = false;
+  asking[kind] = false;
   if (ok) invoke("quit_confirmed", { quitting }).catch(() => {});
 });
 onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));

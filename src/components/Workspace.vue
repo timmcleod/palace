@@ -84,6 +84,7 @@ import { githubRemoteOf } from "../lib/githubRemote.js";
 import { issueError } from "../lib/issues.js";
 import { pullRequestPlan } from "../lib/pullRequests.js";
 import { afterResolving } from "../lib/conflictText.js";
+import { useWatching } from "../lib/watching.js";
 
 // What a tab shows: a repository, its views, and the state they share (what's selected,
 // the commit message being written), with the wiring between them; or with none open,
@@ -389,7 +390,8 @@ async function onPullMerged({ number, base, head, headRepo, headSha, branchDelet
     if (into) {
       offers.push({
         label: `Switch to “${into.name}” and Delete “${local.name}”`,
-        run: async () => (await actions.checkout("branch", into.name)) || actions.deleteMergedBranch(local.name, headSha),
+        // Deleted only in the repository it was switched in, if that's still the one open.
+        run: async () => (await actions.checkout("branch", into.name)) || (overview.value?.path === path && actions.deleteMergedBranch(local.name, headSha)),
       });
     }
   }
@@ -844,6 +846,8 @@ async function switchTo(key, kind, name) {
 
 // --- The window, and live refresh -------------------------------------------------
 
+const { watch: watchRepository, letGo: stopWatching } = useWatching({ shownElsewhere: (path) => props.shownElsewhere(path) });
+
 // Live refresh: the backend watches the open repository and reports changes made
 // anywhere, such as saving a file in an editor or committing from a terminal.
 watch(
@@ -852,7 +856,7 @@ watch(
     if (previous) letGo(previous);
     showTitle();
     if (!path) return;
-    watching.set(path, invoke("watch_repo", { path }).catch(() => {}));
+    watchRepository(path);
     loadAvatars(path);
   },
 );
@@ -887,16 +891,9 @@ watch(active, (now) => {
 // history, and its authors' pictures aren't asked for again.
 function letGo(path) {
   if (props.shownElsewhere(path)) return;
-  // Once it's been watched, as letting go first would leave the watcher, set up after,
-  // watching for nobody.
-  const watched = watching.get(path) ?? Promise.resolve();
-  watching.delete(path);
-  watched.then(() => invoke("release_repo", { path }).catch(() => {}));
+  stopWatching(path);
   forgetAvatars(path);
 }
-
-// Each repository being watched, by path: done once the backend's watching it.
-const watching = new Map();
 
 // Gone, as its tab closes, the backend lets go of the repository it showed too, and what
 // it was fetching, pulling or pushing stops, with nothing left to show how it went.

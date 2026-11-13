@@ -111,7 +111,7 @@ describe("undo", () => {
     const step = { label: "Merge" };
     const run = runner({ step });
     await run.runGit(TITLES, "merge", { branch: "next" }, { undo: "Merge next" });
-    expect(run.undo.stepFor).toHaveBeenCalledWith("merge", { branch: "next" }, "Merge next");
+    expect(run.undo.stepFor).toHaveBeenCalledWith("merge", { branch: "next" }, "Merge next", "/repo");
     expect(run.undo.undoable).toHaveBeenCalledWith(step, expect.any(Function), "/repo");
     const [undoAction] = run.card.value.actions;
     expect(undoAction.label).toBe("Undo");
@@ -130,6 +130,16 @@ describe("undo", () => {
     await run.runGit(TITLES, "merge", { branch: "next" });
     expect(run.card.value.actions).toBeUndefined();
     expect(run.onDone).toHaveBeenCalledWith(run.card.value, "merge", { branch: "next" }, "/repo");
+  });
+
+  test("its step is the repository's it runs in, though another's opened as a background fetch stops", async () => {
+    const run = runner({ step: { label: "Continue" } });
+    run.stopBackgroundFetch.mockImplementationOnce(async () => {
+      run.overview.value = { path: "/other", head: { branch: "main" } };
+    });
+    await run.runGit(TITLES, "control_operation", { action: "continue" });
+    expect(run.undo.stepFor).toHaveBeenCalledWith("control_operation", { action: "continue" }, undefined, "/repo");
+    expect(run.undo.undoable).toHaveBeenCalledWith({ label: "Continue" }, expect.any(Function), "/repo");
   });
 
   test("a push rejected once another repository's opened offers no pull or force push, which would run there", async () => {

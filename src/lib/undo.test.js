@@ -151,6 +151,17 @@ describe("a step that stopped for conflicts", () => {
     expect(undo.stepFor("control_operation", { action: "continue" })).toBeNull();
   });
 
+  test("isn't left behind by resolving, as another repository with nothing under way opens", async () => {
+    const { undo, overview, settle } = setUp();
+    overview.value.operation = "merge";
+    await expect(undo.undoable(undo.stepFor("merge", {}), async () => Promise.reject("CONFLICT: stopped"))).rejects.toBe(
+      "CONFLICT: stopped",
+    );
+    settle.mockImplementationOnce(async () => (overview.value = { path: "/other", operation: null }));
+    await undo.undoable({ label: "Mark as Resolved", mode: "keep", cover: { files: ["a.txt"] }, resolving: true }, async () => null, "/repo");
+    expect(undo.stepFor("control_operation", { action: "continue" }, undefined, "/repo")).toMatchObject({ label: "Merge" });
+  });
+
   test("is left behind by a stash of some files made meanwhile", async () => {
     const { undo, overview } = setUp();
     overview.value.operation = "merge";

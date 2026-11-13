@@ -684,6 +684,18 @@ test("a repository is the last opened as it's opened where it's seen, not as a t
   expect(first()).toBe(OTHER);
 });
 
+test("quitting while closing the window's asked asks first, with closing asked again after", async () => {
+  await start();
+  const nothing = { terminals: [], edits: false, other_terminals: [], other_edits: [] };
+  send("quit-requested", { quitting: false, ...nothing, other_terminals: ["shop"] });
+  await until(() => shown("Close Window?"));
+  send("quit-requested", { quitting: true, ...nothing, other_terminals: ["shop"] });
+  await until(() => shown("Quit Palace?"));
+  button("Cancel").click();
+  await until(() => shown("Close Window?"));
+  expect(calls("quit_confirmed")).toEqual([]);
+});
+
 test("quitting with a terminal the page can't name still says one's running", async () => {
   await start();
   send("quit-requested", { quitting: true, terminals: [999], edits: false, other_terminals: [], other_edits: [] });

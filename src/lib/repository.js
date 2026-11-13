@@ -149,6 +149,9 @@ export function useRepository({
   window.addEventListener("focus", onFocus);
   onBeforeUnmount(() => window.removeEventListener("focus", onFocus));
   watch(active, (now) => now && overview.value && refresh());
+  // Gone, as its tab closes, a load still under way comes to nothing: it would otherwise
+  // bring forward another window with it open, or put it at the top of the recent ones.
+  onBeforeUnmount(() => loadSeq++);
 
   // How many loads have started, so far: an overview's readAt is the count as its own
   // started.

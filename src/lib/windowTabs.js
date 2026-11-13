@@ -137,19 +137,26 @@ export function useTabs({ window }) {
     const tab = tabs.list.find((t) => t.id === id);
     if (!tab) return;
     if (tabs.list.length === 1) return window.close();
+    if (!(await agreedToLose(leftBy(tabs, tab)))) return;
+    // Meanwhile, another may have closed, or this one: the last closes the window.
+    if (!tabs.list.includes(tab)) return;
+    if (tabs.list.length === 1) return window.close();
+    dropTab(tab);
+  }
+
+  // Whether closing a tab that leaves the repositories at `paths` would lose nothing, or
+  // the user, asked, says to go ahead: their edits not saved, and programs running in
+  // their terminals, would be.
+  async function agreedToLose(paths) {
+    if (!paths.length) return true;
     const { busyIn } = await terminals();
     if (settings.autoSave) await finishSaving();
-    const paths = leftBy(tabs, tab);
     const edited = unsavedFiles()
       .filter((f) => paths.includes(f.path))
       .map((f) => quoted(f.file.split("/").pop()));
     const running = (await Promise.all(paths.map(busyIn))).flat().map(quoted);
     const lost = losses({ edited, running, doing: "Closing the tab" });
-    if (lost.length && !(await askConfirm({ title: "Close Tab?", message: lost.join("\n\n"), confirmLabel: "Close", danger: true }))) return;
-    // Meanwhile, another may have closed, or this one: the last closes the window.
-    if (!tabs.list.includes(tab)) return;
-    if (tabs.list.length === 1) return window.close();
-    dropTab(tab);
+    return !lost.length || !!(await askConfirm({ title: "Close Tab?", message: lost.join("\n\n"), confirmLabel: "Close", danger: true }));
   }
 
   // Takes the tab away, then, its workspace gone, what's left of what it's shown that no
@@ -172,12 +179,16 @@ export function useTabs({ window }) {
     }
   }
 
-  // A worktree removed (see close_tabs_with): its tab closes without asking, the user
-  // having been asked already, and its terminals already hung up. The window goes with
-  // its last tab.
-  const unlistenCloseRepo = window.listen("close-repo", ({ payload }) => {
+  // A worktree removed (see close_tabs_with): its tab closes, the user having been asked
+  // already about the worktree, and its terminals already hung up. What else the tab's
+  // shown, that no other tab has, is asked about as closing it would be: kept, the tab
+  // stays, saying its folder's gone. The window goes with its last tab.
+  const unlistenCloseRepo = window.listen("close-repo", async ({ payload }) => {
     const tab = tabWith(tabs, payload.path);
     if (!tab) return;
+    const removed = tab.path;
+    if (!(await agreedToLose(leftBy(tabs, tab).filter((path) => path !== removed)))) return letGoOf([removed]);
+    if (!tabs.list.includes(tab)) return;
     if (tabs.list.length === 1) return invoke("quit_confirmed", { quitting: false }).catch(() => {});
     dropTab(tab);
   });

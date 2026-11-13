@@ -66,12 +66,12 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
   const newest = () => undoStack.value.at(-1);
 
   /**
-   * The step running backend `command` with `args` in the open repository makes, for
-   * undoable(), or null when it can't be undone. `label` names it instead of UNDOABLE.
-   * Continuing or skipping to the end of what stopped makes the whole of it one step.
+   * The step running backend `command` with `args` in the repository at `path`, the
+   * open one by default, makes, for undoable(), or null when it can't be undone.
+   * `label` names it instead of UNDOABLE. Continuing or skipping to the end of what
+   * stopped makes the whole of it one step.
    */
-  function stepFor(command, args, label) {
-    const path = overview.value.path;
+  function stepFor(command, args, label, path = overview.value.path) {
     const resumed = command === "control_operation" && args.action !== "abort" ? (stopped.get(path) ?? null) : null;
     if (command === "control_operation" && !resumed) stopped.delete(path);
     label = resumed?.step.label ?? label ?? UNDOABLE[command]?.(args);
@@ -96,7 +96,10 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
     // finishes as one step. Anything else leaves that behind, as a stash would, whose
     // undo the operation's would undo too; so does a step with nothing under way, as
     // for a stash applied, with nothing to continue.
-    if (!(resolving && overview.value?.operation)) stopped.delete(path);
+    // Told by the repository open now only if it's this one: with another open, what
+    // stopped here is taken to be under way still.
+    const underWay = overview.value?.path === path ? !!overview.value.operation : stopped.has(path);
+    if (!(resolving && underWay)) stopped.delete(path);
     let reason = "";
     const snapshot = (cover) =>
       invoke("take_snapshot", { path, cover }).catch((e) => {

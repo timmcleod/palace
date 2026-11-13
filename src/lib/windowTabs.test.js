@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { mountComposable } from "../test/mount.js";
 import { askConfirm } from "./overlays.js";
@@ -120,10 +119,26 @@ test("the backend's told a repository's tab shows, or closes, as another window 
   w.window.send("show-repo", { path: "/b" });
   expect(showingPath(w)).toBe("/b");
   w.window.send("close-repo", { path: "/b" });
-  await nextTick();
-  expect(paths(w)).toEqual(["/a"]);
+  await vi.waitFor(() => expect(paths(w)).toEqual(["/a"]));
   expect(askConfirm).not.toHaveBeenCalled();
   // Its last tab, the window goes too.
   w.window.send("close-repo", { path: "/a" });
-  expect(invoke).toHaveBeenCalledWith("quit_confirmed", { quitting: false });
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("quit_confirmed", { quitting: false }));
+});
+
+test("a removed worktree's tab asks before what else it's shown is lost, and kept, stays", async () => {
+  const w = await windowWith({ tabs: { repos: ["/r", "/b"], active: 0 }, first: false });
+  const [tab] = w.tabs.list;
+  opened(tab);
+  // The tab went on to the worktree, from the repository with a server running.
+  tab.path = "/w";
+  opened(tab);
+  terminals.busyIn.mockImplementation(async (path) => (path === "/r" ? ["npm run dev"] : []));
+  vi.mocked(askConfirm).mockResolvedValueOnce(false);
+  w.window.send("close-repo", { path: "/w" });
+  await vi.waitFor(() => expect(askConfirm).toHaveBeenCalled());
+  expect(vi.mocked(askConfirm).mock.calls[0][0].message).toBe("“npm run dev” is still running. Closing the tab stops it.");
+  await vi.waitFor(() => expect(terminals.closeTerminalsOf).toHaveBeenCalledWith("/w"));
+  expect(paths(w)).toEqual(["/w", "/b"]);
+  expect(terminals.closeTerminalsOf).not.toHaveBeenCalledWith("/r");
 });

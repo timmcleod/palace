@@ -48,12 +48,13 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
     const where = path ?? overview.value.path;
     const op = status.show({ command, path: where, title: running, line: "", state: "running", message: "", cancellable: NETWORK.has(command) });
 
+    // Only what's done in the open repository can be undone. Told before waiting, when
+    // the repository's still the one it runs in.
+    const step = path ? null : undo.stepFor(command, args, undoLabel, where);
+    const newestBefore = undo.newest();
     try {
       await stopBackgroundFetch();
       const work = () => invoke(command, { path: where, ...args });
-      // Only what's done in the open repository can be undone.
-      const step = path ? null : undo.stepFor(command, args, undoLabel);
-      const newestBefore = undo.newest();
       const message = await (step ? undo.undoable(step, work, where) : work());
       // Undo is offered for what it did, while its repository's still the open one: after
       // another's opened, undo would undo that one's newest step.

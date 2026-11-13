@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm, openForm, openPullDialog } from "./overlays.js";
-import { branchOrder, resetOrder } from "./branchOrder.js";
+import { askConfirm, openForm, openPullDialog, openTagDialog } from "./overlays.js";
+import { addDivider, branchOrder, resetOrder } from "./branchOrder.js";
 import { CANCELED } from "./errors.js";
 import { draftFor } from "./drafts.js";
 import { agentCommand, setAgentCommand } from "./agents.js";
@@ -154,6 +154,44 @@ describe("deleting a branch", () => {
     vi.mocked(askConfirm).mockResolvedValue(false);
     await item(actions.branchMenu("feature"), "Delete…").action();
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("once another repository's opened in the tab as an operation runs", () => {
+  // The actions, with `command` opening another repository as it runs.
+  function switchedDuring(command, parts = {}) {
+    const on = actionsOn(parts);
+    on.run.mockImplementation(async (_titles, ran) => {
+      if (ran === command) on.overview.value = repo({ path: "/code/other" });
+      return null;
+    });
+    return on;
+  }
+
+  test("what was to follow on a remote isn't done there", async () => {
+    const tag = switchedDuring("delete_tag");
+    vi.mocked(openForm).mockResolvedValue({ remote: true });
+    await item(tag.actions.tagMenu("v1.0"), "Delete…").action();
+    expect(tag.ran()).toEqual([["delete_tag", { name: "v1.0" }]]);
+
+    const created = switchedDuring("create_tag");
+    vi.mocked(openTagDialog).mockResolvedValue({ name: "v2.0", revision: "HEAD", message: "", push: true });
+    await item(created.actions.sectionMenu("tags"), "Create New Tag…").action();
+    expect(created.ran().map(([command]) => command)).toEqual(["create_tag"]);
+
+    const branched = switchedDuring("create_branch");
+    vi.mocked(openForm).mockResolvedValue({ name: "feature", checkout: false, publish: true });
+    await branched.actions.newBranch();
+    expect(branched.ran().map(([command]) => command)).toEqual(["create_branch"]);
+  });
+
+  test("the branches' arrangement changes in the repository it ran in", async () => {
+    const { actions } = switchedDuring("delete_merged_branch");
+    addDivider("/code/palace", "", null, ["branch:feature"]);
+    addDivider("/code/other", "", null, ["branch:feature"]);
+    await actions.deleteMergedBranch("feature", "abc123");
+    expect(branchOrder("/code/palace")).not.toContain("branch:feature");
+    expect(branchOrder("/code/other")).toContain("branch:feature");
   });
 });
 
