@@ -38,6 +38,17 @@ impl<T> PerRepo<T> {
         self.0.lock().unwrap().remove(&(window.to_string(), path.to_string()))
     }
 
+    /// Takes away what the repository had in the window, as `release` does, unless
+    /// `keep` says it's still wanted.
+    pub fn release_unless(&self, window: &str, path: &str, keep: impl FnOnce(&T) -> bool) -> Option<T> {
+        let mut all = self.0.lock().unwrap();
+        let key = (window.to_string(), path.to_string());
+        if all.get(&key).is_some_and(keep) {
+            return None;
+        }
+        all.remove(&key)
+    }
+
     /// Takes away everything the window had, as it closes.
     pub fn forget(&self, window: &str) -> Vec<T> {
         let mut all = self.0.lock().unwrap();

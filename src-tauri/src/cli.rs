@@ -119,10 +119,12 @@ impl Runnings {
     }
 
     /// Lets go of a repository the window's done with, so a long-open window doesn't keep
-    /// one for every repository it's had. Work still running goes on to the end, holding
-    /// its own: a push isn't cut off as its tab closes.
+    /// one for every repository it's had. Not while work's still running there, which
+    /// holds it: a push isn't cut off as its tab shows another repository, and Cancel,
+    /// still shown for it, can still stop it, as can an operation stopping a background
+    /// fetch.
     pub fn release(&self, window: &str, path: &str) {
-        let _ = self.0.release(window, path);
+        let _ = self.0.release_unless(window, path, |running| std::sync::Arc::strong_count(running) > 1);
     }
 
     /// Stops the network work of a window that's closed.
@@ -296,6 +298,18 @@ fn join_output(first: &str, second: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repository_with_network_work_running_is_kept_till_it_ends() {
+        let runnings = Runnings::default();
+        let running = runnings.of("main", "/a");
+        runnings.release("main", "/a");
+        // Canceling finds the one running.
+        assert!(std::sync::Arc::ptr_eq(&runnings.of("main", "/a"), &running));
+        drop(running);
+        runnings.release("main", "/a");
+        assert!(runnings.0.release("main", "/a").is_none());
+    }
 
     #[test]
     fn checking_git_versions() {

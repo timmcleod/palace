@@ -14,7 +14,7 @@ const terminals = vi.hoisted(() => ({ busyIn: vi.fn(async () => []), closeTermin
 vi.mock("./terminals.js", () => terminals);
 
 const { useTabs } = await import("./windowTabs.js");
-const { unsavedFiles } = await import("./editing.js");
+const { forgetEditsIn, unsavedFiles } = await import("./editing.js");
 
 // What the backend answers, by command.
 let answers;
@@ -157,4 +157,18 @@ test("a removed worktree only kept from before is let go of, and the tab that sh
   expect(tab.seen).toEqual(["/r"]);
   expect(invoke).toHaveBeenCalledWith("release_repo", { path: "/w" });
   expect(askConfirm).not.toHaveBeenCalled();
+});
+
+test("a removed worktree open in one tab is let go of in another that showed it before, its edits with it", async () => {
+  vi.mocked(forgetEditsIn).mockClear();
+  const w = await windowWith({ tabs: { repos: ["/w", "/r"], active: 0 }, first: false });
+  const [open, before] = w.tabs.list;
+  opened(open);
+  // The other tab showed the worktree too, before going on to the repository.
+  before.seen.push("/w");
+  opened(before);
+  w.window.send("close-repo", { path: "/w" });
+  await vi.waitFor(() => expect(paths(w)).toEqual(["/r"]));
+  expect(before.seen).toEqual(["/r"]);
+  await vi.waitFor(() => expect(forgetEditsIn).toHaveBeenCalledWith("/w"));
 });
