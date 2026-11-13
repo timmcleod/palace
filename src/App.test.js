@@ -607,3 +607,75 @@ test("at startup, the last repository open in another window brings that forward
   await until(() => !!document.querySelector(".welcome"));
   expect(calls("watch_repo")).toEqual([]);
 });
+
+test("a tab's own dialog, as New Issue, keeps the window's keys from closing or switching the tab under it", async () => {
+  await start();
+  await openInNewTab("other");
+  const dialog = Object.assign(document.createElement("div"), { className: "backdrop" });
+  showing().append(dialog);
+  press("w", { code: "KeyW" });
+  press("1", { code: "Digit1" });
+  send("menu", "close-tab");
+  await settle();
+  expect(tabNames()).toEqual(["palace", "other"]);
+  expect(showingTab()).toBe("other");
+  dialog.remove();
+  press("1", { code: "Digit1" });
+  await until(() => showingTab() === "palace");
+});
+
+test("closing a tab stops the fetch, pull or push under way in it", async () => {
+  await start();
+  await openInNewTab("other");
+  answers.fetch = () => new Promise(() => {});
+  showing().querySelector(".toolbar.actions .icon-button").click();
+  await until(() => calls("fetch").some((args) => args.path === OTHER));
+  tabNamed("other").querySelector(".close").click();
+  await until(() => calls("cancel_remote").some((args) => args.path === OTHER));
+});
+
+test("keys leave a tab as another's shown, rather than going on into it hidden", async () => {
+  await start();
+  await openInNewTab("other");
+  const field = showing().querySelector("input");
+  field.focus();
+  expect(document.activeElement).toBe(field);
+  press("1", { code: "Digit1" });
+  await until(() => showingTab() === "palace");
+  await settle();
+  expect(document.activeElement).not.toBe(field);
+});
+
+test("a repository is the last opened as it's opened where it's seen, not as a tab behind refreshes", async () => {
+  await start();
+  await openInNewTab("other");
+  const { readJson } = await import("./lib/storage.js");
+  const first = () => readJson("palace.recentRepositories", [])[0]?.path;
+  expect(first()).toBe(OTHER);
+  // palace's tab, behind, refreshes as its folder changes.
+  send("repo-changed", { path: PALACE });
+  await until(() => calls("repo_overview").filter((args) => args.path === PALACE).length > 1);
+  await settle();
+  expect(first()).toBe(OTHER);
+});
+
+test("quitting with a terminal the page can't name still says one's running", async () => {
+  await start();
+  send("quit-requested", { quitting: true, terminals: [999], edits: false, other_terminals: [], other_edits: [] });
+  await until(() => shown("A terminal is still running. Quitting stops it."));
+});
+
+test("a tab letting go of a repository another tab shows leaves it watched for that one", async () => {
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: Workspace } = await import("./components/Workspace.vue");
+  app = createApp({ render: () => h(Workspace, { opens: PALACE, shownElsewhere: () => true }) });
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => !!root.querySelector(".repo-name")?.textContent.includes("palace"));
+  app.unmount();
+  app = null;
+  await settle();
+  expect(calls("release_repo")).toEqual([]);
+});

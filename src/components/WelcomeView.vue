@@ -125,7 +125,7 @@ function openFirstRecent() {
   width: min(460px, calc(100vw - 32px));
   /* No taller than the window: a long list of recent repositories scrolls instead. */
   box-sizing: border-box;
-  max-height: calc(100vh - 56px);
+  max-height: calc(100% - 56px);
   padding: 36px 28px 24px;
   border-radius: var(--radius-2xl);
   background: var(--content-bg);

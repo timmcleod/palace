@@ -136,16 +136,25 @@ export const confirmDialog = shallowRef(null);
  */
 export function askConfirm({ title, message, confirmLabel = "OK", danger = false, cancel = true }) {
   return new Promise((resolve) => {
-    confirmDialog.value = { title, message, confirmLabel, danger, cancel, resolve };
+    const dialog = { title, message, confirmLabel, danger, cancel, resolve };
+    // One asked while another's showing, as from a tab behind it, waits its turn, rather
+    // than taking its place and leaving what asked first waiting for good.
+    if (confirmDialog.value) waiting.push(dialog);
+    else confirmDialog.value = dialog;
   });
 }
 
+// What's been asked while another was showing, in order.
+const waiting = [];
+
 /**
- * Whether a dialog or menu is showing over the window: each of those above, which
- * App.vue shows. A new one goes in both places.
+ * Whether a dialog or menu is showing over the window: one of those above, which App.vue
+ * shows, or one of the tab showing's own, as Create Pull Request or New Issue. Every
+ * dialog draws a .backdrop; a hidden tab's is hidden with it, and doesn't count.
  */
 export const overlayOpen = () =>
-  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value);
+  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value) ||
+  [...document.querySelectorAll(".backdrop")].some((backdrop) => !backdrop.closest('[style*="display: none"]'));
 
 /** Says something, with only an OK button. */
 export function tell(title, message) {
@@ -154,5 +163,5 @@ export function tell(title, message) {
 
 export function closeConfirm(ok) {
   confirmDialog.value?.resolve(ok);
-  confirmDialog.value = null;
+  confirmDialog.value = waiting.shift() ?? null;
 }

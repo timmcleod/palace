@@ -92,15 +92,19 @@ test("the backend's told the repositories open, in order, and which shows among 
   expect(tabWith(tabs, null)).toBeNull();
 });
 
-test("a tab remembers every repository it's shown, and closing it leaves those no other tab has", () => {
+test("a tab remembers every repository it's shown, and closing it leaves those another tab has or had", () => {
   const tabs = tabsOf("/a", "/b");
   const [first, second] = tabs.list;
+  // Only once it's shown one: opening it isn't enough, as it may not open.
+  expect(first.seen).toEqual([]);
+  showIn(first, { path: "/a", name: "a", branch: "main" });
   showIn(first, { path: "/c", name: "c", branch: "main" });
   showIn(first, { path: "/c", name: "c", branch: "next" });
   expect(first).toMatchObject({ path: "/c", name: "c", branch: "next", seen: ["/a", "/c"] });
   expect(leftBy(tabs, first)).toEqual(["/a", "/c"]);
-  // /a open in the other tab now: its terminals are that one's.
+  // /a shown in the other tab, which has gone on to another: its terminals may be that one's.
   showIn(second, { path: "/a", name: "a", branch: "main" });
+  showIn(second, { path: "/d", name: "d", branch: "main" });
   expect(leftBy(tabs, first)).toEqual(["/c"]);
   showIn(first, null);
   expect(first).toMatchObject({ path: null, name: null, branch: null });

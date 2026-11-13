@@ -101,8 +101,9 @@ pub fn set_unsaved_edits(window: WebviewWindow, files: Vec<Unsaved>) {
 /// “name” in repository.
 pub fn unsaved_under(path: &str) -> Vec<String> {
     let folder = crate::windows::same_folder(path);
-    let unsaved = UNSAVED.lock().unwrap();
-    unsaved.values().flatten().filter(|f| crate::windows::same_folder(&f.path).starts_with(&folder)).map(|f| f.described.clone()).collect()
+    // Looked up with no lock held: see terminal::within.
+    let unsaved: Vec<Unsaved> = UNSAVED.lock().unwrap().values().flatten().cloned().collect();
+    unsaved.into_iter().filter(|f| crate::windows::same_folder(&f.path).starts_with(&folder)).map(|f| f.described).collect()
 }
 
 /// Forgets the edits of a window that's closed.
@@ -117,6 +118,7 @@ pub fn quit_confirmed(app: AppHandle, window: WebviewWindow, quitting: bool) {
         CONFIRMED.store(true, Ordering::Relaxed);
         app.exit(0);
     } else {
+        crate::reopen::remember_if_last(&app);
         let _ = window.destroy();
     }
 }

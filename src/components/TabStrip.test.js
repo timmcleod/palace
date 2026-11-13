@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createApp, h, nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import TabStrip from "./TabStrip.vue";
 
 let app;
@@ -96,4 +96,24 @@ test("Escape, or dropping it off the tabs, leaves a dragged tab where it was", a
   window.dispatchEvent(pointer("pointermove", 2500));
   window.dispatchEvent(pointer("pointerup", 2500));
   expect(onMove).not.toHaveBeenCalled();
+});
+
+test("a mouse wheel scrolls the row, and the tab that comes to show is scrolled into it", async () => {
+  const shown = vi.fn();
+  Element.prototype.scrollIntoView = shown;
+  const tabs = [tab(1, "a"), tab(2, "b"), tab(3, "c")];
+  const active = ref(1);
+  const root = document.createElement("div");
+  document.body.append(root);
+  app = createApp({ render: () => h(TabStrip, { tabs, active: active.value }) });
+  app.mount(root);
+  const row = root.querySelector(".tabs");
+  row.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+  expect(row.scrollLeft).toBe(120);
+  active.value = 3;
+  await nextTick();
+  await nextTick();
+  expect(shown).toHaveBeenCalled();
+  expect(shown.mock.contexts.at(-1).dataset.id).toBe("3");
+  delete Element.prototype.scrollIntoView;
 });

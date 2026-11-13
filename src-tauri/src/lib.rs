@@ -280,11 +280,15 @@ pub fn run() {
             // Not when Palace quits itself, as to restart into an update, which gives a
             // code.
             tauri::RunEvent::ExitRequested { code: None, api, .. } if quit::hold(app, None) => api.prevent_exit(),
+            // Quitting after all: its windows are noted, to reopen as it next starts.
+            tauri::RunEvent::ExitRequested { .. } => reopen::remember(app, reopen::Why::Quit),
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. }
                 if quit::hold(app, Some(&label)) =>
             {
                 api.prevent_close()
             }
+            // The last window, closing, is noted too: Palace quits with it.
+            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. } => reopen::remember_if_last(app),
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => windows::forget(app, &label),
             _ => {}
         });

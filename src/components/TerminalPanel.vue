@@ -32,6 +32,7 @@ import { setDragImage } from "../lib/dragImage.js";
 import { draggingFiles, onFilesDropped } from "../lib/fileDrag.js";
 import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
+import { tallestTerminal } from "../lib/panes.js";
 
 // The panel below the history and details: the repository's terminals, in tabs. An
 // agent tab runs the command set for the repository: Claude Code unless it says
@@ -361,8 +362,7 @@ function startResize(event) {
   dragEdge(event, {
     axis: "y",
     move: (distance) => {
-      const max = Math.max(160, window.innerHeight - 200);
-      emit("update:height", Math.min(max, Math.max(120, startHeight - distance)));
+      emit("update:height", Math.min(tallestTerminal(), Math.max(120, startHeight - distance)));
     },
     done: () => emit("resized"),
   });

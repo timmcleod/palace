@@ -50,6 +50,15 @@ async function open() {
 }
 
 describe("useBackgroundFetch", () => {
+  test("doesn't fetch a repository whose tab has closed before it was due", async () => {
+    const { unmount } = setUp();
+    state.overview.value = { path: "/repo", remotes: [{}] };
+    await nextTick();
+    unmount();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetches()).toBe(0);
+  });
+
   test("fetches a repository 3 seconds after it opens, then reloads it", async () => {
     const { result } = setUp();
     await vi.advanceTimersByTimeAsync(60_000);

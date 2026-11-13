@@ -33,6 +33,7 @@ import {
   tell,
 } from "./lib/overlays.js";
 import { isMac } from "./lib/platform.js";
+import { fitTerminal } from "./lib/panes.js";
 import { lastRepository } from "./lib/recents.js";
 import { useShortcuts } from "./lib/shortcuts.js";
 import { closeTab, closingLoses, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabWith, tabsForBackend } from "./lib/tabs.js";
@@ -124,6 +125,8 @@ const manyTabs = computed(() => tabs.list.length > 1);
 watch(manyTabs, (many) => {
   if (many) document.documentElement.dataset.tabs = "many";
   else delete document.documentElement.dataset.tabs;
+  // The row takes room from the panes above the terminal panel.
+  fitTerminal();
 });
 onBeforeUnmount(() => delete document.documentElement.dataset.tabs);
 
@@ -140,7 +143,7 @@ watch(
 
 // Whether a dialog or menu is open, the window's or the tab showing's own, as Create
 // Pull Request, which the window's keys and menu mustn't go out from under.
-const dialogOpen = () => overlayOpen() || !!workspaces[tabs.active]?.dialogOpen();
+const dialogOpen = overlayOpen;
 
 /** Opens a tab to choose a repository in. */
 const newTab = () => openTab(tabs);
@@ -309,11 +312,14 @@ const unlistenQuit = thisWindow.listen("quit-requested", async ({ payload }) => 
   }
   if (payload.terminals.length) {
     const { describeTerminals } = await import("./lib/terminals.js");
+    // Those this page knows by name: one it's let go of, as its tab closed while its shell
+    // started, is counted but can't be named.
     const names = describeTerminals(payload.terminals).map((t) => `“${t.label}” in ${t.repository}`);
+    const count = payload.terminals.length;
     lines.push(
-      names.length === 1
-        ? `${names[0]} is still running. ${doing} stops it.`
-        : `${names.length} terminals are still running: ${names.join(", ")}. ${doing} stops them.`,
+      count === 1
+        ? `${names[0] ?? "A terminal"} is still running. ${doing} stops it.`
+        : `${count} terminals are still running${names.length ? `: ${names.join(", ")}` : ""}. ${doing} stops them.`,
     );
   }
   const elsewhere = [
@@ -364,6 +370,7 @@ onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
           :task="tab.task"
           :tidy-recents="tab.id === tidies"
           :open-elsewhere="(path) => showElsewhere(path, tab)"
+          :shown-elsewhere="(path) => tabs.list.some((other) => other !== tab && other.path === path)"
           :agent-states="agentStates"
           :active="tab.id === tabs.active"
           @shows="(shown) => showIn(tab, shown)"

@@ -70,3 +70,24 @@ test("Escape ends it without a drop; other keys are the caller's", () => {
   window.dispatchEvent(pointer("pointerup", 40));
   expect(drop).not.toHaveBeenCalled();
 });
+
+test("a drop that fails still ends the drag", () => {
+  const row = document.createElement("div");
+  document.body.append(row);
+  const end = vi.fn();
+  const drag = pointerDrag({
+    image: () => document.createElement("div"),
+    drop: () => {
+      throw new Error("failed");
+    },
+    end,
+  });
+  row.addEventListener("pointerdown", (event) => drag.press(event, "x"));
+  row.dispatchEvent(pointer("pointerdown", 10));
+  window.dispatchEvent(pointer("pointermove", 40));
+  // The drop's error comes out as it was; the drag ends regardless.
+  expect(() => window.dispatchEvent(pointer("pointerup", 40))).toThrow("failed");
+  expect(end).toHaveBeenCalled();
+  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.body.classList.contains("dragging-row")).toBe(false);
+});

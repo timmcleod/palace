@@ -55,7 +55,7 @@ describe("running an operation", () => {
     expect(invoke).toHaveBeenCalledWith("merge", { path: "/repo", branch: "next" });
     expect(duringCard).toMatchObject({ title: "Doing…", state: "running", command: "merge", cancellable: false });
     expect(run.card.value).toMatchObject({ title: "Done", state: "done", message: "Merged 3 commits." });
-    expect(run.onDone).toHaveBeenCalledWith(run.card.value, "merge", { branch: "next" });
+    expect(run.onDone).toHaveBeenCalledWith(run.card.value, "merge", { branch: "next" }, expect.any(String));
     // A success gets out of the way.
     vi.advanceTimersByTime(5000);
     expect(run.card.value).toBeNull();

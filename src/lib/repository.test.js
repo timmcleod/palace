@@ -84,7 +84,7 @@ describe("loading a repository", () => {
     expect(repo.loading.value).toBe(false);
     expect(repo.overview.value.path).toBe("/a");
     expect(repo.error.value).toBe("");
-    expect(repo.onLoaded).toHaveBeenCalledWith(overviews["/a"]);
+    expect(repo.onLoaded).toHaveBeenCalledWith(overviews["/a"], { quiet: false });
     // The changed files too, for the view that lists them.
     expect(invoke).toHaveBeenCalledWith("repo_overview", { path: "/a", files: true });
   });

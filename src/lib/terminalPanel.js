@@ -43,11 +43,13 @@ export function useTerminalPanel({ overview, loadRepository, window, active = ()
     reveal();
     const path = overview.value.path;
     const { agentCommand, missingAgent, openTerminal, tabsFor } = await terminals();
+    if (gone) return;
     if (!newTab && tabsFor(path).tabs.length) return panel.value?.focus();
     if (!newTab && !folder && settings.terminalStartsAgent) {
       const command = agentCommand(path);
       // Not installed, it's a shell: the agent's button says how to install it.
       const ready = !(await missingAgent(command));
+      if (gone) return;
       // Opened meanwhile, as by a second press while that was asked, it isn't again.
       if (tabsFor(path).tabs.length || overview.value?.path !== path) return panel.value?.focus();
       if (ready) return openTerminal(path, { command, kind: "agent" });
@@ -81,15 +83,21 @@ export function useTerminalPanel({ overview, loadRepository, window, active = ()
     return false;
   }
 
-  // Starts the repository's agent on `task`, showing the panel, as for a window opened
-  // by New Agent Task. Where it can only be put in the agent's prompt, that's said; where the
+  // Gone, as its tab closes: what's under way opens no terminal, nor says anything, after.
+  let gone = false;
+  onBeforeUnmount(() => (gone = true));
+  const wanted = () => !gone;
+
+  // Starts the repository's agent on `task`, showing the panel, as for a tab opened by
+  // New Agent Task. Where it can only be put in the agent's prompt, that's said; where the
   // agent didn't start, the task's given back, so it isn't lost.
   async function startTask(task) {
     const path = overview.value?.path;
     if (!path) return;
     reveal();
     const { offerInstall, startAgentOn } = await terminals();
-    const how = await startAgentOn(path, task);
+    const how = await startAgentOn(path, task, { wanted });
+    if (gone) return;
     if (how === "pasted") tell("Send the Task", "The task is in the agent's prompt. Check it, then press Enter to send it.");
     else if (how?.missing) {
       if (await offerInstall(path, how.missing, { then: `give it the task again: “${task}”` })) reveal();
@@ -103,7 +111,8 @@ export function useTerminalPanel({ overview, loadRepository, window, active = ()
     if (!path) return false;
     reveal();
     const { sendToAgent } = await terminals();
-    const tab = await sendToAgent(path, text);
+    const tab = await sendToAgent(path, text, { wanted });
+    if (gone) return false;
     if (!tab) {
       tell("Couldn't Reach the Agent", "The agent tab's agent didn't start. Check the agent tab for why, then try again.");
       return false;

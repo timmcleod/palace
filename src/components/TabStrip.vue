@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, ref } from "vue";
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import Spinner from "./Spinner.vue";
 import { shortcut } from "../lib/platform.js";
@@ -74,13 +74,33 @@ function landing(event) {
 
 onBeforeUnmount(() => drag.cancel());
 
+// --- The row scrolling -----------------------------------------------------------------
+// With more tabs than fit, the row scrolls sideways, its scrollbar hidden.
+
+// The tab that comes to show is scrolled into the row, however it was chosen, as by
+// Cmd+9, or opened at the end.
+watch(
+  () => props.active,
+  async () => {
+    await nextTick();
+    list.value?.querySelector(".tab.active")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  },
+);
+
+// A mouse's wheel scrolls it too, as one without a trackpad has no other way.
+function onWheel(event) {
+  if (!event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+  event.preventDefault();
+  list.value.scrollLeft += event.deltaY;
+}
+
 // The line where it would land, on the tab it's next to.
 const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? "drop-after" : "drop-before") : null);
 </script>
 
 <template>
   <nav class="tab-strip" aria-label="Tabs">
-    <div ref="list" class="tabs" role="tablist">
+    <div ref="list" class="tabs" role="tablist" @wheel="onWheel">
       <div
         v-for="tab in tabs"
         :key="tab.id"
@@ -175,7 +195,7 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
 
 .tab.active {
   border-color: color-mix(in srgb, var(--border) 65%, var(--text-tertiary));
-  background: var(--sidebar-bg);
+  background: var(--tab-active-bg);
   color: var(--text-primary);
 }
 
@@ -207,6 +227,15 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
 
 .tab.drop-after::before {
   right: -5px;
+}
+
+/* At the row's ends, inside it, where it's not cut off. */
+.tab:first-child.drop-before::before {
+  left: 0;
+}
+
+.tab:last-child.drop-after::before {
+  right: 0;
 }
 
 .mark {
@@ -254,7 +283,7 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
 
 .detail {
   font-size: var(--font-xs);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Only on the tab under the pointer, or the one showing. */
@@ -265,7 +294,8 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
 
 .tab:hover .close,
 .tab.active .close,
-.tab:focus-within .close {
+.tab:focus-visible .close,
+.close:focus-visible {
   visibility: visible;
 }
 

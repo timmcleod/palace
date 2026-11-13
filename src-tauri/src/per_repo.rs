@@ -27,7 +27,9 @@ impl<T: Clone + Default> PerRepo<T> {
 impl<T> PerRepo<T> {
     /// Puts `value` in place of whatever the repository had in the window.
     pub fn set(&self, window: &str, path: &str, value: T) {
-        self.0.lock().unwrap().insert((window.to_string(), path.to_string()), value);
+        let replaced = self.0.lock().unwrap().insert((window.to_string(), path.to_string()), value);
+        // Dropped with the lock let go of: a watcher's drop waits for its thread.
+        drop(replaced);
     }
 
     /// Takes away what the repository had in the window, as it's done with it.

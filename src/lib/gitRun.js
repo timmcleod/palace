@@ -24,9 +24,10 @@ const NETWORK = new Set([
  *   undo                 { stepFor, newest, undoable, undo } (see undo.js)
  *   stopBackgroundFetch  stops one under way, as an operation goes first
  *   refresh              reloads everything, after each operation
- *   onConflict()         an operation stopped for conflicts, or left some: they're shown
- *   onDone(op, command, args)  one finished: what follows from it, such as offering a
- *                        pull request for a branch just pushed
+ *   onConflict(where)    an operation stopped for conflicts, or left some: they're shown
+ *   onDone(op, command, args, where)  one finished: what follows from it, such as
+ *                        offering a pull request for a branch just pushed. `where` is
+ *                        the repository it ran in, which may no longer be the open one
  *   pull, forcePush      what a push rejected for the remote's commits offers
  * Returns runGit.
  */
@@ -54,19 +55,21 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
       const step = path ? null : undo.stepFor(command, args, undoLabel);
       const newestBefore = undo.newest();
       const message = await (step ? undo.undoable(step, work) : work());
-      if (undo.newest() !== newestBefore) op.actions = [{ label: "Undo", run: undo.undo }];
+      // Undo is offered for what it did, while its repository's still the open one: after
+      // another's opened, undo would undo that one's newest step.
+      if (overview.value?.path === where && undo.newest() !== newestBefore) op.actions = [{ label: "Undo", run: undo.undo }];
       // Done, but changes set aside for it conflicted when put back.
       if (isError(message, CONFLICT)) {
         op.state = "conflict";
         op.title = `${done}, with conflicts`;
         op.message = errorDetail(message, CONFLICT);
-        onConflict();
+        onConflict(where);
         return null;
       }
       op.message = message;
       op.state = "done";
       op.title = done;
-      onDone(op, command, args);
+      onDone(op, command, args, where);
       // Successes get out of the way; failures stay until dismissed.
       status.dismissLater(op, 5000);
       return null;
@@ -81,7 +84,7 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
         op.state = "conflict";
         op.title = "Stopped for conflicts";
         op.message = errorDetail(message, CONFLICT);
-        onConflict();
+        onConflict(where);
       } else {
         op.state = "failed";
         op.title = failed;

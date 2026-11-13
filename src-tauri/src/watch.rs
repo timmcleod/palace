@@ -12,7 +12,7 @@ use git2::{Repository, StatusOptions};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use crate::per_repo::PerRepo;
@@ -21,18 +21,58 @@ use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
 
 /// The watcher for each repository a window has open (see per_repo.rs). Replacing one,
 /// or letting it go, stops it.
+///
+/// A watcher takes a while to set up (see watch_repo), and the page may let go of the
+/// repository meanwhile, or close the window. So each request to watch one is numbered,
+/// by window and repository, and a watcher is kept only while its request is still the
+/// latest: letting go, or a newer request, or the window closing, leaves the one being
+/// set up to be dropped as it's done, rather than kept, watching for nobody.
 #[derive(Default)]
-pub struct RepoWatcher(PerRepo<Arc<Mutex<RecommendedWatcher>>>);
+pub struct RepoWatcher {
+    watchers: PerRepo<Arc<Mutex<RecommendedWatcher>>>,
+    /// The latest request for each, by window and repository. Taken before `watchers`,
+    /// so a watcher's kept, or let go of, as one.
+    asked: Mutex<HashMap<(String, String), u64>>,
+}
 
 impl RepoWatcher {
-    /// Stops watching the repository at `path` for the window, as it's done with it.
-    pub fn release(&self, window: &str, path: &str) {
-        self.0.release(window, path);
+    /// A new request to watch the repository at `path` for the window: its number.
+    fn ask(&self, window: &str, path: &str) -> u64 {
+        let mut asked = self.asked.lock().unwrap();
+        let latest = asked.entry((window.to_string(), path.to_string())).or_default();
+        *latest += 1;
+        *latest
     }
 
-    /// Stops watching for a window that's closed.
+    /// Keeps `watcher`, set up for the request numbered `request`, if that's still the
+    /// latest; otherwise it's dropped, and stops.
+    fn keep(&self, window: &str, path: &str, request: u64, watcher: Arc<Mutex<RecommendedWatcher>>) {
+        let asked = self.asked.lock().unwrap();
+        if asked.get(&(window.to_string(), path.to_string())) == Some(&request) {
+            self.watchers.set(window, path, watcher);
+        }
+    }
+
+    /// Stops watching the repository at `path` for the window, as it's done with it,
+    /// and any watcher still being set up for it.
+    pub fn release(&self, window: &str, path: &str) {
+        let mut asked = self.asked.lock().unwrap();
+        if let Some(latest) = asked.get_mut(&(window.to_string(), path.to_string())) {
+            *latest += 1;
+        }
+        self.watchers.release(window, path);
+    }
+
+    /// Stops watching for a window that's closed, and setting up watchers for it.
     pub fn forget(&self, window: &str) {
-        self.0.forget(window);
+        let mut asked = self.asked.lock().unwrap();
+        asked.retain(|(w, _), _| w != window);
+        self.watchers.forget(window);
+    }
+
+    #[cfg(test)]
+    fn watching(&self, window: &str, path: &str) -> bool {
+        self.watchers.release(window, path).is_some()
     }
 }
 
@@ -47,6 +87,7 @@ struct Changed {
 /// window opening several tabs at once would otherwise stand still for all of them.
 #[tauri::command]
 pub async fn watch_repo(window: WebviewWindow, path: String) -> Result<(), String> {
+    let request = window.state::<RepoWatcher>().ask(window.label(), &path);
     tauri::async_runtime::spawn_blocking(move || {
         let label = window.label().to_string();
         let target = EventTarget::webview_window(label.clone());
@@ -55,7 +96,7 @@ pub async fn watch_repo(window: WebviewWindow, path: String) -> Result<(), Strin
         let watcher = start(&path, move || {
             let _ = emitter.emit_to(target.clone(), "repo-changed", changed.clone());
         })?;
-        window.state::<RepoWatcher>().0.set(&label, &path, watcher);
+        window.state::<RepoWatcher>().keep(&label, &path, request, watcher);
         Ok(())
     })
     .await
@@ -370,6 +411,35 @@ mod tests {
         git(t.path(), &["commit", "-qam", "Edit"], None).unwrap();
         assert!(reported(&rx), "committing in the main working copy");
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_watcher_set_up_after_its_repository_was_let_go_of_is_not_kept() {
+        let t = TempRepo::new("watch-late");
+        t.commit(&[("a.txt", Some("a\n"))], "First");
+        let path = t.dir.to_string_lossy().into_owned();
+        let watchers = RepoWatcher::default();
+        let set_up = || start(&path, || {}).unwrap();
+
+        // Let go of while it was set up: dropped.
+        let request = watchers.ask("main", &path);
+        watchers.release("main", &path);
+        watchers.keep("main", &path, request, set_up());
+        assert!(!watchers.watching("main", &path));
+
+        // A newer request meanwhile: only the newer one's kept.
+        let older = watchers.ask("main", &path);
+        let newer = watchers.ask("main", &path);
+        watchers.keep("main", &path, older, set_up());
+        assert!(!watchers.watching("main", &path));
+        watchers.keep("main", &path, newer, set_up());
+        assert!(watchers.watching("main", &path));
+
+        // Its window closed meanwhile: dropped.
+        let request = watchers.ask("main", &path);
+        watchers.forget("main");
+        watchers.keep("main", &path, request, set_up());
+        assert!(!watchers.watching("main", &path));
     }
 
     #[test]

@@ -103,6 +103,9 @@ const props = defineProps({
   // tabs or another window, and says whether it is (see App.vue); without it, another
   // window only (see repository.js).
   openElsewhere: { type: Function, default: undefined },
+  // Whether another of the window's tabs shows the repository at `path` too, whose
+  // watcher and history are the window's, kept for that one as this lets go of it.
+  shownElsewhere: { type: Function, default: () => false },
   // What each repository's agents are doing, in every window, by path (see
   // agentStates.js), for Worktrees to show which is busy or wants you.
   agentStates: { type: Object, default: () => ({}) },
@@ -359,6 +362,7 @@ function onPullUpdated(pull) {
 // that tracked it is offered for deleting: from wherever it's checked out, by going
 // to the branch it was merged into.
 async function onPullMerged({ number, base, head, headRepo, headSha, branchDeleted }) {
+  const merged = overview.value.path;
   const remotes = overview.value.remotes;
   const headRemote = githubRemoteOf(remotes, headRepo);
   const baseRemote = githubRemoteOf(remotes, issueRepo.value && `${issueRepo.value.owner}/${issueRepo.value.repo}`);
@@ -366,6 +370,8 @@ async function onPullMerged({ number, base, head, headRepo, headSha, branchDelet
   for (const remote of new Set([baseRemote?.name, headRemote?.name].filter(Boolean))) {
     await runGit(["Fetching…", "Fetched", "Fetch failed"], "fetch", { remote });
   }
+  // Another repository opened meanwhile: what's offered next would be for that one.
+  if (overview.value?.path !== merged) return;
 
   const offers = [];
   // Deleting is forced, since a squash or rebase leaves the branch looking unmerged,
@@ -499,7 +505,8 @@ function focusToolbarSearch() {
 }
 
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
-const dialogOpen = () => overlayOpen() || !!pullRequestDialog.value;
+// Any dialog, the window's or this tab's own (see overlayOpen).
+const dialogOpen = overlayOpen;
 
 // The tab's keyboard shortcuts: which key is which, and where each applies, is in
 // shortcuts.js; what each does is here.
@@ -578,16 +585,18 @@ const { runGit } = useGitRun({
   },
   stopBackgroundFetch: () => stopBackgroundFetch(),
   refresh: () => refresh(),
-  // Conflicts are resolved in the Working Copy.
-  onConflict() {
-    selected.value = "workspace:working-copy";
+  // Conflicts are resolved in the Working Copy: in the repository they're in, if it's
+  // still the one showing.
+  onConflict(where) {
+    if (overview.value?.path === where) selected.value = "workspace:working-copy";
   },
-  onDone(op, command, args) {
-    if (command === "push" || command === "publish_branch") offerPullRequest(op, args.branch ?? overview.value.head.branch);
+  onDone(op, command, args, where) {
+    const here = overview.value?.path === where;
+    if (here && (command === "push" || command === "publish_branch")) offerPullRequest(op, args.branch ?? overview.value.head.branch);
     // Fetching and pulling can bring in commits by new authors.
     if (command === "fetch" || command === "pull") {
-      loadAvatars(overview.value.path);
-      markFetched(overview.value.path);
+      if (here) loadAvatars(where);
+      markFetched(where);
     }
   },
   pull: () => actions.pull(),
@@ -669,9 +678,11 @@ const DONE = {
 const UNDO_OFFERED_FOR = 8000;
 
 async function undoableWithNotice(step, work) {
+  const path = overview.value?.path;
   const before = newest();
   const result = await undoable(step, work);
-  if (newest() !== before && !remoteBusy.value) {
+  // Not after another repository's opened meanwhile, whose newest step undo would undo.
+  if (overview.value?.path === path && newest() !== before && !remoteBusy.value) {
     showStatus(
       {
         command: "undoable",
@@ -869,6 +880,7 @@ watch(active, (now) => now && (recents.value = recentRepositories()));
 // A repository no longer shown: the backend stops watching it and lets go of its
 // history, and its authors' pictures aren't asked for again.
 function letGo(path) {
+  if (props.shownElsewhere(path)) return;
   invoke("release_repo", { path }).catch(() => {});
   forgetAvatars(path);
 }
@@ -1010,15 +1022,12 @@ const {
 
 // The window shows a terminal tab of this one's repository, as for its notice clicked
 // (see App.vue).
-// The window asks too whether one of this tab's own dialogs is open, as Create Pull
-// Request is, which its keys mustn't go out from under (see App.vue).
 defineExpose({
   // Once it's opened what it opens, so the terminal tab's repository isn't opened twice.
   showTerminalTab: async (tab) => {
     await started;
     return showTerminalTab(tab);
   },
-  dialogOpen,
 });
 
 // --- Review comments for the agent -------------------------------------------------
@@ -1086,10 +1095,13 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     otherDrafts.delete(data.path);
     switchRepository(overview.value?.path, data.path);
   },
-  onLoaded(data) {
+  onLoaded(data, { quiet }) {
     // A repository open, Settings from the welcome screen is done with.
     browsingSettings.value = false;
-    rememberRepository(data);
+    // It's among the recent ones, the last opened, as it's opened where it's seen: not
+    // as it's read again in the background, nor in a tab behind the one showing, as
+    // tabs reopen, which would leave the list in the order they happened to refresh.
+    if (!quiet && props.active) rememberRepository(data);
     recents.value = recentRepositories();
   },
   onNotRepository: (path, options) => offerToCreateRepository(path, options),

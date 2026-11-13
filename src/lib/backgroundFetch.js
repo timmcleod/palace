@@ -61,12 +61,20 @@ export function useBackgroundFetch({ overview, busy, loading, refresh }) {
   }
 
   const fetchTimer = setInterval(fetchIfDue, 30_000);
-  onBeforeUnmount(() => clearInterval(fetchTimer));
-  // A repository is fetched shortly after it's opened, once it has had time to load.
+  // A repository is fetched shortly after it's opened, once it has had time to load:
+  // not if it's gone first, as with its tab closed.
+  let soon = 0;
   watch(
     () => overview.value?.path,
-    () => setTimeout(fetchIfDue, 3000),
+    () => {
+      clearTimeout(soon);
+      soon = setTimeout(fetchIfDue, 3000);
+    },
   );
+  onBeforeUnmount(() => {
+    clearInterval(fetchTimer);
+    clearTimeout(soon);
+  });
 
   const fetchTitle = computed(() => {
     const at = overview.value && fetchedAt[overview.value.path];

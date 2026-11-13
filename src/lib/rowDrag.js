@@ -79,13 +79,17 @@ export function pointerDrag({ image, start = () => {}, move = () => {}, drop = (
 
   function onUp(event) {
     const dropped = dragging;
-    if (dropped) {
-      // The click that follows the release isn't one.
-      window.addEventListener("click", swallowClick, true);
-      setTimeout(() => window.removeEventListener("click", swallowClick, true));
-      drop(event);
+    try {
+      if (dropped) {
+        // The click that follows the release isn't one.
+        window.addEventListener("click", swallowClick, true);
+        setTimeout(() => window.removeEventListener("click", swallowClick, true));
+        drop(event);
+      }
+    } finally {
+      // Ended whatever the drop did, so a failed one doesn't leave the drag going.
+      cancel();
     }
-    cancel();
   }
 
   function swallowClick(event) {

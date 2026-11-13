@@ -345,21 +345,23 @@ pub fn busy_terminals() -> Vec<Busy> {
 /// The programs running in terminals started in the folder at `path`, or a folder in it,
 /// in any window, by name, as "vim" or "claude", or None where it can't tell.
 pub fn busy_programs_in(path: &str) -> Vec<Option<String>> {
-    let within = within(path);
+    let ids = within(path);
     TERMINALS
         .lock()
         .unwrap()
-        .values()
-        .filter(|t| within(t) && is_busy(t))
-        .map(|t| t.master.process_group_leader().and_then(program_name))
+        .iter()
+        .filter(|(id, t)| ids.contains(id) && is_busy(t))
+        .map(|(_, t)| t.master.process_group_leader().and_then(program_name))
         .collect()
 }
 
-/// Whether a terminal was started in the folder at `path`, or a folder in it, however
-/// either was reached.
-fn within(path: &str) -> impl Fn(&Terminal) -> bool {
+/// The terminals started in the folder at `path`, or a folder in it, however either was
+/// reached, by id. Their folders are looked up with no lock held, as one on a drive gone
+/// quiet could take a while, and everything typed in a terminal waits on the lock.
+fn within(path: &str) -> Vec<u32> {
     let folder = crate::windows::same_folder(path);
-    move |t| crate::windows::same_folder(&t.folder).starts_with(&folder)
+    let folders: Vec<(u32, String)> = TERMINALS.lock().unwrap().iter().map(|(id, t)| (*id, t.folder.clone())).collect();
+    folders.into_iter().filter(|(_, f)| crate::windows::same_folder(f).starts_with(&folder)).map(|(id, _)| id).collect()
 }
 
 /// Hangs up the terminal, which ends its shell and what the shell started.
@@ -380,15 +382,15 @@ pub async fn terminal_close_all(app: tauri::AppHandle, window: WebviewWindow) {
 
 /// Hangs up the terminals in `window`, as when it closes.
 pub fn close_window(window: &str) {
-    close(|t| t.window == window);
+    let ids: Vec<u32> = TERMINALS.lock().unwrap().iter().filter(|(_, t)| t.window == window).map(|(id, _)| *id).collect();
+    close(&ids);
 }
 
-/// Hangs up the terminals `which` picks.
-fn close(which: impl Fn(&Terminal) -> bool) {
+/// Hangs up the terminals `ids`.
+fn close(ids: &[u32]) {
     let mut terminals = TERMINALS.lock().unwrap();
-    let ids: Vec<u32> = terminals.iter().filter(|(_, t)| which(t)).map(|(id, _)| *id).collect();
     for id in ids {
-        if let Some(mut terminal) = terminals.remove(&id) {
+        if let Some(mut terminal) = terminals.remove(id) {
             let _ = terminal.killer.kill();
         }
     }
@@ -399,20 +401,20 @@ fn close(which: impl Fn(&Terminal) -> bool) {
 /// them, for their shells and the programs in front in them to exit: hung up, a program
 /// may take a moment to stop, writing as it goes.
 pub fn close_in_and_wait(path: &str, limit: Duration) {
-    let within = within(path);
+    let ids = within(path);
     // A shell by its process, and what's in front by its process group, which holds
     // what it started.
     let running: Vec<(i32, bool)> = TERMINALS
         .lock()
         .unwrap()
-        .values()
-        .filter(|t| within(t))
-        .flat_map(|t| {
+        .iter()
+        .filter(|(id, _)| ids.contains(id))
+        .flat_map(|(_, t)| {
             let front = t.master.process_group_leader().filter(|front| Some(*front as u32) != t.shell).map(|front| (front, true));
             t.shell.map(|shell| (shell as i32, false)).into_iter().chain(front)
         })
         .collect();
-    close(within);
+    close(&ids);
     let started = Instant::now();
     while running.iter().any(|&(id, group)| still_running(id, group)) && started.elapsed() < limit {
         std::thread::sleep(Duration::from_millis(50));

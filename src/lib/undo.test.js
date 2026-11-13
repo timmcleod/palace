@@ -179,3 +179,44 @@ test("each repository keeps its own steps", async () => {
   undo.switchRepository("/other", "/repo");
   expect(undo.newest().label).toBe("Commit");
 });
+
+test("undoing while the repository's switched for another moves the step among its own, and leaves the other's", async () => {
+  const draft = reactive({ subject: "", body: "" });
+  const overview = ref({ path: "/repo" });
+  const offers = [];
+  let finish;
+  const undo = useUndo({
+    overview,
+    draft,
+    busy: () => false,
+    settle: async () => {},
+    run: () => new Promise((resolve) => (finish = resolve)),
+    offer: (label) => offers.push(label),
+  });
+  await undo.undoable({ label: "Commit", mode: "keep", message: "Fix it" }, async () => "");
+  // The other repository has a step of its own.
+  undo.switchRepository("/repo", "/other");
+  overview.value = { path: "/other" };
+  await undo.undoable({ label: "Stash", mode: "keep" }, async () => "");
+  undo.switchRepository("/other", "/repo");
+  overview.value = { path: "/repo" };
+
+  const undoing = undo.undo();
+  undo.switchRepository("/repo", "/other");
+  overview.value = { path: "/other" };
+  finish(null);
+  await undoing;
+  // The other's step is where it was, and nothing's said for the one undone.
+  expect(undo.newest().label).toBe("Stash");
+  expect(draft.subject).toBe("");
+  expect(offers).toEqual([]);
+  // The one undone's own steps: undone, ready to redo.
+  undo.switchRepository("/other", "/repo");
+  overview.value = { path: "/repo" };
+  expect(undo.newest()).toBeUndefined();
+  finish = null;
+  const redoing = undo.redo();
+  finish(null);
+  await redoing;
+  expect(undo.newest().label).toBe("Commit");
+});

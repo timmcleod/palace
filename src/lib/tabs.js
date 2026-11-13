@@ -8,14 +8,14 @@ import { folderName } from "./format.js";
 //   { id, path, name, branch, task, seen }
 // where `path` is the repository it has open, or is opening, or null for none; `name`
 // and `branch` what it shows of it; `task`, given as it opens, what its agent is to start
-// on; and `seen`, every repository it's shown, whose terminals go on running as it shows
-// another. `active` is the id of the one showing.
+// on; and `seen`, every repository it's shown, once it has, whose terminals go on
+// running as it shows another. `active` is the id of the one showing.
 
 let nextId = 1;
 
 /** A new tab, for the repository at `path`, or with none, still to choose one. */
 export function makeTab(path = null, { task = null } = {}) {
-  return { id: nextId++, path, name: path ? folderName(path) : null, branch: null, task, seen: path ? [path] : [] };
+  return { id: nextId++, path, name: path ? folderName(path) : null, branch: null, task, seen: [] };
 }
 
 /** Notes that the tab shows `shown` ({ path, name, branch }), or none. */
@@ -27,12 +27,14 @@ export function showIn(tab, shown) {
 }
 
 /**
- * The repositories closing the tab leaves with nothing showing them: those it's shown,
- * whose terminals and edits not saved go with it, but for any another tab has open.
+ * The repositories whose terminals and edits not saved go with the tab as it closes:
+ * those it's shown, but for any another tab has open or has shown too. Terminals are
+ * kept by repository, not by tab, so one another tab has shown may be its.
  */
 export function leftBy(tabs, tab) {
-  const open = new Set(tabs.list.filter((other) => other !== tab).map((other) => other.path));
-  return tab.seen.filter((path) => !open.has(path));
+  const others = tabs.list.filter((other) => other !== tab);
+  const theirs = new Set(others.flatMap((other) => [other.path, ...other.seen]));
+  return tab.seen.filter((path) => !theirs.has(path));
 }
 
 /**

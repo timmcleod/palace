@@ -25,8 +25,8 @@ pub struct Tabs {
 }
 
 impl Tabs {
-    /// One tab, with the repository at `path` open and showing, as a new window for a
-    /// worktree has.
+    /// One tab, with the repository at `path` open and showing, as a window noted before
+    /// tabs had (see reopen.rs).
     pub fn one(path: String) -> Self {
         Tabs { repos: vec![path], active: Some(0) }
     }
@@ -134,8 +134,9 @@ pub struct Showing {
 /// The labels of the windows with the folder at `path` open in one of their tabs.
 fn windows_showing(windows: &Windows, path: &str) -> Vec<String> {
     let path = same_folder(path);
-    let open = windows.0.lock().unwrap();
-    open.iter().filter(|(_, tabs)| tabs.repos.iter().any(|repo| same_folder(repo) == path)).map(|(label, _)| label.clone()).collect()
+    // Looked up with no lock held: see terminal::within.
+    let open: Vec<(String, Tabs)> = windows.0.lock().unwrap().iter().map(|(label, tabs)| (label.clone(), tabs.clone())).collect();
+    open.into_iter().filter(|(_, tabs)| tabs.repos.iter().any(|repo| same_folder(repo) == path)).map(|(label, _)| label).collect()
 }
 
 /// A folder as its real path, through any symbolic links, so the same folder compares
@@ -145,16 +146,21 @@ pub(crate) fn same_folder(path: &str) -> std::path::PathBuf {
 }
 
 /// Whether a tab, in any window, has the folder at `path` open, and if so, what closing
-/// it would lose.
+/// it would lose. Off the main thread, as looking up folders can take a while.
 #[tauri::command]
-pub fn window_showing(windows: State<'_, Windows>, path: String) -> Option<Showing> {
-    if windows_showing(&windows, &path).is_empty() {
-        return None;
-    }
-    Some(Showing {
-        programs: crate::terminal::busy_programs_in(&path),
-        edits: crate::quit::unsaved_under(&path),
+pub async fn window_showing(app: AppHandle, path: String) -> Option<Showing> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if windows_showing(&app.state::<Windows>(), &path).is_empty() {
+            return None;
+        }
+        Some(Showing {
+            programs: crate::terminal::busy_programs_in(&path),
+            edits: crate::quit::unsaved_under(&path),
+        })
     })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Closes the tabs with the folder at `path` open, in every window, without asking: the

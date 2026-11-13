@@ -16,7 +16,7 @@ use tauri::Manager;
 /// wait is kept long, a minute at most, for that.
 #[tauri::command]
 pub fn restart_after_update(app: AppHandle) {
-    crate::reopen::remember(&app);
+    crate::reopen::remember(&app, crate::reopen::Why::Restart);
     #[cfg(target_os = "linux")]
     if let Ok(binary) = tauri::process::current_binary(&app.env()) {
         use std::os::unix::process::CommandExt;

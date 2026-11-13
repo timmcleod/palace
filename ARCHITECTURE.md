@@ -48,8 +48,9 @@ back only what the operation changed, and only if nothing else has changed it si
 Each window holds repositories in tabs across its top, each with its own terminals,
 and a repository is open in one tab at a time: opening it again shows that tab, and its
 window. The page tells the backend each window's tabs as they change
-(`set_window_tabs`), so another window can find one, and Palace reopens them after
-restarting itself (`reopen.rs`). The backend keeps track of what belongs to which window,
+(`set_window_tabs`), so another window can find one, and Palace reopens them, with the
+windows they were in, as it next starts, after quitting or restarting itself
+(`reopen.rs`). The backend keeps track of what belongs to which window,
 and lets it all go when the window closes. Code that keeps per-window state on the
 backend should do the same.
 

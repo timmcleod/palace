@@ -137,7 +137,9 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short" });
 
 function place() {
   const rect = input.value.closest(".toolbar-search").getBoundingClientRect();
-  position.value = { top: `${rect.bottom + 6}px`, right: `${window.innerWidth - rect.right}px` };
+  // No lower than the window's bottom, wherever the toolbar is, as under a row of tabs.
+  const room = window.innerHeight - rect.bottom - 22;
+  position.value = { top: `${rect.bottom + 6}px`, right: `${window.innerWidth - rect.right}px`, maxHeight: `min(520px, ${room}px)` };
 }
 
 async function onFocus() {
@@ -278,7 +280,6 @@ defineExpose({ focus });
   z-index: 15;
   width: 480px;
   max-width: calc(100vw - 40px);
-  max-height: min(520px, calc(100vh - 80px));
   overflow-x: hidden;
   overflow-y: auto;
   padding: 5px;

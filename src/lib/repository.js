@@ -13,7 +13,8 @@ import { NOT_A_REPOSITORY, isError } from "./errors.js";
  * And what Workspace.vue does around a load:
  *   onSwitch(data)                 another repository is about to show: views are reset
  *                                  (overview still holds the one before)
- *   onLoaded(data)                 it's showing: it's among the recent ones
+ *   onLoaded(data, { quiet })      it's showing; `quiet` when it was read again in
+ *                                  the background, rather than opened
  *   onNotRepository(path, options) the folder chosen isn't a repository
  *   onOpenFailed(path, error)      the one chosen couldn't open, and the one showing
  *                                  stays
@@ -71,7 +72,7 @@ export function useRepository({
       overview.value = data;
       folderGone.value = false;
       error.value = "";
-      onLoaded(data);
+      onLoaded(data, { quiet });
     } catch (e) {
       if (seq !== loadSeq) return;
       // A failed background refresh keeps showing the last good state, saying so when

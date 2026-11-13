@@ -132,12 +132,29 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
     return result;
   }
 
-  const undo = () => replay(undoStack, redoStack, true);
-  const redo = () => replay(redoStack, undoStack, false);
+  const undo = () => replay(true);
+  const redo = () => replay(false);
 
-  // Undoes the newest step on `stack`, or redoes it, moving it to the other stack.
-  async function replay(stack, other, undoing) {
-    const step = stack.value.at(-1);
+  // The undo and redo steps of the repository at `path`, and a way to change them: the
+  // open one's, or another's, kept for when it's open again.
+  function stepsOf(path) {
+    if (path === overview.value?.path) {
+      return {
+        undo: undoStack.value,
+        redo: redoStack.value,
+        set: (undos, redos) => ([undoStack.value, redoStack.value] = [undos, redos]),
+      };
+    }
+    const [undos, redos] = otherStacks.get(path) ?? [[], []];
+    return { undo: undos, redo: redos, set: (u, r) => otherStacks.set(path, [u, r]) };
+  }
+
+  // Undoes the newest undo step, or redoes the newest redo step, moving it to the other.
+  // The repository may be switched while it runs: the step's moved among its own
+  // repository's steps, wherever they are by then.
+  async function replay(undoing) {
+    const path = overview.value?.path;
+    const step = (undoing ? undoStack : redoStack).value.at(-1);
     if (!step || busy()) return;
     const [verb, did] = undoing ? ["undo", "Undid"] : ["redo", "Redid"];
     const error = await run(
@@ -145,14 +162,20 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
       "restore_snapshot",
       undoing ? { from: step.after, to: step.before, mode: step.mode } : { from: step.before, to: step.after, mode: step.mode },
     );
+    const steps = stepsOf(path);
+    const [from, to] = undoing ? [steps.undo, steps.redo] : [steps.redo, steps.undo];
+    const left = from.filter((s) => s !== step);
+    const moved = [...to, step];
     if (error) {
       // Something else has moved what it changed, or its saved copies are gone, so it
       // can never be replayed.
-      if (isError(error, STALE_STEP)) stack.value = stack.value.slice(0, -1);
+      if (isError(error, STALE_STEP)) (undoing ? steps.set(left, to) : steps.set(to, left));
       return;
     }
-    stack.value = stack.value.slice(0, -1);
-    other.value = [...other.value, step];
+    if (undoing) steps.set(left, moved);
+    else steps.set(moved, left);
+    // What follows is for the repository showing: not one switched away from meanwhile.
+    if (path !== overview.value?.path) return;
     // An undone commit's message comes back, ready to commit again, and goes away
     // when the commit is redone.
     if (step.message) {

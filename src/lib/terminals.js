@@ -262,6 +262,11 @@ export async function startTab(path, tab) {
     session.term.write(`\r\n${e}\r\n`);
     return;
   }
+  // Closed while its shell started, as with its tab in the window: hung up now it has one.
+  if (session.closed) {
+    invoke("terminal_close", { id: tab.id }).catch(() => {});
+    return;
+  }
   if (session.command) type(tab, `${session.command}\r`);
   // Typed but left for the user to run, as an install command is.
   if (session.input) type(tab, session.input);
@@ -273,15 +278,16 @@ export async function startTab(path, tab) {
  * it: in the agent tab showing, or else the last one opened, or else a new one, once
  * its agent has started. Resolves to the tab, or null if a new agent never started.
  */
-export async function sendToAgent(path, text) {
+export async function sendToAgent(path, text, { wanted = () => true } = {}) {
   const group = tabsFor(path);
   const agents = group.tabs.filter((tab) => tab.kind === "agent");
   let tab = agents.find((t) => t.key === group.active) ?? agents.at(-1);
   if (tab) {
     group.active = tab.key;
   } else {
+    if (!wanted()) return null;
     tab = openTerminal(path, { command: agentCommand(path), kind: "agent" });
-    if (!(await agentStarted(tab))) return null;
+    if (!(await agentStarted(tab)) || !wanted()) return null;
   }
   pasteInto(tab, text);
   return tab;
@@ -291,19 +297,21 @@ export async function sendToAgent(path, text) {
  * Starts the repository's agent on `task`, as New Agent Task does, and resolves to how:
  * "started", given it as it starts (see taskCommand), so it's working at once; "pasted",
  * put in its prompt for the user to send, for an agent Palace can't give one to that way;
- * { missing: agent }, not installed here; or null, when that agent never started.
+ * { missing: agent }, not installed here; or null, when that agent never started, or
+ * `wanted()` says it's no longer wanted, as its tab's closed while it was looked for.
  */
-export async function startAgentOn(path, task) {
+export async function startAgentOn(path, task, { wanted = () => true } = {}) {
   const agentCommandHere = agentCommand(path);
   // Not installed, its command would only say "command not found".
   const missing = await missingAgent(agentCommandHere);
+  if (!wanted()) return null;
   if (missing) return { missing };
   const command = taskCommand(agentCommandHere);
   if (command) {
     openTerminal(path, { command, kind: "agent", task: withoutControls(task) });
     return "started";
   }
-  return (await sendToAgent(path, task)) ? "pasted" : null;
+  return (await sendToAgent(path, task, { wanted })) ? "pasted" : null;
 }
 
 // Pasted as a terminal pastes, marked as a paste for programs that ask, as agents do,
@@ -400,6 +408,8 @@ export function removeTab(path, tab) {
   group.tabs.splice(index, 1);
   if (group.active === tab.key) group.active = (group.tabs[index] ?? group.tabs[index - 1])?.key ?? null;
   if (tab.id != null) invoke("terminal_close", { id: tab.id }).catch(() => {});
+  // One whose shell is still starting is hung up as it does (see startTab).
+  tab.session.closed = true;
   withdrawNotifications(tab);
   tab.session.term.dispose();
   tab.session.el.remove();

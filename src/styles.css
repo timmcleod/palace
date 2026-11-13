@@ -50,6 +50,8 @@
   --icon: #6e6e6e;
 
   --sidebar-bg: #f4f4f4;
+  /* The tab showing, apart from the row of them (--sunken-bg) and those behind it. */
+  --tab-active-bg: var(--content-bg);
   --content-bg: #ffffff;
   /* What floats over the page (menus, cards, notices), raised from it. */
   --popover-bg: #ffffff;
@@ -124,6 +126,7 @@
   --icon: #b3bdcc;
 
   --sidebar-bg: #212a3a;
+  --tab-active-bg: var(--sidebar-bg);
   --content-bg: #131a26;
   --popover-bg: #1f2838;
   --sunken-bg: #0d121b;
@@ -209,12 +212,15 @@
   background: color-mix(in srgb, var(--sidebar-bg) 50%, var(--content-bg));
 }
 
-/* The toolbars fade a little too, as the system's own title bars do. */
-.toolbar > * {
+/* The toolbars fade a little too, as the system's own title bars do, and the row of
+   tabs with them. */
+.toolbar > *,
+.tab-strip > * {
   transition: opacity 0.15s;
 }
 
-:root[data-inactive] .toolbar > * {
+:root[data-inactive] .toolbar > *,
+:root[data-inactive] .tab-strip > * {
   opacity: 0.6;
 }
 
@@ -636,6 +642,16 @@ kbd {
   display: none;
 }
 
+/* How tall the row of tabs across the window's top is, with two or more, for what's
+   placed below it. */
+:root {
+  --tab-row-height: 0px;
+}
+
+:root[data-tabs="many"] {
+  --tab-row-height: 48px;
+}
+
 /* The image that follows the pointer while dragging a branch, or a tab (see Sidebar.vue
    and TabStrip.vue). */
 .drag-image {
@@ -653,6 +669,10 @@ kbd {
   font-size: var(--font-lg);
   white-space: nowrap;
   color: var(--text-primary);
+  /* A long name doesn't make it wider than the window. */
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .drag-image svg {

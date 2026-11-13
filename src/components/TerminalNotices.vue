@@ -36,7 +36,8 @@ const icons = { done: CircleCheck, blocked: MessageCircleQuestion, error: Circle
 <style scoped>
 .terminal-notices {
   position: fixed;
-  top: 60px;
+  /* Below the toolbar, and the row of tabs over it when there is one. */
+  top: calc(60px + var(--tab-row-height));
   right: 16px;
   z-index: 16;
   display: flex;

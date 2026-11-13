@@ -202,10 +202,27 @@ test("stops listening once the window's page goes", async () => {
 });
 
 describe("a task", () => {
+  test("isn't wanted once its tab has closed, and says nothing after", async () => {
+    const { startTask } = panelFor();
+    let finish;
+    vi.mocked(terminals.startAgentOn).mockImplementationOnce(async (path, task, { wanted }) => {
+      await new Promise((resolve) => (finish = resolve));
+      return wanted() ? "started" : null;
+    });
+    const starting = startTask("Fix the login bug");
+    await settle();
+    mounted.unmount();
+    mounted = null;
+    finish();
+    await starting;
+    // Not "Couldn't Reach the Agent", for a tab that's gone.
+    expect(tell).not.toHaveBeenCalled();
+  });
+
   test("starts the agent on it, showing the panel", async () => {
     const { startTask, open } = panelFor();
     await startTask("Fix the login bug");
-    expect(terminals.startAgentOn).toHaveBeenLastCalledWith("/repo", "Fix the login bug");
+    expect(terminals.startAgentOn).toHaveBeenLastCalledWith("/repo", "Fix the login bug", { wanted: expect.any(Function) });
     expect(open.value).toBe(true);
     expect(tell).not.toHaveBeenCalled();
   });
