@@ -4,8 +4,8 @@
 //! - The Palace menu's About Palace and Check for Updates… open Palace's own page for
 //!   them, the top of Settings, rather than the system's About panel, which can't check
 //!   for updates or link anywhere.
-//! - The File menu works on tabs: New Tab (⌘N) and Close Tab (⌘W), with New Window and
-//!   Close Window on ⇧⌘N and ⇧⌘W. The default's Close Window, on ⌘W, would close every
+//! - The File menu works on tabs: New Tab (⌘T) and Close Tab (⌘W), beside New Window
+//!   (⌘N) and Close Window (⇧⌘W). The default's Close Window, on ⌘W, would close every
 //!   tab in the window at once.
 //!
 //! The window in front is told which was chosen ("menu"), and does it; Close Window
@@ -46,8 +46,8 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
         "File",
         true,
         &[
-            &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+N"))?,
-            &MenuItem::with_id(app, NEW_WINDOW, "New Window", true, Some("CmdOrCtrl+Shift+N"))?,
+            &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
+            &MenuItem::with_id(app, NEW_WINDOW, "New Window", true, Some("CmdOrCtrl+N"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
             &MenuItem::with_id(app, CLOSE_WINDOW, "Close Window", true, Some("CmdOrCtrl+Shift+W"))?,

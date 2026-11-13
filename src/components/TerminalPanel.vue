@@ -227,9 +227,7 @@ function focus() {
 }
 defineExpose({ focus });
 
-// Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's (see shortcuts.js).
-
-
+// A shell, as Cmd+Shift+T, or Ctrl+Shift+T on Linux, opens one (see shortcuts.js).
 function newTerminal() {
   openTerminal(props.path);
 }

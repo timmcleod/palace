@@ -588,8 +588,8 @@ function onRowClick(row, event) {
 }
 
 /* The macOS window buttons get a row of their own above the name, which then lines
-   up with the section labels below. */
-:root[data-title-bar="overlay"] .sidebar-toolbar {
+   up with the section labels below; with tabs, they're in the tabs' row instead. */
+:root[data-title-bar="overlay"]:not([data-tabs="many"]) .sidebar-toolbar {
   height: auto;
   padding-top: 30px;
   padding-bottom: 6px;

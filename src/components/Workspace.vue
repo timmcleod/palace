@@ -1150,8 +1150,8 @@ function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
-    { label: "New Tab", detail: shortcut("Ctrl+N"), action: () => emit("new-tab") },
-    { label: "New Window", detail: shortcut("Ctrl+Shift+N"), action: () => emit("new-window") },
+    { label: "New Tab", detail: shortcut("Ctrl+T"), action: () => emit("new-tab") },
+    { label: "New Window", detail: shortcut("Ctrl+N"), action: () => emit("new-window") },
     { separator: true },
     current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => showTerminal({ newTab: true }) },
@@ -1864,10 +1864,11 @@ const breadcrumb = computed(() => {
 </template>
 
 <style scoped>
+/* All the window has below its tabs (see App.vue). */
 .window {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  height: 100vh;
+  height: 100%;
 }
 
 /* The sidebar stays full height; the terminal panel is below the other panes. */
@@ -2157,11 +2158,12 @@ const breadcrumb = computed(() => {
 /* A view shown from the welcome screen, in place of it: GitHub, or Settings. */
 .standalone-page {
   display: flex;
-  height: 100vh;
+  height: 100%;
 }
 
-/* Below the macOS window buttons and the strip that drags the window. */
-:root[data-title-bar="overlay"] .standalone-page {
+/* Below the macOS window buttons and the strip that drags the window; with tabs, the
+   tabs' row is there instead. */
+:root[data-title-bar="overlay"]:not([data-tabs="many"]) .standalone-page {
   box-sizing: border-box;
   padding-top: 28px;
 }

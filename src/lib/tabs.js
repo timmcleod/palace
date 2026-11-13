@@ -1,6 +1,6 @@
 import { folderName } from "./format.js";
 
-// A window's tabs, down its left side, each a workspace of its own (Workspace.vue): a
+// A window's tabs, across its top, each a workspace of its own (Workspace.vue): a
 // repository, with its views and terminals, or with none open yet, the welcome screen to
 // choose one. Each is kept running while another shows.
 //

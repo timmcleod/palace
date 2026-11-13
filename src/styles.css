@@ -631,6 +631,11 @@ kbd {
   height: 28px;
 }
 
+/* With tabs, their row is the title bar (see TabStrip.vue). */
+:root[data-tabs="many"] .title-strip {
+  display: none;
+}
+
 /* The image that follows the pointer while dragging a branch, or a tab (see Sidebar.vue
    and TabStrip.vue). */
 .drag-image {

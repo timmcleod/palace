@@ -2,12 +2,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isMac } from "./platform.js";
 
 // On macOS the window has no title bar of its own: Palace's top bars run to the top
-// edge, with the window buttons in the sidebar's (see tauri.macos.conf.json). Their
-// empty parts then do what a title bar does: dragging moves the window, and
-// double-clicking zooms it. Screens without those bars, such as the welcome screen,
-// get a strip along the top instead. The GitHub view's headers count as bars, and in
-// Settings, whose page has none, so does a strip as tall as the toolbars elsewhere. So
-// does the strip of tabs down the window's side, where there's no tab (see TabStrip.vue).
+// edge, with the window buttons in the sidebar's, or with two tabs or more, in the
+// tabs' row (see tauri.macos.conf.json, TabStrip.vue). Their empty parts do what a
+// title bar does: dragging moves the window, and double-clicking zooms it. Screens
+// without those bars, such as the welcome screen, get a strip along the top instead. The GitHub view's headers count as
+// bars, and in Settings, whose page has none, so does a strip at its top as tall as the
+// toolbars elsewhere.
 
 const BARS = ".toolbar, .sidebar-toolbar, .title-strip, .owners-header, .repos-header, .tab-strip";
 const CONTROLS = "button, a, input, select, textarea, label, [role=button], [role=tab]";
@@ -16,7 +16,8 @@ const barHeight = () => parseFloat(getComputedStyle(document.documentElement).ge
 
 function inEmptyBar(event) {
   if (event.button !== 0 || !event.target.closest || event.target.closest(CONTROLS)) return false;
-  return !!event.target.closest(BARS) || (event.clientY < barHeight() && !!event.target.closest(".settings"));
+  const settings = event.target.closest(".settings");
+  return !!event.target.closest(BARS) || (!!settings && event.clientY - settings.getBoundingClientRect().top < barHeight());
 }
 
 if (isMac) {

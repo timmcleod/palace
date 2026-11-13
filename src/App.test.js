@@ -350,17 +350,28 @@ const press = (key, init = {}) =>
   document.body.dispatchEvent(new KeyboardEvent("keydown", { key, code: init.code, metaKey: isMac, ctrlKey: !isMac, bubbles: true, cancelable: true, ...init }));
 const confirmShown = () => !!document.querySelector("[role=alertdialog]");
 
-// Opens a new tab, then the repository named `name` in it, from the welcome screen.
+// Opens a new tab, with ⌘T, then the repository named `name` in it, from the welcome
+// screen.
 async function openInNewTab(name) {
-  document.querySelector(".tab-strip .open").click();
+  press("t", { code: "KeyT" });
   await until(() => !!showing()?.querySelector(".recent"));
   [...showing().querySelectorAll(".recent")].find((el) => el.textContent.includes(name)).click();
   await until(() => showingTab() === name);
 }
 
-test("+ Open opens a tab to choose a repository in, which opens there, beside the other", async () => {
+test("one tab looks as a window without tabs; a second brings their row, and closing it takes it away", async () => {
   await start();
-  expect(tabNames()).toEqual(["palace"]);
+  expect(document.querySelector(".tab-strip")).toBeNull();
+  expect(document.documentElement.dataset.tabs).toBeUndefined();
+  await openInNewTab("other");
+  expect(document.documentElement.dataset.tabs).toBe("many");
+  tabNamed("other").querySelector(".close").click();
+  await until(() => !document.querySelector(".tab-strip"));
+  expect(document.documentElement.dataset.tabs).toBeUndefined();
+});
+
+test("a new tab opens to choose a repository in, which opens there, beside the other", async () => {
+  await start();
   await openInNewTab("other");
   expect(tabNames()).toEqual(["palace", "other"]);
   await until(() => calls("set_window_tabs").at(-1)?.tabs.repos.length === 2);
@@ -409,14 +420,16 @@ test("closing a tab asks first when it has edits not saved, and the last tab clo
   tabNamed("other").querySelector(".close").click();
   await until(() => !!button("Close"));
   button("Close").click();
-  await until(() => tabNames().length === 1);
+  // Back to one tab: no row of them.
+  await until(() => !document.querySelector(".tab-strip"));
   // Gone with it: its edits, and its watcher.
   const { unsavedFiles } = await import("./lib/editing.js");
   expect(unsavedFiles()).toEqual([]);
   await until(() => calls("release_repo").length > 0);
   expect(calls("release_repo")).toEqual([{ path: OTHER }]);
 
-  tabNamed("palace").querySelector(".close").click();
+  // The last, with ⌘W, as its row's gone with the others.
+  press("w", { code: "KeyW" });
   await settle();
   expect(window.close).toHaveBeenCalled();
 });
@@ -442,7 +455,8 @@ test("another window asking for a repository open here shows its tab; a worktree
   send("show-repo", { path: PALACE });
   await until(() => showingTab() === "palace");
   send("close-repo", { path: OTHER });
-  await until(() => tabNames().join() === "palace");
+  await until(() => !document.querySelector(".tab-strip"));
+  expect(showing().querySelector(".repo-name").textContent).toContain("palace");
   // Asked already, as the worktree was removed: not again.
   expect(confirmShown()).toBe(false);
 });

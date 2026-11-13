@@ -45,7 +45,7 @@ back only what the operation changed, and only if nothing else has changed it si
 
 ## Windows
 
-Each window holds repositories in tabs down its left side, each with its own terminals,
+Each window holds repositories in tabs across its top, each with its own terminals,
 and a repository is open in one tab at a time: opening it again shows that tab, and its
 window. The page tells the backend each window's tabs as they change
 (`set_window_tabs`), so another window can find one, and Palace reopens them after

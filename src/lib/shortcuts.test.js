@@ -25,8 +25,8 @@ const linux = (keys, where = {}, code) => shortcutFor(press(keys, code), { ...an
 describe("shortcutFor", () => {
   test("names each shortcut, with Cmd on a Mac and Ctrl elsewhere", () => {
     const shortcuts = {
-      n: "newTab",
-      "Shift+n": "newWindow",
+      t: "newTab",
+      n: "newWindow",
       w: "closeTab",
       z: "undo",
       "Shift+z": "redo",
@@ -53,14 +53,15 @@ describe("shortcutFor", () => {
     expect(mac("Cmd+'", { repository: false }, "Quote")).toBeNull();
   });
 
-  test("opens a terminal tab with Cmd+T on a Mac and Ctrl+Shift+T on Linux, from a terminal too", () => {
-    expect(mac("Cmd+t")).toBe("newTerminalTab");
-    expect(mac("Cmd+t", { inTerminal: true })).toBe("newTerminalTab");
+  test("opens a terminal tab with Shift and Cmd+T, or Ctrl+T on Linux, from a terminal too", () => {
+    expect(mac("Cmd+Shift+T")).toBe("newTerminalTab");
+    expect(mac("Cmd+Shift+T", { inTerminal: true })).toBe("newTerminalTab");
     expect(linux("Ctrl+Shift+T")).toBe("newTerminalTab");
     expect(linux("Ctrl+Shift+T", { inTerminal: true })).toBe("newTerminalTab");
-    // Ctrl+T is the shell's on Linux, and Cmd+Shift+T isn't it on a Mac.
-    expect(linux("Ctrl+t")).toBeNull();
-    expect(mac("Cmd+Shift+T")).toBeNull();
+    // Without Shift, one of the window's tabs; on Linux, from a terminal, the shell's.
+    expect(mac("Cmd+t", { inTerminal: true })).toBe("newTab");
+    expect(linux("Ctrl+t")).toBe("newTab");
+    expect(linux("Ctrl+t", { inTerminal: true })).toBeNull();
   });
 
   test("goes between the window's tabs, from a terminal too where the keys are Palace's", () => {
@@ -80,7 +81,7 @@ describe("shortcutFor", () => {
     expect(linux("Ctrl+2", { inTerminal: true }, "Digit2")).toBeNull();
     expect(linux("Ctrl+Tab", { inTerminal: true })).toBe("nextTab");
     // Not with a dialog open.
-    for (const keys of ["Cmd+w", "Cmd+n", "Ctrl+Tab"]) expect(mac(keys, { dialogOpen: true }), keys).toBeNull();
+    for (const keys of ["Cmd+w", "Cmd+t", "Cmd+n", "Ctrl+Tab"]) expect(mac(keys, { dialogOpen: true }), keys).toBeNull();
   });
 
   test("leaves everything else typed in a terminal to it", () => {
@@ -88,7 +89,7 @@ describe("shortcutFor", () => {
       expect(mac(keys, { inTerminal: true }), keys).toBeNull();
     }
     // Cmd+N is Palace's in a Mac's terminal; Ctrl+N is the shell's on Linux.
-    expect(mac("Cmd+n", { inTerminal: true })).toBe("newTab");
+    expect(mac("Cmd+n", { inTerminal: true })).toBe("newWindow");
     expect(linux("Ctrl+n", { inTerminal: true })).toBeNull();
   });
 
@@ -122,13 +123,13 @@ describe("shortcutFor", () => {
   });
 
   test("needs a repository open for what acts on one, and no dialog", () => {
-    for (const keys of ["Cmd+r", "Cmd+p", "Cmd+,", "Cmd+t"]) {
+    for (const keys of ["Cmd+r", "Cmd+p", "Cmd+,", "Cmd+Shift+T"]) {
       expect(mac(keys, { repository: false }), keys).toBeNull();
       expect(mac(keys, { dialogOpen: true }), keys).toBeNull();
     }
     // A new tab or window needs none.
-    expect(mac("Cmd+n", { repository: false })).toBe("newTab");
-    expect(mac("Cmd+Shift+n", { repository: false })).toBe("newWindow");
+    expect(mac("Cmd+t", { repository: false })).toBe("newTab");
+    expect(mac("Cmd+n", { repository: false })).toBe("newWindow");
   });
 
   test("leaves plain typing alone", () => {

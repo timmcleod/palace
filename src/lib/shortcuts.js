@@ -8,19 +8,19 @@ import { isMac } from "./platform.js";
  * they're Cmd; elsewhere Ctrl.
  *
  * In the order they're tried:
- *   newTab            Cmd+N opens a tab, and newWindow, Cmd+Shift+N, a window; closeTab,
- *                     Cmd+W, closes the tab showing; showTab, Cmd+1 to Cmd+9, shows that
- *                     tab, Cmd+9 the last. On a Mac from a terminal too, where Cmd keys
- *                     are Palace's, while on Linux, Ctrl+N, Ctrl+W and the rest are the
- *                     shell's there. On a Mac, the menu's items take the first three
- *                     before the page sees them (see menu.rs).
+ *   newTab            Cmd+T opens a tab, and newWindow, Cmd+N, a window, as in a browser;
+ *                     closeTab, Cmd+W, closes the tab showing; showTab, Cmd+1 to Cmd+9,
+ *                     shows that tab, Cmd+9 the last. On a Mac from a terminal too, where
+ *                     Cmd keys are Palace's, while on Linux, Ctrl+T, Ctrl+N, Ctrl+W and
+ *                     the rest are the shell's there. On a Mac, the menu's items take the
+ *                     first three before the page sees them (see menu.rs).
  *   nextTab,          Ctrl+Tab and Ctrl+Shift+Tab, from anywhere, as in a browser, and on
  *   previousTab       a Mac, Cmd+Shift+] and Cmd+Shift+[ too.
  *   terminal          Cmd+' shows the terminal panel and goes to it, or from it, hides it.
  *                     A terminal's programs can't use it, so it's Palace's there too. By
  *                     the key, not the character, which needs Shift on some layouts.
- *   newTerminalTab    Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's, from
- *                     anywhere, as in the terminal apps.
+ *   newTerminalTab    Cmd+Shift+T, or Ctrl+Shift+T on Linux, from anywhere: Cmd+T, as the
+ *                     terminal apps have it, opens one of the window's tabs.
  *   (Anything else typed in a terminal is the terminal's.)
  *   undo, redo        Cmd+Z, and Cmd+Shift+Z or Cmd+Y, except in text fields and
  *                     dialogs, which keep their own.
@@ -42,15 +42,15 @@ export function shortcutFor(event, where, mac = isMac) {
   const alone = command && !event.shiftKey && !event.altKey;
 
   const palaces = (mac || !inTerminal) && !dialogOpen;
-  if (command && !event.altKey && key === "n" && palaces) return event.shiftKey ? "newWindow" : "newTab";
+  if (alone && event.code === "KeyT" && palaces) return "newTab";
+  if (alone && key === "n" && palaces) return "newWindow";
   if (alone && key === "w" && palaces) return "closeTab";
   if (alone && /^Digit[1-9]$/.test(event.code) && palaces) return "showTab";
   const tab = event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab";
   const bracket = mac && event.metaKey && event.shiftKey && !event.altKey && (event.code === "BracketRight" || event.code === "BracketLeft");
   if ((tab || bracket) && !dialogOpen) return (tab ? event.shiftKey : event.code === "BracketLeft") ? "previousTab" : "nextTab";
   if (alone && event.code === "Quote" && repository && !dialogOpen) return "terminal";
-  const newTab = mac ? event.metaKey && !event.ctrlKey && !event.shiftKey : event.ctrlKey && !event.metaKey && event.shiftKey;
-  if (newTab && !event.altKey && event.code === "KeyT" && repository && !dialogOpen) return "newTerminalTab";
+  if (command && event.shiftKey && !event.altKey && event.code === "KeyT" && repository && !dialogOpen) return "newTerminalTab";
   if (inTerminal) return null;
 
   if (command && !event.altKey && (key === "z" || key === "y") && !inTextField && !dialogOpen) {

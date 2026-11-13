@@ -41,7 +41,7 @@ import { starRequest } from "./lib/star.js";
 import { updateNoticeShown } from "./lib/updates.js";
 
 // The window: what's the window's own, whatever it shows. Git checked for at startup,
-// its tabs down its left side, the dialogs and menus shown over everything, asking
+// its tabs across its top, the dialogs and menus shown over everything, asking
 // before it closes, and every window's agents. Each tab is a Workspace.vue: a
 // repository, or the welcome screen without one.
 
@@ -119,6 +119,16 @@ watch(
   () => started.value && JSON.stringify(tabsForBackend(tabs)),
   (said) => said && invoke("set_window_tabs", { tabs: JSON.parse(said) }).catch(() => {}),
 );
+
+// With one tab, the window looks as it would without tabs: no row of them, the macOS
+// window buttons in the sidebar's top (see Sidebar.vue). A second brings the row, which
+// the page's styles are told of.
+const manyTabs = computed(() => tabs.list.length > 1);
+watch(manyTabs, (many) => {
+  if (many) document.documentElement.dataset.tabs = "many";
+  else delete document.documentElement.dataset.tabs;
+});
+onBeforeUnmount(() => delete document.documentElement.dataset.tabs);
 
 // What a tab's workspace shows, for the tab to say.
 function onShows(tab, shown) {
@@ -325,6 +335,7 @@ onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
   <GitMissing v-if="gitMissing" :status="gitStatus" :checking="checkingGit" @recheck="checkGit" />
   <div v-else-if="started" class="tabbed">
     <TabStrip
+      v-if="manyTabs"
       :tabs="tabs.list"
       :active="tabs.active"
       :agents="agentStates"
@@ -369,13 +380,19 @@ onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
 </template>
 
 <style scoped>
+/* The tabs across the top, and below them, the one showing. */
 .tabbed {
   display: flex;
+  flex-direction: column;
   height: 100vh;
 }
 
 .workspaces {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
+}
+
+.workspace {
+  height: 100%;
 }
 </style>

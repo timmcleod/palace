@@ -6,8 +6,8 @@ export const isMac = /Mac/.test(navigator.platform || navigator.userAgent);
 export const commandKey = (event) => (isMac ? event.metaKey : event.ctrlKey);
 
 // The keys that open a new terminal tab, a shell whatever else is set (see
-// shortcuts.js): Cmd+T on a Mac, and Ctrl+Shift+T on Linux, where Ctrl+T is the shell's.
-export const NEW_TERMINAL_KEYS = isMac ? "⌘T" : "Ctrl+Shift+T";
+// shortcuts.js): Shift with Cmd+T on a Mac, or Ctrl+T on Linux.
+export const NEW_TERMINAL_KEYS = isMac ? "⇧⌘T" : "Ctrl+Shift+T";
 
 // The file manager, as it's named in menus.
 export const fileManager = isMac ? "Finder" : "Files";
