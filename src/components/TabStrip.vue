@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import { Check, GitBranch, Plus, X } from "lucide-vue-next";
+import Spinner from "./Spinner.vue";
 import { shortcut } from "../lib/platform.js";
 import { useTabRowDrag } from "../lib/tabRowDrag.js";
 import { isWorktree, tabColor, tabDetails, tabInitial, tabNames } from "../lib/tabs.js";
@@ -9,7 +10,7 @@ import { isWorktree, tabColor, tabDetails, tabInitial, tabNames } from "../lib/t
 // known by a tile in its color, with its initial, or for a worktree, the branch mark in
 // its repository's; and below its name, the branch checked out there, what its agents
 // are doing, and what it has to push, pull and commit. Its agents' state is on its tile
-// too: a line tracing it round while one works, a dot when one's finished, needs the
+// too, at its corner: the spinner while one works, a dot when one's finished, needs the
 // user, or has stopped. Clicking one shows it; its × closes it; dragging it moves it
 // among the others; + opens a tab to choose a repository in. Where it's empty, it's the
 // title bar (see titleBar.js), with the macOS window buttons at its left.
@@ -99,9 +100,7 @@ function onWheel(event) {
         <span v-if="tab.path" class="tile" :class="agentOf(tab)" aria-hidden="true">
           <GitBranch v-if="isWorktree(tab)" :size="13" :stroke-width="2.25" />
           <template v-else>{{ tabInitial(tab.name) }}</template>
-          <svg v-if="agentOf(tab) === 'working'" class="trace" viewBox="0 0 24 24">
-            <path d="M12 23.25H.75V12a11.25 11.25 0 0 1 22.5 0v11.25z" pathLength="100" />
-          </svg>
+          <span v-if="agentOf(tab) === 'working'" class="spinning"><Spinner :size="11" /></span>
           <span v-else-if="agentOf(tab)" class="badge">
             <Check v-if="agentOf(tab) === 'done'" :size="7" :stroke-width="4" />
           </span>
@@ -223,9 +222,7 @@ function onWheel(event) {
   outline-offset: -2px;
 }
 
-/* Its repository's initial, or a worktree's branch mark, on a tint of its color, in a
-   doorway, arched as the gate in Palace's icon is: what's in it a little low, to stand
-   in the doorway rather than under its arch. */
+/* Its repository's initial, or a worktree's branch mark, on a tint of its color. */
 .tile {
   position: relative;
   display: flex;
@@ -234,54 +231,33 @@ function onWheel(event) {
   justify-content: center;
   width: 24px;
   height: 24px;
-  box-sizing: border-box;
-  padding-top: 2px;
-  border-radius: 12px 12px 0 0;
+  border-radius: 7px;
   background: color-mix(in srgb, var(--tab-color) 14%, transparent);
   color: color-mix(in srgb, var(--tab-color) 78%, var(--text-primary));
   font-size: var(--font-sm);
   font-weight: 700;
 }
 
-/* An agent working: a line tracing the tile round along its edge, the doorway's, half
-   its width in from it, so none of it's cut off. Its size given, as an SVG placed by
-   its edges alone keeps a size of its own, rather than stretching. */
-.trace {
+/* An agent working: the spinner at the tile's corner, where its dot would be, on the
+   tab's color, to stand off the tile. Not .working, which the tile is, as it's
+   classed by its agent's state. */
+.spinning {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 24px;
-  height: 24px;
-}
-
-.trace path {
-  fill: none;
-  stroke: var(--tab-color);
-  stroke-width: 1.5;
-  stroke-dasharray: 25 75;
-  stroke-linecap: round;
-  animation: trace 1.4s linear infinite;
-}
-
-@keyframes trace {
-  to {
-    stroke-dashoffset: -100;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .trace path {
-    animation: none;
-  }
+  top: -6px;
+  right: -6px;
+  display: flex;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--tab-bg, var(--sunken-bg));
+  color: var(--accent);
 }
 
 /* An agent finished, with a check; needing the user; or stopped with an error. Ringed
-   in the tab's color, the row's or the lifted one's, to stand off the tile, and a little in from its corner, where
-   the arch has curved away from it. */
+   in the tab's color, the row's or the lifted one's, to stand off the tile. */
 .badge {
   position: absolute;
-  top: -2px;
-  right: -1px;
+  top: -3px;
+  right: -3px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -293,8 +269,8 @@ function onWheel(event) {
 }
 
 .done .badge {
-  top: -3px;
-  right: -2px;
+  top: -4px;
+  right: -4px;
   width: 11px;
   height: 11px;
   background: var(--graph-4);

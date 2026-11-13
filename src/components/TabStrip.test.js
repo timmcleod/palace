@@ -55,7 +55,7 @@ test("each tab is known by a tile in its repository's color, a worktree's the sa
   const { root } = render({ tabs: [tab(1, "palace", { home: "/code/palace" }), worktree, tab(3, "api", { home: "/code/api" })], active: 1, agents: { "/code/palace": "working" } });
   const [palace, tabs, api] = root.querySelectorAll(".tab");
   expect(palace.querySelector(".tile").textContent.trim()).toBe("P");
-  expect(palace.querySelector(".tile .trace")).not.toBeNull();
+  expect(palace.querySelector(".tile.working > .spinning .spinner")).not.toBeNull();
   expect(palace.style.getPropertyValue("--tab-color")).toMatch(/^var\(--graph-[1-6]\)$/);
   // The worktree, with the branch mark rather than an initial, in its repository's color.
   expect(tabs.querySelector(".tile svg")).not.toBeNull();
