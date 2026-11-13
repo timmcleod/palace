@@ -1879,6 +1879,13 @@ const breadcrumb = computed(() => {
       @hide="terminalOpen = false"
       @unseen="terminalUnseen = $event"
     />
+    <!-- The sidebar's edge, beside the terminal panel too, as beside the panes above. -->
+    <div
+      v-if="terminalLoaded"
+      v-show="terminalOpen"
+      class="splitter terminal-splitter"
+      @pointerdown="startResize($event, 'sidebar', 200, 480)"
+    />
   </div>
 
   <main v-else-if="browsingGitHub" class="standalone-page">
@@ -1940,6 +1947,15 @@ const breadcrumb = computed(() => {
 .window > .terminal-panel {
   grid-row: 2;
   grid-column: 2 / -1;
+}
+
+/* In the grid beside it, rather than in it, as a pane's is: the panel's own top edge
+   resizes it, and what's in it is the terminals'. Placed as it is, over its left edge. */
+.window > .terminal-splitter {
+  position: relative;
+  grid-row: 2;
+  grid-column: 2;
+  justify-self: start;
 }
 
 .pane {
