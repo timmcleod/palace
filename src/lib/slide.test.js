@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { slideClosed, slideOpen } from "./slide.js";
+import { slideClosed, slideFrom, slideOpen } from "./slide.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -59,4 +59,34 @@ test("a slide canceled, as by its element going, ends quietly", async () => {
   el.animate = () => ({ finished: Promise.reject(new DOMException("canceled", "AbortError")) });
   await expect(slideOpen(el)).resolves.toBeUndefined();
   expect(el.style.overflow).toBe("");
+});
+
+// An element on the page at `left`, `top`, which records how it's animated.
+function placed(left, top) {
+  const el = document.createElement("div");
+  document.body.append(el);
+  el.getBoundingClientRect = () => ({ left, top });
+  el.animate = vi.fn();
+  return el;
+}
+
+test("elements moved slide from where they were to where they are, and those that didn't, or went, don't", () => {
+  const moved = placed(200, 10);
+  const still = placed(0, 10);
+  const gone = placed(0, 10);
+  gone.remove();
+  slideFrom(new Map([[moved, { left: 0, top: 30 }], [still, { left: 0, top: 10 }], [gone, { left: 400, top: 10 }]]));
+  expect(moved.animate.mock.calls[0][0]).toEqual([{ transform: "translate(-200px, 20px)" }, { transform: "none" }]);
+  expect(still.animate).not.toHaveBeenCalled();
+  expect(gone.animate).not.toHaveBeenCalled();
+  moved.remove();
+  still.remove();
+});
+
+test("nor where motion is turned down", () => {
+  vi.stubGlobal("matchMedia", (query) => ({ matches: query.includes("reduce") }));
+  const moved = placed(200, 10);
+  slideFrom(new Map([[moved, { left: 0, top: 10 }]]));
+  expect(moved.animate).not.toHaveBeenCalled();
+  moved.remove();
 });

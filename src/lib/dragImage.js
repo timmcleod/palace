@@ -15,3 +15,23 @@ export function setDragImage(event, image, at = null) {
   const [x, y] = at ? [at.x * scale, at.y * scale] : [14 * scale, height / 2];
   event.dataTransfer.setDragImage(image, Math.round(x), Math.round(y));
 }
+
+/**
+ * A copy of `element`, a tab, to show as it's dragged: as it looks in its row, at its
+ * width there, but for the line of where a drag would land, and inert, so neither the
+ * keyboard nor a screen reader takes it for another tab while it's on the page.
+ */
+export function tabCopy(element) {
+  const copy = element.cloneNode(true);
+  copy.classList.remove("drop-before", "drop-after");
+  copy.setAttribute("inert", "");
+  copy.setAttribute("aria-hidden", "true");
+  copy.style.width = `${element.getBoundingClientRect().width}px`;
+  return copy;
+}
+
+/** Where in `element` the point `x`, `y` on the page is, to hold its copy by there. */
+export function grabPoint(element, x, y) {
+  const rect = element.getBoundingClientRect();
+  return { x: x - rect.left, y: y - rect.top };
+}

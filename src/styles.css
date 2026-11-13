@@ -652,8 +652,8 @@ kbd {
   --tab-row-height: 48px;
 }
 
-/* The image that follows the pointer while dragging a branch, or a tab (see Sidebar.vue
-   and TabStrip.vue). */
+/* A compact image of what's dragged, its icon and name, as a branch or commits (see
+   Sidebar.vue and HistoryList.vue). */
 .drag-image {
   position: fixed;
   top: -100px;
@@ -678,16 +678,6 @@ kbd {
 .drag-image svg {
   flex-shrink: 0;
   color: var(--icon);
-}
-
-/* Drawn on the page, following the pointer, rather than the web view's own. */
-.drag-image.following {
-  top: 0;
-  left: 0;
-  z-index: 1000;
-  visibility: hidden;
-  pointer-events: none;
-  opacity: 0.9;
 }
 
 body.dragging-row,

@@ -158,6 +158,7 @@ const drag = pointerDrag({
   // below where it'd land (see .drop-sentence).
   image({ data: row, element }) {
     const image = document.createElement("div");
+    image.className = "drag-image";
     const icon = element.querySelector(".row-icon")?.cloneNode(true);
     if (icon) image.append(icon);
     image.append(row.divider ? row.label || "Divider" : row.label);

@@ -107,6 +107,24 @@ export function dropPlace(tabs, id, target, after) {
   return tabs.list.findIndex((tab) => tab.id === id) === to ? null : to;
 }
 
+/**
+ * Where a tab dragged along the row would land, with the pointer at `x`: at whichever
+ * place between two tabs, or at an end, is nearest, as { id, after }, before the tab
+ * `id`, or after it at the end; null with no tabs. `spans` is where each tab is along
+ * the row, { id, left, right }, in order: as they were when the drag started, so the
+ * gap that opens where it'd land, moving the tabs, doesn't move where that is.
+ */
+export function landingAt(spans, x) {
+  if (!spans.length) return null;
+  const places = spans.map((span, i) => (i ? (spans[i - 1].right + span.left) / 2 : span.left));
+  places.push(spans.at(-1).right);
+  let nearest = 0;
+  places.forEach((place, i) => {
+    if (Math.abs(x - place) < Math.abs(x - places[nearest])) nearest = i;
+  });
+  return nearest < spans.length ? { id: spans[nearest].id, after: false } : { id: spans.at(-1).id, after: true };
+}
+
 /** Moves the tab `id` to be at `to` in the list, as dragged there. */
 export function moveTab(tabs, id, to) {
   const at = tabs.list.findIndex((tab) => tab.id === id);

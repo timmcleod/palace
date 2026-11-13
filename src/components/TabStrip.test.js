@@ -16,15 +16,20 @@ function render(props) {
   document.body.append(root);
   app = createApp({ render: () => h(TabStrip, { ...props, ...handlers }) });
   app.mount(root);
-  // Each tab 200 pixels wide, side by side, as laid out; the page under test has no
-  // layout of its own.
-  root.querySelectorAll(".tab").forEach((el, i) => {
+  // Each tab 200 pixels wide, side by side, in a row as wide as they are, as laid out;
+  // the page under test has no layout of its own.
+  const tabs = root.querySelectorAll(".tab");
+  tabs.forEach((el, i) => {
     el.getBoundingClientRect = () => ({ left: i * 200, width: 200, right: i * 200 + 200, top: 0, bottom: 40, height: 40 });
   });
+  const row = root.querySelector(".tabs");
+  row.getBoundingClientRect = () => ({ left: 0, width: tabs.length * 200, right: tabs.length * 200, top: 0, bottom: 40, height: 40 });
+  // Across a window 1000 wide, 48 high.
+  root.querySelector(".tab-strip").getBoundingClientRect = () => ({ left: 0, width: 1000, right: 1000, top: 0, bottom: 48, height: 48 });
   return { root, ...handlers };
 }
 
-const pointer = (type, x) => new PointerEvent(type, { button: 0, clientX: x, clientY: 20, bubbles: true });
+const pointer = (type, x, y = 20) => new PointerEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
 
 test("names each tab for its repository, its branch and what its agent's doing below, and one with none New Tab", () => {
   const { root } = render({ tabs: [tab(1, "palace"), tab(2, null, { branch: null })], active: 1, agents: { "/code/palace": "blocked" } });
@@ -49,43 +54,92 @@ test("clicking a tab shows it, its × closes it, and + Open opens one", () => {
   expect(onNew).toHaveBeenCalled();
 });
 
-// The tab at `x`, as the page would find it under the pointer.
-const tabAt = (root, x) => root.querySelectorAll(".tab")[Math.floor(x / 200)] ?? null;
-
-test("a tab dragged shows where it would land, as a branch does, and moves there as it's dropped", async () => {
+test("a tab dragged shows where it would land, in a gap there, and moves there as it's dropped", async () => {
   const { root, onMove, onSelect } = render({ tabs: [tab(1, "a"), tab(2, "b"), tab(3, "c")], active: 1 });
-  document.elementFromPoint = (x) => tabAt(root, x);
-  const [first, , last] = root.querySelectorAll(".tab");
-  first.dispatchEvent(pointer("pointerdown", 100));
+  const [first, middle, last] = root.querySelectorAll(".tab");
+  // Grabbed 60 pixels into it.
+  middle.dispatchEvent(pointer("pointerdown", 260));
   // Not yet a drag: a click's wobble.
-  window.dispatchEvent(pointer("pointermove", 102));
+  window.dispatchEvent(pointer("pointermove", 262));
   await nextTick();
-  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.querySelector(".following")).toBeNull();
 
   // Over the right half of c: it'd land after it, and doesn't move until it's dropped.
   window.dispatchEvent(pointer("pointermove", 550));
   await nextTick();
-  expect(document.querySelector(".drag-image.following").textContent).toBe("a");
-  expect(first.classList.contains("dragging")).toBe(true);
+  // A copy of the tab, as it looks in the row, held where it was grabbed.
+  const image = document.querySelector(".following");
+  expect(image.classList.contains("tab")).toBe(true);
+  expect(image.classList.contains("active")).toBe(false);
+  expect(image.querySelector(".name").textContent).toBe("b");
+  expect(image.querySelector(".detail").textContent).toBe("main");
+  expect(image.style.width).toBe("200px");
+  expect(image.style.transform).toBe("translate(490px, 0px)");
+  expect(image.hasAttribute("inert")).toBe(true);
+  expect(middle.classList.contains("dragging")).toBe(true);
   expect(last.classList.contains("drop-after")).toBe(true);
   expect(onMove).not.toHaveBeenCalled();
 
   // Over itself, it'd stay: no line.
-  window.dispatchEvent(pointer("pointermove", 50));
+  window.dispatchEvent(pointer("pointermove", 300));
   await nextTick();
   expect(root.querySelector(".drop-before, .drop-after")).toBeNull();
 
+  // Over the left half of a: before it.
+  window.dispatchEvent(pointer("pointermove", 50));
+  await nextTick();
+  expect(first.classList.contains("drop-before")).toBe(true);
+
+  // Where the tabs were as it started, not where the gap's moved them: the row
+  // scrolled, though, is taken into account.
+  root.querySelector(".tabs").scrollLeft = 200;
+  window.dispatchEvent(pointer("pointermove", 50));
+  await nextTick();
+  expect(root.querySelector(".drop-before, .drop-after")).toBeNull();
+  root.querySelector(".tabs").scrollLeft = 0;
+
   window.dispatchEvent(pointer("pointermove", 550));
   window.dispatchEvent(pointer("pointerup", 550));
-  first.click();
-  expect(onMove).toHaveBeenCalledWith(1, 2);
+  middle.click();
+  expect(onMove).toHaveBeenCalledWith(2, 2);
   expect(onSelect).not.toHaveBeenCalled();
-  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.querySelector(".following")).toBeNull();
 });
 
-test("Escape, or dropping it off the tabs, leaves a dragged tab where it was", async () => {
+test("let go near the row, below it or past its last tab, it lands there too", async () => {
+  const { root, onMove } = render({ tabs: [tab(1, "a"), tab(2, "b"), tab(3, "c")], active: 1 });
+  const [first, , last] = root.querySelectorAll(".tab");
+  first.dispatchEvent(pointer("pointerdown", 100));
+  // Below the row, by less than a tab's height, past the last tab.
+  window.dispatchEvent(pointer("pointermove", 900, 80));
+  await nextTick();
+  expect(last.classList.contains("drop-after")).toBe(true);
+  // Further below, nowhere.
+  window.dispatchEvent(pointer("pointermove", 900, 100));
+  await nextTick();
+  expect(root.querySelector(".drop-before, .drop-after")).toBeNull();
+  window.dispatchEvent(pointer("pointermove", 900, 80));
+  window.dispatchEvent(pointer("pointerup", 900, 80));
+  expect(onMove).toHaveBeenCalledWith(1, 2);
+});
+
+test("dropped, the tab slides into its place from where its copy was let go", async () => {
+  const { root } = render({ tabs: [tab(1, "a"), tab(2, "b"), tab(3, "c")], active: 1 });
+  const tabs = [...root.querySelectorAll(".tab")];
+  for (const element of tabs) element.animate = vi.fn();
+  tabs[0].dispatchEvent(pointer("pointerdown", 100));
+  window.dispatchEvent(pointer("pointermove", 550));
+  document.querySelector(".following").getBoundingClientRect = () => ({ left: 450, top: 30 });
+  window.dispatchEvent(pointer("pointerup", 550));
+  await nextTick();
+  // Not put in its new place here, as the window's tabs are App's: none moved but it.
+  expect(tabs[0].animate.mock.calls[0][0]).toEqual([{ transform: "translate(450px, 30px)" }, { transform: "none" }]);
+  expect(tabs[1].animate).not.toHaveBeenCalled();
+  expect(tabs[2].animate).not.toHaveBeenCalled();
+});
+
+test("Escape, or dropping it well away from the row, leaves a dragged tab where it was", async () => {
   const { root, onMove } = render({ tabs: [tab(1, "a"), tab(2, "b")], active: 1 });
-  document.elementFromPoint = (x) => tabAt(root, x);
   const first = root.querySelector(".tab");
   first.dispatchEvent(pointer("pointerdown", 100));
   window.dispatchEvent(pointer("pointermove", 350));
@@ -93,8 +147,8 @@ test("Escape, or dropping it off the tabs, leaves a dragged tab where it was", a
   window.dispatchEvent(pointer("pointerup", 350));
   first.dispatchEvent(pointer("pointerdown", 100));
   window.dispatchEvent(pointer("pointermove", 350));
-  window.dispatchEvent(pointer("pointermove", 2500));
-  window.dispatchEvent(pointer("pointerup", 2500));
+  window.dispatchEvent(pointer("pointermove", 350, 200));
+  window.dispatchEvent(pointer("pointerup", 350, 200));
   expect(onMove).not.toHaveBeenCalled();
 });
 

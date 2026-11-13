@@ -6,13 +6,14 @@ afterEach(() => (document.body.innerHTML = ""));
 const pointer = (type, x, y = 10) => new PointerEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true });
 
 // A row, and a drag of it, recording what's called.
-function setUp() {
+function setUp(options = {}) {
   const row = document.createElement("div");
   document.body.append(row);
   const calls = { start: vi.fn(), move: vi.fn(), drop: vi.fn(), key: vi.fn(), end: vi.fn() };
   const drag = pointerDrag({
     image: ({ data }) => Object.assign(document.createElement("div"), { textContent: data }),
     ...calls,
+    ...options,
   });
   row.addEventListener("pointerdown", (event) => drag.press(event, "feature"));
   return { row, drag, ...calls };
@@ -23,12 +24,32 @@ test("a press is a click until the pointer's moved a few pixels, then a drag wit
   row.dispatchEvent(pointer("pointerdown", 10));
   window.dispatchEvent(pointer("pointermove", 12));
   expect(start).not.toHaveBeenCalled();
-  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.querySelector(".following")).toBeNull();
   window.dispatchEvent(pointer("pointermove", 40));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ data: "feature", element: row }));
   expect(move).toHaveBeenCalled();
-  expect(document.querySelector(".drag-image.following").textContent).toBe("feature");
+  expect(document.querySelector(".following").textContent).toBe("feature");
   expect(document.body.classList.contains("dragging-row")).toBe(true);
+});
+
+test("the image is placed on the window, whatever it's styled as, and held 14px into its left end", () => {
+  const { row } = setUp();
+  row.dispatchEvent(pointer("pointerdown", 10));
+  window.dispatchEvent(pointer("pointermove", 40, 10));
+  const image = document.querySelector(".following");
+  expect(image.style.position).toBe("fixed");
+  expect(image.style.pointerEvents).toBe("none");
+  // The page under test has no layout: the image is 0 pixels high.
+  expect(image.style.transform).toBe("translate(26px, 10px)");
+});
+
+test("or held at the point hold() gives", () => {
+  const hold = vi.fn(() => ({ x: 30, y: 4 }));
+  const { row } = setUp({ hold });
+  row.dispatchEvent(pointer("pointerdown", 10));
+  window.dispatchEvent(pointer("pointermove", 40, 10));
+  expect(hold).toHaveBeenCalledWith(expect.objectContaining({ data: "feature", element: row, x: 10, y: 10 }));
+  expect(document.querySelector(".following").style.transform).toBe("translate(10px, 6px)");
 });
 
 test("released, it drops, then ends, and the click that follows isn't one", () => {
@@ -43,7 +64,7 @@ test("released, it drops, then ends, and the click that follows isn't one", () =
   expect(drop.mock.invocationCallOrder[0]).toBeLessThan(end.mock.invocationCallOrder[0]);
   row.click();
   expect(clicked).not.toHaveBeenCalled();
-  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.querySelector(".following")).toBeNull();
   expect(document.body.classList.contains("dragging-row")).toBe(false);
 });
 
@@ -88,6 +109,6 @@ test("a drop that fails still ends the drag", () => {
   // The drop's error comes out as it was; the drag ends regardless.
   expect(() => window.dispatchEvent(pointer("pointerup", 40))).toThrow("failed");
   expect(end).toHaveBeenCalled();
-  expect(document.querySelector(".drag-image")).toBeNull();
+  expect(document.querySelector(".following")).toBeNull();
   expect(document.body.classList.contains("dragging-row")).toBe(false);
 });

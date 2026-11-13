@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { activeTab, closeTab, dropPlace, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabNames, tabWith, tabsForBackend } from "./tabs.js";
+import { activeTab, closeTab, dropPlace, landingAt, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabNames, tabWith, tabsForBackend } from "./tabs.js";
 
 // Tabs with the repositories at `paths` open, the first showing.
 function tabsOf(...paths) {
@@ -130,4 +130,21 @@ test("the backend's told the repositories tabs showed before and keep, once each
   showIn(second, { path: "/w", name: "w", branch: "main" });
   showIn(second, { path: "/b", name: "b", branch: "main" });
   expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 0, kept: ["/w"] });
+});
+
+test("a dragged tab lands at the place between tabs nearest the pointer, or at an end", () => {
+  // Three tabs 200 wide, 6 apart: the places are at 0, 203, 409 and 612.
+  const spans = [
+    { id: 1, left: 0, right: 200 },
+    { id: 2, left: 206, right: 406 },
+    { id: 3, left: 412, right: 612 },
+  ];
+  expect(landingAt(spans, -40)).toEqual({ id: 1, after: false });
+  expect(landingAt(spans, 90)).toEqual({ id: 1, after: false });
+  expect(landingAt(spans, 110)).toEqual({ id: 2, after: false });
+  // Between two tabs, as in the gap that opens there.
+  expect(landingAt(spans, 230)).toEqual({ id: 2, after: false });
+  expect(landingAt(spans, 520)).toEqual({ id: 3, after: true });
+  expect(landingAt(spans, 900)).toEqual({ id: 3, after: true });
+  expect(landingAt([], 10)).toBeNull();
 });

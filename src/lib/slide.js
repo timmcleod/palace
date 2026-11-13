@@ -1,8 +1,10 @@
 // A part of the page opening or closing by sliding, as a file's diff in a commit does,
-// rather than popping in or out and moving everything below it at once. Where motion is
+// rather than popping in or out and moving everything below it at once; or moving to a
+// new place by sliding there, as tabs put in a new order do. Where motion is
 // turned down in the system's settings, or the page can't animate, it's done at once.
 
 export const SLIDE_MS = 180;
+const EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
 const stillness = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
 
@@ -28,7 +30,7 @@ async function slide(el, from, to) {
   // Hidden while it slides, what's in it doesn't spill out over what's below.
   if (!overflowBefore.has(el)) overflowBefore.set(el, el.style.overflow);
   el.style.overflow = "hidden";
-  const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: SLIDE_MS, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+  const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: SLIDE_MS, easing: EASING });
   sliding.set(el, animation);
   try {
     await animation.finished;
@@ -40,5 +42,21 @@ async function slide(el, from, to) {
       sliding.delete(el);
       overflowBefore.delete(el);
     }
+  }
+}
+
+/**
+ * Slides each element in `before`, a Map of where on the page it was, { left, top },
+ * from there to where it is now: called once they've moved, as tabs put in a new order,
+ * so they're seen to go there rather than jump. It takes over the element's transform
+ * while it slides.
+ */
+export function slideFrom(before) {
+  if (stillness()?.matches) return;
+  for (const [el, was] of before) {
+    if (typeof el.animate !== "function" || !el.isConnected) continue;
+    const now = el.getBoundingClientRect();
+    const [x, y] = [was.left - now.left, was.top - now.top];
+    if (x || y) el.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: "none" }], { duration: SLIDE_MS, easing: EASING });
   }
 }

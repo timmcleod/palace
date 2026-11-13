@@ -28,7 +28,7 @@ import {
   tabLabel as label,
   tabsFor,
 } from "../lib/terminals.js";
-import { setDragImage } from "../lib/dragImage.js";
+import { grabPoint, setDragImage, tabCopy } from "../lib/dragImage.js";
 import { draggingFiles, onFilesDropped } from "../lib/fileDrag.js";
 import AgentIcon from "./AgentIcon.vue";
 import Spinner from "./Spinner.vue";
@@ -113,14 +113,12 @@ function onTabDragStart(event, tab) {
   event.dataTransfer.effectAllowed = "move";
 
   // A copy of the tab itself, as the shown one looks, held where it was grabbed.
+  // Shown as the active one, of a piece with a terminal, whichever it is.
   const el = event.currentTarget;
-  const rect = el.getBoundingClientRect();
-  dragImage = el.cloneNode(true);
-  dragImage.classList.remove("drop-before", "drop-after");
+  dragImage = tabCopy(el);
   dragImage.classList.add("active", "dragged");
-  dragImage.style.width = `${rect.width}px`;
   document.body.append(dragImage);
-  setDragImage(event, dragImage, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+  setDragImage(event, dragImage, grabPoint(el, event.clientX, event.clientY));
 }
 
 function onTabDragEnd() {
