@@ -64,7 +64,11 @@ only its own repository's events.
 - **`components/Workspace.vue`** is what the window shows: the open repository, the
   state its views share (what's selected, the commit message being written) and the
   wiring between them, or with none open, the welcome screen. It should stay wiring.
-  When a piece of it grows logic of its own, that logic moves out.
+  When a piece of it grows logic of its own, that logic moves out. A window can hold
+  more than one, each kept running while another shows, so what's meant for the whole
+  window (a key, the menu, a notice, the window's title) is acted on only by the one
+  showing, its `active` prop: composables take it as `active`, and components inside
+  read it with `inActiveWorkspace()`.
 - **`src/lib/`** holds the logic, in plain modules. Some are composables, named
   `use…`, that own one job and its state for a window: loading and refreshing the
   repository, the terminal panel, keyboard shortcuts, undo, navigation and so on.

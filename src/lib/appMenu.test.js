@@ -24,3 +24,16 @@ test("About Palace shows the About page, and Check for Updates checks there too"
   await Promise.resolve();
   expect(stop).toHaveBeenCalled();
 });
+
+test("the menu's items go to the workspace showing only", () => {
+  const showAbout = vi.fn();
+  let showing = false;
+  const { unmount } = mountComposable(() => useAppMenu({ window, showAbout, active: () => showing }));
+  chosen("check-for-updates");
+  expect(showAbout).not.toHaveBeenCalled();
+  expect(checkForUpdates).not.toHaveBeenCalled();
+  showing = true;
+  chosen("about");
+  expect(showAbout).toHaveBeenCalledTimes(1);
+  unmount();
+});

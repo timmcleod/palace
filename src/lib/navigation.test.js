@@ -6,7 +6,7 @@ import { describe as describePlace, useNavigation } from "./navigation.js";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-function setUp() {
+function setUp({ active } = {}) {
   const view = {
     selected: ref("workspace:history"),
     selectedCommit: ref(null),
@@ -24,6 +24,7 @@ function setUp() {
       view,
       fileShown: () => (view.selected.value === "workspace:files" ? (openFiles["/repo"] ?? null) : null),
       showFile: (file) => (openFiles["/repo"] = file),
+      active,
     }),
   );
   return { ...result, view, openFiles, unmount };
@@ -112,6 +113,20 @@ describe("useNavigation", () => {
 
     unmount();
     window.dispatchEvent(new MouseEvent("mouseup", { button: 4 }));
+    await nextTick();
+    expect(view.selected.value).toBe("branch:main");
+  });
+
+  test("the mouse's buttons go only in the workspace showing", async () => {
+    let showing = false;
+    const { view } = setUp({ active: () => showing });
+    await moveTo(() => (view.selected.value = "branch:main"));
+    await moveTo(() => (view.selected.value = "workspace:stashes"));
+    window.dispatchEvent(new MouseEvent("mouseup", { button: 3 }));
+    await nextTick();
+    expect(view.selected.value).toBe("workspace:stashes");
+    showing = true;
+    window.dispatchEvent(new MouseEvent("mouseup", { button: 3 }));
     await nextTick();
     expect(view.selected.value).toBe("branch:main");
   });

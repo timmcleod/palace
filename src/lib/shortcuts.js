@@ -60,10 +60,12 @@ export function shortcutFor(event, where, mac = isMac) {
  * Listens for the shortcuts in the window while the component calling it is mounted.
  * `where(event)` says where a key was pressed (see shortcutFor), and `actions` does each
  * by name, given that; one that returns false didn't apply after all, as / with no
- * search showing, and leaves the key to whatever else takes it.
+ * search showing, and leaves the key to whatever else takes it. Only while `active()`,
+ * the workspace calling it is showing, does it act on them.
  */
-export function useShortcuts(where, actions) {
+export function useShortcuts(where, actions, { active = () => true } = {}) {
   function onKeydown(event) {
+    if (!active()) return;
     const here = where(event);
     const name = shortcutFor(event, here);
     if (name && actions[name](here) !== false) event.preventDefault();

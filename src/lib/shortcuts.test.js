@@ -117,10 +117,10 @@ describe("useShortcuts", () => {
   let app;
   afterEach(() => app?.unmount());
 
-  function listen(actions) {
+  function listen(actions, options) {
     app = createApp({
       setup() {
-        useShortcuts(() => anywhere, actions);
+        useShortcuts(() => anywhere, actions, options);
         return () => h("div");
       },
     });
@@ -152,5 +152,16 @@ describe("useShortcuts", () => {
     app = null;
     keydown({ key: "/" });
     expect(search).not.toHaveBeenCalled();
+  });
+
+  test("acts only while its workspace is the one showing", () => {
+    const search = vi.fn();
+    let showing = false;
+    listen({ search }, { active: () => showing });
+    expect(keydown({ key: "/" }).defaultPrevented).toBe(false);
+    expect(search).not.toHaveBeenCalled();
+    showing = true;
+    expect(keydown({ key: "/" }).defaultPrevented).toBe(true);
+    expect(search).toHaveBeenCalled();
   });
 });

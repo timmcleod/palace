@@ -4,9 +4,13 @@
 import { onBeforeUnmount } from "vue";
 import { checkForUpdates } from "./updates.js";
 
-/** Listens on `window` for the menu's items, showing the About page with `showAbout()`. */
-export function useAppMenu({ window, showAbout }) {
+/**
+ * Listens on `window` for the menu's items, showing the About page with `showAbout()`,
+ * while `active()`, the workspace calling it is showing.
+ */
+export function useAppMenu({ window, showAbout, active = () => true }) {
   const unlisten = window.listen("menu", ({ payload }) => {
+    if (!active()) return;
     if (payload === "about") showAbout();
     if (payload === "check-for-updates") {
       showAbout();

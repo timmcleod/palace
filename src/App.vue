@@ -68,6 +68,9 @@ async function checkGit() {
 
 onMounted(checkGit);
 
+// Terminals a page started before it reloaded have nothing to show them any more.
+invoke("terminal_close_all").catch(() => {});
+
 // --- Every window's agents ---------------------------------------------------------
 
 // What each repository's agents are doing, in every window, by path (see agentStates.js),

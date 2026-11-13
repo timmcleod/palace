@@ -48,7 +48,7 @@ function waiting() {
 let mounted;
 const allMounted = [];
 // The window's repository state, Workspace.vue's, with useRepository looking after it.
-function repository({ open = null, listsFiles = false } = {}) {
+function repository({ open = null, listsFiles = false, active } = {}) {
   const state = {
     overview: ref(open),
     loading: ref(false),
@@ -59,6 +59,7 @@ function repository({ open = null, listsFiles = false } = {}) {
     onLoaded: vi.fn(),
     onNotRepository: vi.fn(),
     onOpenFailed: vi.fn(),
+    active,
   };
   mounted = mountComposable(() => useRepository(state));
   allMounted.push(mounted);
@@ -311,6 +312,18 @@ describe("refresh", () => {
     expect(repo.overview.value.path).toBe("/b");
     expect(repo.folderGone.value).toBe(false);
     expect(repo.refreshKey.value).toBe(0);
+  });
+
+  test("on the window coming forward, happens only in the workspace showing, and in another as it comes to show", async () => {
+    overviews["/a"] = overviewOf("/a");
+    const showing = ref(false);
+    repository({ open: overviewOf("/a"), active: () => showing.value });
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(loads()).toBe(0);
+    showing.value = true;
+    await settle();
+    expect(loads()).toBe(1);
   });
 
   test("happens when the window comes forward, until the page goes", async () => {

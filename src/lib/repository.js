@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { NOT_A_REPOSITORY, isError } from "./errors.js";
 
@@ -21,7 +21,7 @@ import { NOT_A_REPOSITORY, isError } from "./errors.js";
  * loadRepository, refresh, and loadsStarted, for telling which overviews were read
  * after something happened (each has `readAt`).
  */
-export function useRepository({ overview, loading, error, refreshKey, listsFiles, onSwitch, onLoaded, onNotRepository, onOpenFailed }) {
+export function useRepository({ overview, loading, error, refreshKey, listsFiles, onSwitch, onLoaded, onNotRepository, onOpenFailed, active = () => true }) {
   // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
   let loadSeq = 0;
   // The open repository's folder, once it's gone: removed as a worktree, or moved or
@@ -124,9 +124,12 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
   }
 
   // The file watcher catches most changes made elsewhere; refreshing on focus also
-  // catches any it misses, such as on network drives where changes aren't reported.
-  window.addEventListener("focus", refresh);
-  onBeforeUnmount(() => window.removeEventListener("focus", refresh));
+  // catches any it misses, such as on network drives where changes aren't reported. Only
+  // the workspace showing does, and one that isn't, as it comes to show.
+  const onFocus = () => active() && refresh();
+  window.addEventListener("focus", onFocus);
+  onBeforeUnmount(() => window.removeEventListener("focus", onFocus));
+  watch(active, (now) => now && overview.value && refresh());
 
   // How many loads have started, so far: an overview's readAt is the count as its own
   // started.

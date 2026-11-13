@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createApp, nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { isMac } from "./lib/platform.js";
 
@@ -171,6 +171,32 @@ test("the window starts, opening the repository it had, without an error", async
   expect(root.querySelector(".repo-name")?.textContent).toContain("palace");
   expect(root.textContent).toContain("main");
   expect(root.textContent).toContain("v1.0.0");
+});
+
+test("the window hangs up the terminals its page had before a reload, once", async () => {
+  await start();
+  expect(calls("terminal_close_all")).toHaveLength(1);
+});
+
+test("a workspace that isn't the one showing leaves the window's title and keys alone, until it shows", async () => {
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: Workspace } = await import("./components/Workspace.vue");
+  const showing = ref(false);
+  app = createApp({ render: () => h(Workspace, { ready: true, active: showing.value }) });
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => !!root.querySelector(".repo-name")?.textContent.includes("palace"));
+
+  document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "r", metaKey: isMac, ctrlKey: !isMac, bubbles: true }));
+  await settle();
+  expect(calls("fetch")).toEqual([]);
+  expect(window.setTitle).not.toHaveBeenCalled();
+
+  showing.value = true;
+  await until(() => window.setTitle.mock.calls.length > 0);
+  expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
 });
 
 test("a repository opened is the window's: the backend's told, the window's titled, and its folder watched", async () => {

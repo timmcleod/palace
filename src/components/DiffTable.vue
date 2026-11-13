@@ -5,6 +5,7 @@ import { wordHighlights } from "../lib/wordDiff.js";
 import { combine, highlightBlocks } from "../lib/highlight.js";
 import { settings } from "../lib/settings.js";
 import { addComment, commentsOn, deleteComment, editComment } from "../lib/review.js";
+import { inActiveWorkspace } from "../lib/activeWorkspace.js";
 import ImageDiff from "./ImageDiff.vue";
 import ReviewComment from "./ReviewComment.vue";
 
@@ -237,9 +238,10 @@ function saveDraft(body) {
   draft.value = null;
 }
 
-// C comments on the lines picked.
+// C comments on the lines picked, in the workspace showing.
+const active = inActiveWorkspace();
 function onKey(event) {
-  if (!commentable.value || picked.value.hunk == null || draft.value) return;
+  if (!active() || !commentable.value || picked.value.hunk == null || draft.value) return;
   if (event.key !== "c" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
   if (event.target.closest?.("input, textarea, [contenteditable], .xterm")) return;
   event.preventDefault();

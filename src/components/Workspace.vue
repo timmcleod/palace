@@ -80,7 +80,8 @@ import {
   tell,
 } from "../lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "../lib/clone.js";
-import { loadAvatars } from "../lib/avatars.js";
+import { forgetAvatars, loadAvatars } from "../lib/avatars.js";
+import { provideActive } from "../lib/activeWorkspace.js";
 import { dragEdge } from "../lib/resize.js";
 import { useShortcuts } from "../lib/shortcuts.js";
 import { useTerminalPanel } from "../lib/terminalPanel.js";
@@ -108,7 +109,12 @@ const props = defineProps({
   // What each repository's agents are doing, in every window, by path (see
   // agentStates.js), for Worktrees to show which is busy or wants you.
   agentStates: { type: Object, default: () => ({}) },
+  // Whether it's the one showing in the window, of the several it may hold: only that
+  // one acts on what's meant for the whole window, as keys, the menu and notices.
+  active: { type: Boolean, default: true },
 });
+const active = () => props.active;
+provideActive(active);
 
 // --- State shared across views -----------------------------------------------------
 
@@ -470,6 +476,7 @@ const { nav, go, describe, forget: forgetPlaces } = useNavigation({
   view: { selected, selectedCommit, selectedStash, fileFilter, detailMode, treeFile, treeReveal, comparison },
   fileShown: () => (isFiles.value && overview.value ? (openFiles[overview.value.path] ?? null) : null),
   showFile: (file) => (openFiles[overview.value.path] = file),
+  active,
 });
 
 // --- Keyboard shortcuts ------------------------------------------------------------
@@ -539,6 +546,7 @@ useShortcuts(
       go("forward");
     },
   },
+  { active },
 );
 
 // --- Running git operations --------------------------------------------------------
@@ -832,22 +840,36 @@ async function switchTo(key, kind, name) {
 watch(
   () => overview.value?.path,
   (path, previous) => {
-    // The one before, the backend stops watching, and lets go of its history.
-    if (previous) invoke("release_repo", { path: previous }).catch(() => {});
-    // Other windows show this one instead of opening the repository again, and the
-    // window's title names it, to tell windows apart when switching between them.
+    if (previous) letGo(previous);
+    // Other windows show this one instead of opening the repository again.
     invoke("set_window_repo", { path: path ?? null }).catch(() => {});
-    thisWindow.setTitle(path ? `${folderName(path)} — Palace` : "Palace").catch(() => {});
+    showTitle();
     if (!path) return;
     invoke("watch_repo", { path }).catch(() => {});
     loadAvatars(path);
   },
 );
 
-// Recent repositories opened in other windows join the list here too.
-// Gone, the backend lets go of the repository it showed too.
-onBeforeUnmount(() => overview.value && invoke("release_repo", { path: overview.value.path }).catch(() => {}));
+// The window's title names the repository showing, to tell windows apart when switching
+// between them: this one's, while it's the workspace showing.
+function showTitle() {
+  if (!props.active) return;
+  const path = overview.value?.path;
+  thisWindow.setTitle(path ? `${folderName(path)} — Palace` : "Palace").catch(() => {});
+}
+watch(() => props.active, showTitle);
 
+// A repository no longer shown: the backend stops watching it and lets go of its
+// history, and its authors' pictures aren't asked for again.
+function letGo(path) {
+  invoke("release_repo", { path }).catch(() => {});
+  forgetAvatars(path);
+}
+
+// Gone, the backend lets go of the repository it showed too.
+onBeforeUnmount(() => overview.value && letGo(overview.value.path));
+
+// Recent repositories opened in other windows join the list here too.
 onBeforeUnmount(onSavedElsewhere((key) => key === RECENTS_KEY && (recents.value = recentRepositories())));
 
 // Opens the worktree at `path` in a window of its own, or
@@ -876,6 +898,7 @@ onBeforeUnmount(() => unlistenChanges.then((unlisten) => unlisten()));
 useAppMenu({
   window: thisWindow,
   showAbout: () => showSettings(),
+  active,
 });
 
 /** Opens Settings at `section` (one of its SECTIONS), or with none, at the top. */
@@ -982,7 +1005,7 @@ const {
   notices: terminalNotices,
   dismissNotice,
   openNotice,
-} = useTerminalPanel({ overview, loadRepository: (path) => loadRepository(path), window: thisWindow });
+} = useTerminalPanel({ overview, loadRepository: (path) => loadRepository(path), window: thisWindow, active });
 
 // --- Review comments for the agent -------------------------------------------------
 
@@ -1064,6 +1087,7 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
       actions: recents.value.some((r) => r.path === path) ? [{ label: "Remove from List", run: () => removeRecent(path) }] : [],
     });
   },
+  active,
 });
 const isWorktree = computed(() => !!overview.value?.worktrees?.some((w) => w.current && !w.main));
 

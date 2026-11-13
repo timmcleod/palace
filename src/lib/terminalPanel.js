@@ -11,10 +11,11 @@ const terminals = () => import("./terminals.js");
  * opening tabs in it, and the notices that a terminal's program finished or needs you.
  * `overview` is the open repository's overview ref; `loadRepository(path)` opens
  * another, as for a notice from a terminal of a repository that isn't showing; `window`
- * is this one (getCurrentWebviewWindow), which notices come to. The panel component
- * goes in `panel`, by its ref.
+ * is this one (getCurrentWebviewWindow), which notices come to: only while `active()`,
+ * the workspace calling it is showing, are they shown here. The panel component goes in
+ * `panel`, by its ref.
  */
-export function useTerminalPanel({ overview, loadRepository, window }) {
+export function useTerminalPanel({ overview, loadRepository, window, active = () => true }) {
   // Showing, and loaded: it loads the first time it's opened, and stays, hidden.
   const open = ref(false);
   const loaded = ref(false);
@@ -22,9 +23,6 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
   // hidden panel's button can say so.
   const unseen = ref(false);
   const panel = ref(null);
-
-  // Terminals a page started before it reloaded have nothing to show them any more.
-  invoke("terminal_close_all").catch(() => {});
 
   function reveal() {
     open.value = true;
@@ -121,6 +119,7 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
   const notices = ref([]);
   let nextNotice = 1;
   const unlistenNotice = window.listen("notice", ({ payload }) => {
+    if (!active()) return;
     const id = nextNotice++;
     const others = notices.value.filter((n) => n.window !== payload.window || n.key !== payload.key);
     notices.value = [...others, { ...payload, id }].slice(-3);
@@ -139,7 +138,7 @@ export function useTerminalPanel({ overview, loadRepository, window }) {
   }
 
   // Another window's notice, clicked there, or the system's notification, clicked.
-  const unlistenShowTab = window.listen("show-terminal-tab", ({ payload }) => showTab(payload));
+  const unlistenShowTab = window.listen("show-terminal-tab", ({ payload }) => active() && showTab(payload));
 
   onBeforeUnmount(() => {
     unlistenNotice.then((unlisten) => unlisten());

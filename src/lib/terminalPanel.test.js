@@ -43,11 +43,11 @@ function fakeWindow(label = "main") {
 
 let mounted;
 // The panel, with the repository at `path` open, and a component standing in for it.
-function panelFor(path = "/repo") {
+function panelFor(path = "/repo", { active } = {}) {
   const overview = ref(path ? { path } : null);
   const window = fakeWindow();
   const loadRepository = vi.fn(async (to) => (overview.value = { path: to }));
-  mounted = mountComposable(() => useTerminalPanel({ overview, loadRepository, window }));
+  mounted = mountComposable(() => useTerminalPanel({ overview, loadRepository, window, active }));
   const panel = mounted.result;
   panel.panel.value = { focus: vi.fn() };
   return { ...panel, overview, window, loadRepository };
@@ -180,6 +180,21 @@ test("showing a tab of a repository that isn't open opens it first", async () =>
 test("comes when another window says to show a tab", async () => {
   const { window } = panelFor();
   groups["/repo"] = reactive({ tabs: [{ key: 1 }, { key: 3 }], active: 1 });
+  window.send("show-terminal-tab", { path: "/repo", key: 3 });
+  await settle();
+  expect(groups["/repo"].active).toBe(3);
+});
+
+test("notices, and showing a tab, are for the workspace showing only", async () => {
+  let showing = false;
+  const { window, notices } = panelFor("/repo", { active: () => showing });
+  groups["/repo"] = reactive({ tabs: [{ key: 1 }, { key: 3 }], active: 1 });
+  window.send("notice", { window: "main", path: "/repo", key: 3, state: "done", title: "Agent finished" });
+  window.send("show-terminal-tab", { path: "/repo", key: 3 });
+  await settle();
+  expect(notices.value).toEqual([]);
+  expect(groups["/repo"].active).toBe(1);
+  showing = true;
   window.send("show-terminal-tab", { path: "/repo", key: 3 });
   await settle();
   expect(groups["/repo"].active).toBe(3);

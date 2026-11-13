@@ -22,7 +22,7 @@ const QUICK_CHANGE = 800;
  * describe(place) for the buttons' tooltips, and forget(), for when another repository
  * opens.
  */
-export function useNavigation({ overview, view, fileShown, showFile }) {
+export function useNavigation({ overview, view, fileShown, showFile, active = () => true }) {
   const { selected, selectedCommit, selectedStash, fileFilter, detailMode, treeFile, treeReveal, comparison } = view;
   const nav = reactive({ back: [], forward: [] });
   let here = null;
@@ -96,9 +96,10 @@ export function useNavigation({ overview, view, fileShown, showFile }) {
     here = null;
   }
 
-  // Mice with back and forward buttons report them as buttons 3 and 4.
+  // Mice with back and forward buttons report them as buttons 3 and 4, in the workspace
+  // showing.
   function onMouseup(event) {
-    if (event.button === 3 || event.button === 4) {
+    if (active() && (event.button === 3 || event.button === 4)) {
       event.preventDefault();
       go(event.button === 3 ? "back" : "forward");
     }
