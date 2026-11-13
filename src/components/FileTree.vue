@@ -23,7 +23,7 @@ const props = defineProps({
   path: { type: String, required: true },
   selected: { type: String, default: null },
   refreshKey: { type: Number, default: 0 },
-  // The changed files as the window's last refresh read them, for their marks, or null
+  // The changed files as the tab's last refresh read them, for their marks, or null
   // when it didn't: then they're read here.
   statusFiles: { type: Array, default: null },
 });

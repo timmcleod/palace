@@ -45,6 +45,14 @@ export function useGitActions({
   agentReady = async () => true,
 }) {
   const current = () => overview.value?.head.branch ?? null;
+
+  // Whether the repository open now is still the one that was when it was called: a
+  // tab can be switched to another while an operation asks, or runs, and what follows
+  // from it isn't for that one.
+  function stillHere() {
+    const path = overview.value?.path;
+    return () => overview.value?.path === path;
+  }
   const headBranchInfo = () => overview.value?.branches.find((b) => b.is_head) ?? null;
   // Git won't start a merge or rebase while another operation is waiting on the user.
   const midOperation = () => !!overview.value?.operation;
@@ -63,10 +71,11 @@ export function useGitActions({
   // your own on it, only once you've said to.
   async function checkoutPull(remote, number, branch) {
     if (!(await leaveDetached())) return CANCELED;
+    const here = stillHere();
     const titles = ["Checking out…", `Checked out #${number}`, "Checkout failed"];
     const rewritten = (e) => isError(e, PULL_REWRITTEN);
     const error = await run(titles, "checkout_pull", { remote, number, branch }, { quietError: rewritten });
-    if (!error || !rewritten(error)) return error;
+    if (!error || !rewritten(error) || !here()) return error;
     const count = errorDetail(error, PULL_REWRITTEN);
     const yours =
       count === "?"
@@ -77,7 +86,7 @@ export function useGitActions({
       "Replace the Pull Request's Branch?",
       "Replace",
     );
-    if (!replace) return CANCELED;
+    if (!replace || !here()) return CANCELED;
     return run(titles, "checkout_pull", { remote, number, branch, replace: true });
   }
 
@@ -193,8 +202,11 @@ export function useGitActions({
     const titles = ["Renaming…", "Renamed", "Couldn't rename the branch"];
     let error;
     if (github) {
+      const here = stillHere();
       error = await run(titles, "github_rename_branch", { owner: github.owner, repo: github.repo, branch: old, newName: to });
-      // GitHub finishes renaming in the background; Palace waits for it, then fetches.
+      // GitHub finishes renaming in the background; Palace waits for it, then fetches,
+      // in the repository it was renamed from.
+      if (!error && !here()) return;
       error ??= await run(titles, "finish_remote_rename", { remote: remote.name, old, new: to });
     } else {
       error = await run(titles, "rename_remote_branch", { name, new: to });
@@ -204,16 +216,17 @@ export function useGitActions({
 
   async function deleteBranch(name) {
     if (!(await confirm(`Delete the branch “${name}”?`, "Delete Branch", "Delete"))) return;
+    const here = stillHere();
     const titles = ["Deleting branch…", "Deleted branch", "Couldn't delete the branch"];
     const notMerged = (e) => e.includes("not fully merged");
     let error = await run(titles, "delete_branch", { name, force: false }, { quietError: notMerged });
-    if (error && notMerged(error)) {
+    if (error && notMerged(error) && here()) {
       const force = await confirm(
         `“${name}” has commits that aren't merged into any other branch. If you delete it, those commits will be hard to get back.`,
         "Delete Unmerged Branch?",
         "Delete Anyway",
       );
-      if (!force) return;
+      if (!force || !here()) return;
       error = await run(titles, "delete_branch", { name, force: true });
     }
     if (!error) removeKey(arrangedIn(), `branch:${name}`);
@@ -657,7 +670,8 @@ export function useGitActions({
     if (!(await agentReady())) return;
     const from = current() ?? "HEAD";
     // Canceled, or not started, what was typed waits for next time, in this repository.
-    const draft = `new-task:${overview.value.path}`;
+    const repository = overview.value.path;
+    const draft = `new-task:${repository}`;
     const values = await openForm({
       title: "New Agent Task",
       message: `A new branch from ${from}, in a worktree of its own, opens in a tab where the agent starts on the task.`,
@@ -685,7 +699,7 @@ export function useGitActions({
       return;
     }
     // The worktree runs the agent this repository does, as it was checked for.
-    setAgentCommand(folder, agentCommand(overview.value.path));
+    setAgentCommand(folder, agentCommand(repository));
     openWorktree(folder, { task });
   }
 

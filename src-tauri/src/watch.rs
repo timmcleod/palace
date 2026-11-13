@@ -47,27 +47,40 @@ impl RepoWatcher {
     /// Keeps `watcher`, set up for the request numbered `request`, if that's still the
     /// latest; otherwise it's dropped, and stops.
     fn keep(&self, window: &str, path: &str, request: u64, watcher: Arc<Mutex<RecommendedWatcher>>) {
-        let asked = self.asked.lock().unwrap();
-        if asked.get(&(window.to_string(), path.to_string())) == Some(&request) {
-            self.watchers.set(window, path, watcher);
-        }
+        // What's dropped, the one replaced or this one, is dropped with the locks let go
+        // of, as dropping a watcher waits for its thread.
+        let dropped = {
+            let asked = self.asked.lock().unwrap();
+            if asked.get(&(window.to_string(), path.to_string())) == Some(&request) {
+                self.watchers.set(window, path, watcher)
+            } else {
+                Some(watcher)
+            }
+        };
+        drop(dropped);
     }
 
     /// Stops watching the repository at `path` for the window, as it's done with it,
     /// and any watcher still being set up for it.
     pub fn release(&self, window: &str, path: &str) {
-        let mut asked = self.asked.lock().unwrap();
-        if let Some(latest) = asked.get_mut(&(window.to_string(), path.to_string())) {
-            *latest += 1;
-        }
-        self.watchers.release(window, path);
+        let released = {
+            let mut asked = self.asked.lock().unwrap();
+            if let Some(latest) = asked.get_mut(&(window.to_string(), path.to_string())) {
+                *latest += 1;
+            }
+            self.watchers.release(window, path)
+        };
+        drop(released);
     }
 
     /// Stops watching for a window that's closed, and setting up watchers for it.
     pub fn forget(&self, window: &str) {
-        let mut asked = self.asked.lock().unwrap();
-        asked.retain(|(w, _), _| w != window);
-        self.watchers.forget(window);
+        let forgotten = {
+            let mut asked = self.asked.lock().unwrap();
+            asked.retain(|(w, _), _| w != window);
+            self.watchers.forget(window)
+        };
+        drop(forgotten);
     }
 
     #[cfg(test)]

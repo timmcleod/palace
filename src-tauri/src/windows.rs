@@ -1,8 +1,8 @@
-//! Palace's windows, side by side, each with repositories open in tabs of its own. The
-//! first, "main", reopens the last repository at startup; New Window opens another, to
-//! choose one in. Restarted by Palace itself, as into an update, it reopens all it had
-//! (see reopen.rs). A repository is open in one tab at a time: opening it again shows
-//! that tab, and its window.
+//! Palace's windows, side by side, each with repositories open in tabs of its own. As
+//! Palace starts, it reopens the windows it had, with their tabs (see reopen.rs), or
+//! with none noted, the first, "main", with the last repository; New Window opens
+//! another, to choose one in. A repository is open in one tab at a time: opening it
+//! again shows that tab, and its window.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -131,12 +131,16 @@ pub struct Showing {
     edits: Vec<String>,
 }
 
-/// The labels of the windows with the folder at `path` open in one of their tabs.
-fn windows_showing(windows: &Windows, path: &str) -> Vec<String> {
+/// The windows with the folder at `path` open in one of their tabs: each window's label,
+/// and the folder as its tab has it, however that was reached.
+fn windows_showing(windows: &Windows, path: &str) -> Vec<(String, String)> {
     let path = same_folder(path);
     // Looked up with no lock held: see terminal::within.
     let open: Vec<(String, Tabs)> = windows.0.lock().unwrap().iter().map(|(label, tabs)| (label.clone(), tabs.clone())).collect();
-    open.into_iter().filter(|(_, tabs)| tabs.repos.iter().any(|repo| same_folder(repo) == path)).map(|(label, _)| label).collect()
+    open.into_iter()
+        .flat_map(|(label, tabs)| tabs.repos.into_iter().map(move |repo| (label.clone(), repo)))
+        .filter(|(_, repo)| same_folder(repo) == path)
+        .collect()
 }
 
 /// A folder as its real path, through any symbolic links, so the same folder compares
@@ -175,8 +179,9 @@ pub async fn close_tabs_with(app: &AppHandle, path: &str) {
         crate::terminal::close_in_and_wait(&folder, std::time::Duration::from_secs(3));
     })
     .await;
-    for label in labels {
-        let _ = app.emit_to(EventTarget::webview_window(&label), "close-repo", Repository { path: path.to_string() });
+    // Told as its tab has it, which it finds the tab by.
+    for (label, repo) in labels {
+        let _ = app.emit_to(EventTarget::webview_window(&label), "close-repo", Repository { path: repo });
     }
 }
 
@@ -267,12 +272,13 @@ pub(crate) fn make<'a>(
 ) -> Result<(String, WebviewWindowBuilder<'a, Wry, AppHandle>), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    start_with(windows, &config.label, tabs);
     let theme = if dark { Theme::Dark } else { Theme::Light };
     let builder = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|e| format!("Couldn't open a window: {e}"))?
         .theme(Some(theme))
         .background_color(background(dark));
+    // Only now there's to be a window, its tabs are its.
+    start_with(windows, &config.label, tabs);
     Ok((config.label, builder))
 }
 
@@ -375,8 +381,10 @@ mod tests {
         let windows = Windows::default();
         start_with(&windows, "main", Tabs { repos: vec!["/code/other".into(), folder.clone()], active: Some(0) });
         start_with(&windows, "window-2", Tabs::one("/code/else".into()));
-        assert_eq!(windows_showing(&windows, &link.to_string_lossy()), ["main"]);
-        assert_eq!(windows_showing(&windows, &format!("{folder}/")), ["main"]);
+        // Each window's told the folder as its tab has it.
+        let showing = [("main".to_string(), folder.clone())];
+        assert_eq!(windows_showing(&windows, &link.to_string_lossy()), showing);
+        assert_eq!(windows_showing(&windows, &format!("{folder}/")), showing);
         assert!(windows_showing(&windows, "/code/nowhere").is_empty());
         std::fs::remove_file(&link).unwrap();
     }

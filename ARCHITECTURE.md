@@ -45,9 +45,9 @@ back only what the operation changed, and only if nothing else has changed it si
 
 ## Windows
 
-Each window holds repositories in tabs across its top, each with its own terminals,
-and a repository is open in one tab at a time: opening it again shows that tab, and its
-window. The page tells the backend each window's tabs as they change
+Each window holds repositories in tabs, across its top once there are two, each with
+its own terminals, and a repository is open in one tab at a time: opening it again shows
+that tab, and its window. The page tells the backend each window's tabs as they change
 (`set_window_tabs`), so another window can find one, and Palace reopens them, with the
 windows they were in, as it next starts, after quitting or restarting itself
 (`reopen.rs`). The backend keeps track of what belongs to which window,
@@ -65,10 +65,10 @@ close button does.
 
 ## The page
 
-- **`App.vue`** is the window: what's its own whatever it shows. It checks for git at
-  startup, holds the tabs (`tabs.js`, drawn by `TabStrip.vue`), shows the dialogs and
-  menus over everything, asks before a tab or the window closes, and hears what every
-  window's agents are doing.
+- **`App.vue`** is the window: what belongs to it, whatever tab is showing. It checks
+  for git at startup, holds the tabs (`windowTabs.js` and `tabs.js`, drawn by
+  `TabStrip.vue`), shows the dialogs and menus over everything, asks before the window
+  closes or Palace quits, and hears what every window's agents are doing.
 - **`components/Workspace.vue`** is a tab: the open repository, the state its views
   share (what's selected, the commit message being written) and the wiring between
   them, or with none open, the welcome screen. It should stay wiring. When a piece of
@@ -78,8 +78,9 @@ close button does.
   `active`, and components inside read it with `inActiveWorkspace()`. What's the
   window's to do, opening a tab or closing its own, it asks `App.vue` for, by events.
 - **`src/lib/`** holds the logic, in plain modules. Some are composables, named
-  `use…`, that own one job and its state for a window: loading and refreshing the
-  repository, the terminal panel, keyboard shortcuts, undo, navigation and so on.
+  `use…`, that own one job and its state for a tab, or the window: loading and
+  refreshing the repository, the terminal panel, keyboard shortcuts, undo, navigation,
+  the window's tabs and so on.
   Others are plain functions, such as building the sidebar's rows. Code here can be
   tested without the window, and that's the point of putting it here.
 - **`src/components/`** holds the views. They show state and turn clicks and keys into
@@ -87,7 +88,7 @@ close button does.
   `src/lib/` instead.
 
 Refreshing works the same way throughout: the backend watches the repository and sends
-an event when it changes, and the window reloads the repository and tells each view to
+an event when it changes, and the tab reloads the repository and tells each view to
 read its part again. Views don't poll.
 
 ### Saved data

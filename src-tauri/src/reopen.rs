@@ -1,8 +1,8 @@
 //! Palace's windows, reopened as they were when Palace next starts: each with the tabs
 //! it had, where it was on the screen and how big. They're noted as Palace quits, or its
-//! last window closes, and just before it restarts itself, as into an update (see
-//! restart_after_update); the next start takes the note once. Without one, as after a
-//! crash, Palace opens its first window, with the last repository opened.
+//! last windows close, and just before it restarts itself, as into an update (see
+//! restart_after_update); the next start takes the note once, however long after. Without
+//! one, as after a crash, Palace opens its first window, with the last repository opened.
 //!
 //! On Linux under Wayland the desktop places windows itself, and doesn't say where
 //! they are, so there they reopen with their tabs and sizes, where it puts them.
@@ -12,18 +12,12 @@ use crate::windows::{make, open, show_first, show_themed, start_with, Tabs, Wind
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow};
 
 // Development builds keep their own, as they do their saved data (see store.rs).
 const FILE: &str = if cfg!(debug_assertions) { "reopen-dev.json" } else { "reopen.json" };
-
-/// How long after it's written a restart's note is good for. The restart takes seconds,
-/// or a minute at most on Linux (see restart_after_update); a note older than that was
-/// left by a restart that never finished, and is ignored rather than reopening windows,
-/// long after, where screens may since have changed. A note left by quitting is good
-/// whenever Palace next starts.
-const FRESH_FOR: u64 = 120;
 
 /// Why the windows are noted.
 #[derive(Clone, Copy, PartialEq)]
@@ -38,6 +32,11 @@ pub enum Why {
 /// as its windows close.
 static RESTARTING: AtomicBool = AtomicBool::new(false);
 
+/// The windows about to close, by label, their closing not held: once every window
+/// open is, Palace is about to quit with them, and they're noted. Several can close at
+/// once, as with Close All, each before the others have gone.
+static CLOSING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// The note: when it was written, and the windows. Written by one version and read by
 /// the next, so what a field's missing from reads as its default, rather than the whole
 /// note being thrown away when a version adds one.
@@ -46,8 +45,6 @@ static RESTARTING: AtomicBool = AtomicBool::new(false);
 struct Note {
     written: u64,
     windows: Vec<Placed>,
-    /// Noted as Palace quit, rather than as it restarted: good for longer.
-    quit: bool,
 }
 
 /// A corner, or a size, in logical pixels.
@@ -90,19 +87,31 @@ pub fn remember(app: &AppHandle, why: Why) {
     if windows.is_empty() {
         return;
     }
-    let note = Note { written: seconds_now(), windows, quit: why == Why::Quit };
+    let note = Note { written: seconds_now(), windows };
     if let (Some(dir), Ok(json)) = (path.parent(), serde_json::to_vec(&note)) {
         let _ = std::fs::create_dir_all(dir);
         let _ = std::fs::write(&path, json);
     }
 }
 
-/// Notes the windows, as remember does for quitting, when the window about to close is
-/// the last: Palace quits with it.
-pub fn remember_if_last(app: &AppHandle) {
-    if app.webview_windows().len() == 1 {
+/// The window labeled `window` is about to close, nothing holding it: once every window
+/// open is, they're noted, as Palace quits with the last.
+pub fn closing(app: &AppHandle, window: &str) {
+    let all_closing = {
+        let mut closing = CLOSING.lock().unwrap();
+        if !closing.iter().any(|w| w == window) {
+            closing.push(window.to_string());
+        }
+        app.webview_windows().keys().all(|label| closing.contains(label))
+    };
+    if all_closing {
         remember(app, Why::Quit);
     }
+}
+
+/// The window labeled `window` has closed.
+pub fn closed(window: &str) {
+    CLOSING.lock().unwrap().retain(|w| w != window);
 }
 
 fn placed(app: &AppHandle, label: &str, window: &WebviewWindow) -> Placed {
@@ -133,14 +142,12 @@ fn size_of(window: &WebviewWindow, scale: f64) -> Option<Pair> {
 }
 
 /// The windows noted, taken once: the note goes as it's read, so only the next start
-/// reopens them, and a restart's only while it's fresh (see FRESH_FOR).
-fn take(path: &Path, now: u64) -> Vec<Placed> {
+/// reopens them. However old it is: screens that have changed since are allowed for
+/// (see fit).
+fn take(path: &Path) -> Vec<Placed> {
     let read = std::fs::read(path);
     let _ = std::fs::remove_file(path);
     let note: Note = read.ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
-    if !note.quit && now.abs_diff(note.written) > FRESH_FOR {
-        return Vec::new();
-    }
     note.windows
         .into_iter()
         .map(|mut window| {
@@ -238,7 +245,7 @@ fn fit(placed: &Placed, screens: &[Screen]) -> (Option<Pair>, Option<Pair>) {
 /// way, and keeps another in front.
 pub fn show_windows(app: &AppHandle) {
     let exists = |path: &str| Path::new(path).is_dir();
-    let noted = file(app).map(|path| in_order(take(&path, seconds_now()), exists)).unwrap_or_default();
+    let noted = file(app).map(|path| in_order(take(&path), exists)).unwrap_or_default();
     let Some(main) = app.get_webview_window("main") else { return };
     let screens = if noted.is_empty() { Vec::new() } else { screens(app) };
     let windows = app.state::<Windows>();
@@ -307,26 +314,18 @@ mod tests {
     fn the_note_is_taken_once() {
         let path = note_file("once");
         let windows = vec![window(&["/code/palace"]), window(&[])];
-        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone(), ..Default::default() }).unwrap()).unwrap();
-        assert_eq!(take(&path, 1005), windows);
+        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
+        assert_eq!(take(&path), windows);
         assert!(!path.exists());
-        assert_eq!(take(&path, 1005), vec![]);
+        assert_eq!(take(&path), vec![]);
     }
 
     #[test]
-    fn a_note_left_from_long_ago_reopens_nothing() {
-        let path = note_file("stale");
-        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: vec![window(&["/code/a"])], ..Default::default() }).unwrap()).unwrap();
-        assert_eq!(take(&path, 1000 + FRESH_FOR + 1), vec![]);
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn a_note_left_by_quitting_reopens_whenever_palace_next_starts() {
-        let path = note_file("quit");
+    fn a_note_reopens_whenever_palace_next_starts() {
+        let path = note_file("old");
         let windows = vec![window(&["/code/a", "/code/b"])];
-        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone(), quit: true }).unwrap()).unwrap();
-        assert_eq!(take(&path, 1000 + 30 * 24 * 60 * 60), windows);
+        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
+        assert_eq!(take(&path), windows);
         assert!(!path.exists());
     }
 
@@ -334,7 +333,7 @@ mod tests {
     fn a_note_that_cant_be_read_reopens_nothing() {
         let path = note_file("bad");
         std::fs::write(&path, "not json").unwrap();
-        assert_eq!(take(&path, 0), vec![]);
+        assert_eq!(take(&path), vec![]);
         assert!(!path.exists());
     }
 
@@ -345,7 +344,7 @@ mod tests {
         let path = note_file("version");
         std::fs::write(&path, r#"{"written": 1000, "windows": [{"repo": "/code/a", "spaces": 3}], "more": true}"#).unwrap();
         // Before tabs, a window's one repository: its one tab now.
-        assert_eq!(take(&path, 1000), vec![Placed { tabs: Tabs::one("/code/a".into()), ..Default::default() }]);
+        assert_eq!(take(&path), vec![Placed { tabs: Tabs::one("/code/a".into()), ..Default::default() }]);
     }
 
     #[test]
@@ -353,8 +352,8 @@ mod tests {
         let path = note_file("tabs");
         let tabs = Tabs { repos: vec!["/code/a".into(), "/code/b".into()], active: Some(1) };
         let windows = vec![Placed { tabs, first: true, ..Default::default() }];
-        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone(), ..Default::default() }).unwrap()).unwrap();
-        assert_eq!(take(&path, 1000), windows);
+        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
+        assert_eq!(take(&path), windows);
     }
 
     #[test]

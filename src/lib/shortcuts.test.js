@@ -82,6 +82,9 @@ describe("shortcutFor", () => {
     expect(linux("Ctrl+Tab", { inTerminal: true })).toBe("nextTab");
     // Not with a dialog open.
     for (const keys of ["Cmd+w", "Cmd+t", "Cmd+n", "Ctrl+Tab"]) expect(mac(keys, { dialogOpen: true }), keys).toBeNull();
+    // Ctrl+W in a text field on Linux is the field's: a tab closing would lose what's written.
+    expect(linux("Ctrl+w", { inTextField: true })).toBeNull();
+    expect(mac("Cmd+w", { inTextField: true })).toBe("closeTab");
   });
 
   test("leaves everything else typed in a terminal to it", () => {
@@ -120,6 +123,11 @@ describe("shortcutFor", () => {
     expect(linux("Alt+ArrowRight")).toBe("forward");
     expect(mac("Alt+ArrowLeft", { inTextField: true })).toBeNull();
     expect(mac("ArrowLeft")).toBeNull();
+  });
+
+  test("leaves search and going back or forward alone under a dialog", () => {
+    expect(mac("Cmd+f", { dialogOpen: true })).toBeNull();
+    expect(mac("Alt+ArrowLeft", { dialogOpen: true })).toBeNull();
   });
 
   test("needs a repository open for what acts on one, and no dialog", () => {

@@ -7,7 +7,7 @@ import { settings } from "./settings.js";
 const terminals = () => import("./terminals.js");
 
 /**
- * The window's terminal panel, below the history and details: whether it's showing,
+ * The tab's terminal panel, below the history and details: whether it's showing,
  * opening tabs in it, and the notices that a terminal's program finished or needs you.
  * `overview` is the open repository's overview ref; `loadRepository(path)` opens
  * another, as for a notice from a terminal of a repository that isn't showing; `window`

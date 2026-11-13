@@ -1,7 +1,27 @@
 import { shallowRef } from "vue";
 
-// The form dialog and context menu are single overlays rendered once in App.vue.
-// Anything can open them; each returns a promise with the user's choice.
+// The window's dialogs and context menu: one of each, rendered in App.vue. Anything can
+// open them; each returns a promise with the user's choice.
+
+// Each dialog shown is numbered, and App.vue keys it by that, so the next, even of the
+// same kind, mounts afresh, taking the keys as its own focus says: otherwise a danger
+// question coming after another could open with the keys on its red button.
+let nextId = 1;
+
+// Shows `dialog` in `slot`, resolving to the user's choice. One it takes the place of is
+// settled as canceled (null), so what opened that doesn't wait for good.
+function show(slot, dialog) {
+  return new Promise((resolve) => {
+    slot.value?.resolve(null);
+    slot.value = { ...dialog, id: nextId++, resolve };
+  });
+}
+
+// Closes the dialog in `slot` with `value` as its choice.
+function settle(slot, value) {
+  slot.value?.resolve(value);
+  slot.value = null;
+}
 
 export const formDialog = shallowRef(null);
 
@@ -12,15 +32,10 @@ export const formDialog = shallowRef(null);
  * draft: a key for what's typed (see drafts.js): canceling keeps it for next time.
  */
 export function openForm({ title, message = "", fields = [], confirmLabel = "OK", danger = false, draft = null }) {
-  return new Promise((resolve) => {
-    formDialog.value = { title, message, fields, confirmLabel, danger, draft, resolve };
-  });
+  return show(formDialog, { title, message, fields, confirmLabel, danger, draft });
 }
 
-export function closeForm(values) {
-  formDialog.value?.resolve(values);
-  formDialog.value = null;
-}
+export const closeForm = (values) => settle(formDialog, values);
 
 export const contextMenu = shallowRef(null);
 
@@ -46,16 +61,9 @@ export const tagDialog = shallowRef(null);
  * Shows the Create New Tag dialog and resolves to { name, revision, message, push },
  * or null if canceled. options: { path, revision, branches, remoteBranches, tags, hasRemote }
  */
-export function openTagDialog(options) {
-  return new Promise((resolve) => {
-    tagDialog.value = { ...options, resolve };
-  });
-}
+export const openTagDialog = (options) => show(tagDialog, options);
 
-export function closeTagDialog(values) {
-  tagDialog.value?.resolve(values);
-  tagDialog.value = null;
-}
+export const closeTagDialog = (values) => settle(tagDialog, values);
 
 export const pullDialog = shallowRef(null);
 
@@ -63,16 +71,9 @@ export const pullDialog = shallowRef(null);
  * Shows the Pull dialog and resolves to { from, rebase, autostash }, or null if
  * canceled. options: { branch, from, remotes: [{ name, branches }], rebase, autostash }
  */
-export function openPullDialog(options) {
-  return new Promise((resolve) => {
-    pullDialog.value = { ...options, resolve };
-  });
-}
+export const openPullDialog = (options) => show(pullDialog, options);
 
-export function closePullDialog(values) {
-  pullDialog.value?.resolve(values);
-  pullDialog.value = null;
-}
+export const closePullDialog = (values) => settle(pullDialog, values);
 
 export const resetDialog = shallowRef(null);
 
@@ -81,16 +82,9 @@ export const resetDialog = shallowRef(null);
  * canceled. options: { path, revision, branch, checkedOut, current, upstream, branches, tags,
  * remoteBranches }: with checkedOut false, `branch` isn't checked out and only it moves.
  */
-export function openResetDialog(options) {
-  return new Promise((resolve) => {
-    resetDialog.value = { ...options, resolve };
-  });
-}
+export const openResetDialog = (options) => show(resetDialog, options);
 
-export function closeResetDialog(values) {
-  resetDialog.value?.resolve(values);
-  resetDialog.value = null;
-}
+export const closeResetDialog = (values) => settle(resetDialog, values);
 
 export const cloneDialog = shallowRef(null);
 
@@ -98,16 +92,9 @@ export const cloneDialog = shallowRef(null);
  * Shows the Clone dialog and resolves to { url, location }, or null if canceled.
  * options: { url, folder } — the URL to clone (may be empty) and the clone folder.
  */
-export function openCloneDialog(options) {
-  return new Promise((resolve) => {
-    cloneDialog.value = { ...options, resolve };
-  });
-}
+export const openCloneDialog = (options) => show(cloneDialog, options);
 
-export function closeCloneDialog(values) {
-  cloneDialog.value?.resolve(values);
-  cloneDialog.value = null;
-}
+export const closeCloneDialog = (values) => settle(cloneDialog, values);
 
 export const mergeDialog = shallowRef(null);
 
@@ -116,31 +103,27 @@ export const mergeDialog = shallowRef(null);
  * { branch, options }, or null if canceled.
  * options: { head, branch, branches, remoteBranches, tags, rebase }
  */
-export function openMergeDialog(options) {
-  return new Promise((resolve) => {
-    mergeDialog.value = { ...options, resolve };
-  });
-}
+export const openMergeDialog = (options) => show(mergeDialog, options);
 
-export function closeMergeDialog(values) {
-  mergeDialog.value?.resolve(values);
-  mergeDialog.value = null;
-}
+export const closeMergeDialog = (values) => settle(mergeDialog, values);
 
 export const confirmDialog = shallowRef(null);
 
 /**
  * Asks before doing something, resolving to true to go ahead. A blank line in
  * `message` starts a new paragraph. `danger` marks something that can't be undone:
- * the button turns red, and Enter cancels.
+ * the button turns red, and Enter cancels. One asked while another's showing, as from
+ * a tab behind it, waits its turn, rather than taking its place; with `first`, as for
+ * quitting, it goes before, and the other's asked again after.
  */
-export function askConfirm({ title, message, confirmLabel = "OK", danger = false, cancel = true }) {
+export function askConfirm({ title, message, confirmLabel = "OK", danger = false, cancel = true, first = false }) {
   return new Promise((resolve) => {
-    const dialog = { title, message, confirmLabel, danger, cancel, resolve };
-    // One asked while another's showing, as from a tab behind it, waits its turn, rather
-    // than taking its place and leaving what asked first waiting for good.
-    if (confirmDialog.value) waiting.push(dialog);
-    else confirmDialog.value = dialog;
+    const dialog = { title, message, confirmLabel, danger, cancel, id: nextId++, resolve };
+    if (!confirmDialog.value) confirmDialog.value = dialog;
+    else if (first) {
+      waiting.unshift(confirmDialog.value);
+      confirmDialog.value = dialog;
+    } else waiting.push(dialog);
   });
 }
 

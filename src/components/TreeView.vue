@@ -24,7 +24,7 @@ const props = defineProps({
   // A file to reveal and open, such as the one being searched for.
   reveal: { type: String, default: null },
 });
-// "file-opened" keeps the window told which file is open, so going Back can reopen
+// "file-opened" keeps the tab told which file is open, so going Back can reopen
 // it; "show-commit" asks to show a commit from the blame.
 const emit = defineEmits(["file-opened", "show-commit"]);
 

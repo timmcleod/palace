@@ -38,17 +38,20 @@ export function leftBy(tabs, tab) {
 }
 
 /**
- * What closing a tab would lose, said before it closes, or null for nothing: `edited`,
- * the names of its files with edits not saved, and `running`, the labels of its
- * terminals with something running in them.
+ * What each tab's called, by id: its repository's name, or with another tab's of the
+ * same name, as two clones of one repository, the folder it's in before it, to tell
+ * them apart; "New Tab" for one with none.
  */
-export function closingLoses({ edited, running }) {
-  const lines = [];
-  const quoted = (names) => names.map((name) => `“${name}”`);
-  if (edited.length) lines.push(`Edits to ${quoted(edited).join(", ")} aren't saved. Closing the tab loses them.`);
-  if (running.length === 1) lines.push(`${quoted(running)[0]} is still running. Closing the tab stops it.`);
-  else if (running.length) lines.push(`${running.length} terminals are still running: ${quoted(running).join(", ")}. Closing the tab stops them.`);
-  return lines.length ? lines.join("\n\n") : null;
+export function tabNames(list) {
+  const count = new Map();
+  for (const tab of list) if (tab.name) count.set(tab.name, (count.get(tab.name) ?? 0) + 1);
+  return new Map(
+    list.map((tab) => {
+      if (!tab.name) return [tab.id, "New Tab"];
+      const parent = tab.path?.split(/[\\/]/).filter(Boolean).at(-2);
+      return [tab.id, count.get(tab.name) > 1 && parent ? `${parent}/${tab.name}` : tab.name];
+    }),
+  );
 }
 
 /** The tab showing. */

@@ -57,9 +57,10 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
   // Other repositories' steps, kept for when they're open again: path → [undo, redo].
   const otherStacks = new Map();
 
-  // A step that stopped for conflicts, to undo as a whole once it's continued to the
-  // end: { path, step, before }.
-  let stopped = null;
+  // Each repository's step that stopped for conflicts, to undo as a whole once it's
+  // continued to the end: path → { path, step, before }. By repository, as the tab may
+  // show another meanwhile, and what's done there doesn't leave this one's behind.
+  const stopped = new Map();
 
   // The newest step, to tell whether something just added one.
   const newest = () => undoStack.value.at(-1);
@@ -70,9 +71,9 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
    * Continuing or skipping to the end of what stopped makes the whole of it one step.
    */
   function stepFor(command, args, label) {
-    const resumed =
-      command === "control_operation" && args.action !== "abort" && stopped?.path === overview.value.path ? stopped : null;
-    if (command === "control_operation" && !resumed) stopped = null;
+    const path = overview.value.path;
+    const resumed = command === "control_operation" && args.action !== "abort" ? (stopped.get(path) ?? null) : null;
+    if (command === "control_operation" && !resumed) stopped.delete(path);
     label = resumed?.step.label ?? label ?? UNDOABLE[command]?.(args);
     if (!label) return null;
     const mode = resumed?.step.mode ?? (command === "reset" && args.keepChanges ? "mixed" : "keep");
@@ -85,15 +86,17 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
    * commit, its message. cover is take_snapshot's: { files, changed, stash }.
    * step.resumed is a stopped step this finishes. step.resolving marks one that gets
    * what stopped for conflicts to where it can go on, as resolving or discarding files.
+   * `where` is the repository it runs in, the one open as it's asked by default: the
+   * step's kept with that one's, whichever is open by the time it's done.
    */
-  async function undoable({ cover, resumed, resolving, ...step }, work) {
+  async function undoable({ cover, resumed, resolving, ...step }, work, where = overview.value.path) {
+    const path = where;
     await settle();
-    const path = overview.value.path;
     // While an operation is under way, a step resolving it is part of what continuing
     // finishes as one step. Anything else leaves that behind, as a stash would, whose
     // undo the operation's would undo too; so does a step with nothing under way, as
     // for a stash applied, with nothing to continue.
-    if (!(resolving && overview.value.operation)) stopped = null;
+    if (!(resolving && overview.value?.operation)) stopped.delete(path);
     let reason = "";
     const snapshot = (cover) =>
       invoke("take_snapshot", { path, cover }).catch((e) => {
@@ -116,18 +119,18 @@ export function useUndo({ overview, run, busy, draft, settle, offer }) {
     try {
       result = await work();
     } catch (e) {
-      if (before && isError(e, CONFLICT)) stopped = { path, step: resumed?.step ?? step, before };
+      if (before && isError(e, CONFLICT)) stopped.set(path, { path, step: resumed?.step ?? step, before });
       throw e;
     }
     const after = before && (await snapshot({ files: before.files.map((f) => f.path) }));
     // A rebase that stopped again leaves HEAD detached, and is still to be finished.
     if (resumed && before.head_branch && !after?.head_branch) {
-      stopped = resumed;
+      stopped.set(path, resumed);
       return result;
     }
-    if (after && JSON.stringify(after) !== JSON.stringify(before) && path === overview.value?.path) {
-      undoStack.value = [...undoStack.value.slice(1 - MAX_UNDO), { ...step, before, after }];
-      redoStack.value = [];
+    if (after && JSON.stringify(after) !== JSON.stringify(before)) {
+      const steps = stepsOf(path);
+      steps.set([...steps.undo.slice(1 - MAX_UNDO), { ...step, before, after }], []);
     }
     return result;
   }

@@ -23,6 +23,7 @@ const NEW_WINDOW: &str = "new-window";
 const CLOSE_TAB: &str = "close-tab";
 /// Done here, not told.
 const CLOSE_WINDOW: &str = "close-window";
+const QUIT: &str = "quit";
 
 pub fn set(app: &AppHandle) -> tauri::Result<()> {
     let palace = Submenu::with_items(
@@ -39,7 +40,10 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::hide_others(app, None)?,
             &PredefinedMenuItem::show_all(app, None)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
+            // Palace's own, not the system's, which quits at once: with programs running in
+            // terminals or edits not saved, Palace asks first, and notes its windows to
+            // reopen (see quit.rs, reopen.rs).
+            &MenuItem::with_id(app, QUIT, "Quit Palace", true, Some("CmdOrCtrl+Q"))?,
         ],
     )?;
     let file = Submenu::with_items(
@@ -92,6 +96,9 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
             && let Some(window) = focused_window(app)
         {
             let _ = window.close();
+        } else if id == QUIT && !crate::quit::hold(app, None) {
+            crate::reopen::remember(app, crate::reopen::Why::Quit);
+            app.exit(0);
         }
     });
     Ok(())

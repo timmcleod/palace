@@ -71,7 +71,7 @@ import { cloneFolder, rememberCloneFolder } from "../lib/clone.js";
 import { forgetAvatars, loadAvatars } from "../lib/avatars.js";
 import { provideActive } from "../lib/activeWorkspace.js";
 import { dragEdge } from "../lib/resize.js";
-import { useShortcuts } from "../lib/shortcuts.js";
+import { inTextField, useShortcuts } from "../lib/shortcuts.js";
 import { useTerminalPanel } from "../lib/terminalPanel.js";
 import { useRepository } from "../lib/repository.js";
 import { useAppMenu } from "../lib/appMenu.js";
@@ -88,17 +88,18 @@ import { afterResolving } from "../lib/conflictText.js";
 // What a tab shows: a repository, its views, and the state they share (what's selected,
 // the commit message being written), with the wiring between them; or with none open,
 // the welcome screen, to open one. What's the window's own, whatever its tabs show, is
-// App.vue's. Like App.vue was, it should stay wiring: when a piece of it
-// grows logic of its own, that logic moves to src/lib/.
+// App.vue's. It should stay wiring: when a piece of it grows logic of its own, that
+// logic moves to src/lib/.
 
 const props = defineProps({
   // The repository it opens as it starts, or null to choose one on the welcome screen;
   // and what that one's agent is to start on, as for a worktree made for a task.
   opens: { type: String, default: null },
   task: { type: String, default: null },
-  // Whether it's the first of the first window at startup, which takes the recent
-  // repositories that have gone off the list.
-  tidyRecents: { type: Boolean, default: false },
+  // Whether it's the first tab of the first window at startup, which takes the recent
+  // repositories that have gone off the list, and says if the saved settings couldn't
+  // be read: once, rather than in every tab.
+  first: { type: Boolean, default: false },
   // Shows the repository at `path` where it's open already, in another of the window's
   // tabs or another window, and says whether it is (see App.vue); without it, another
   // window only (see repository.js).
@@ -504,7 +505,6 @@ function focusToolbarSearch() {
   return !!input;
 }
 
-const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
 // Any dialog, the window's or this tab's own (see overlayOpen).
 const dialogOpen = overlayOpen;
 
@@ -618,7 +618,7 @@ function refreshAndFetch() {
   if (overview.value?.remotes.length && !remoteBusy.value) runRemote("fetch");
 }
 
-// Branches that lose commits outside this window, as to an agent's `git reset --hard`,
+// Branches that lose commits outside this tab, as to an agent's `git reset --hard`,
 // are said to have, with a way to have them back: see lostCommits.js.
 useLostCommits({
   overview,
@@ -842,7 +842,7 @@ async function switchTo(key, kind, name) {
   }
 }
 
-// --- Windows and live refresh ------------------------------------------------------
+// --- The window, and live refresh -------------------------------------------------
 
 // Live refresh: the backend watches the open repository and reports changes made
 // anywhere, such as saving a file in an editor or committing from a terminal.
@@ -852,13 +852,13 @@ watch(
     if (previous) letGo(previous);
     showTitle();
     if (!path) return;
-    invoke("watch_repo", { path }).catch(() => {});
+    watching.set(path, invoke("watch_repo", { path }).catch(() => {}));
     loadAvatars(path);
   },
 );
 
 // The window's title names the repository showing, to tell windows apart when switching
-// between them: this one's, while it's the workspace showing.
+// between them: this tab's, while it's the one showing.
 function showTitle() {
   if (!props.active) return;
   const path = overview.value?.path;
@@ -874,16 +874,29 @@ watch(
   (shown) => emit("shows", shown && { path: shown[0], name: shown[1], branch: shown[2] }),
 );
 
-// Coming to show, it takes the recent repositories opened in another tab meanwhile.
-watch(active, (now) => now && (recents.value = recentRepositories()));
+// Coming to show, its repository goes to the top of the recent ones, as the last
+// opened, so the list follows the tabs looked at, not the order they happened to open
+// or refresh in; and it takes those opened in another tab meanwhile.
+watch(active, (now) => {
+  if (!now) return;
+  if (overview.value) rememberRepository(overview.value);
+  recents.value = recentRepositories();
+});
 
 // A repository no longer shown: the backend stops watching it and lets go of its
 // history, and its authors' pictures aren't asked for again.
 function letGo(path) {
   if (props.shownElsewhere(path)) return;
-  invoke("release_repo", { path }).catch(() => {});
+  // Once it's been watched, as letting go first would leave the watcher, set up after,
+  // watching for nobody.
+  const watched = watching.get(path) ?? Promise.resolve();
+  watching.delete(path);
+  watched.then(() => invoke("release_repo", { path }).catch(() => {}));
   forgetAvatars(path);
 }
+
+// Each repository being watched, by path: done once the backend's watching it.
+const watching = new Map();
 
 // Gone, as its tab closes, the backend lets go of the repository it showed too, and what
 // it was fetching, pulling or pushing stops, with nothing left to show how it went.
@@ -1067,7 +1080,7 @@ async function clearReview() {
 // --- Opening and refreshing repositories -------------------------------------------
 
 // Opening the repository, and refreshing it as it changes: see repository.js. What's
-// here is what the window does around it.
+// here is what the tab does around it.
 const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
   overview,
   loading,
@@ -1077,6 +1090,9 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
   // Another repository: its views start afresh, and the commit message and undo steps
   // being written for the one before wait for it to come back.
   onSwitch(data) {
+    // What the status card offers, as Undo, is for the repository before: it goes, but
+    // for an operation still running, which says how it went when it's done.
+    if (!remoteBusy.value) dismissStatus();
     selected.value = headHistoryKey(data);
     historyRef.value = null;
     selectedCommit.value = null;
@@ -1091,9 +1107,9 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     comparison.value = null;
     forgetPlaces();
     if (overview.value && (draft.subject || draft.body || draft.amend)) otherDrafts.set(overview.value.path, { ...draft });
-    Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data.path));
-    otherDrafts.delete(data.path);
-    switchRepository(overview.value?.path, data.path);
+    Object.assign(draft, { subject: "", body: "", amend: false, saved: null }, otherDrafts.get(data?.path));
+    otherDrafts.delete(data?.path);
+    switchRepository(overview.value?.path, data?.path);
   },
   onLoaded(data, { quiet }) {
     // A repository open, Settings from the welcome screen is done with.
@@ -1213,7 +1229,7 @@ async function start() {
   if (!overview.value) emit("shows", null);
   // Repositories deleted since Palace last ran are taken off the list, once, without
   // holding up what's opened.
-  if (props.tidyRecents) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
+  if (props.first) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
   // Opened for a task (New Agent Task): its agent starts on it, or, with the worktree not
   // open after all, the task's given back, so it isn't lost.
   if (props.task && overview.value) startTask(props.task);
@@ -1221,14 +1237,27 @@ async function start() {
   starting.value = false;
 }
 
-// Done once it's started, whether it opened anything or not.
+// Done once it's started, whether it opened anything or not. A tab behind the one
+// showing, as tabs reopen as Palace starts, starts as it's first shown: not all at once,
+// each loading its repository, watching it and fetching in the background.
 let started;
-onMounted(() => (started = start()));
+onMounted(() => (started = firstShown().then(() => !gone && start())));
+
+function firstShown() {
+  if (props.active) return Promise.resolve();
+  return new Promise((resolve) => {
+    const stop = watch(active, (now) => {
+      if (!now) return;
+      stop();
+      resolve();
+    });
+  });
+}
 
 // Saved settings that couldn't be read are left alone until a restart, rather than
 // replaced by whatever's changed meanwhile.
 onMounted(() => {
-  if (!storeProblem) return;
+  if (!storeProblem || !props.first) return;
   const op = showStatus({
     title: "Couldn't read your saved settings",
     state: "failed",

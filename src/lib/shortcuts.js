@@ -12,7 +12,9 @@ import { isMac } from "./platform.js";
  *                     closeTab, Cmd+W, closes the tab showing; showTab, Cmd+1 to Cmd+9,
  *                     shows that tab, Cmd+9 the last. On a Mac from a terminal too, where
  *                     Cmd keys are Palace's, while on Linux, Ctrl+T, Ctrl+N, Ctrl+W and
- *                     the rest are the shell's there. On a Mac, the menu's items take the
+ *                     the rest are the shell's there; and Ctrl+W in a text field is left
+ *                     to it, as it deletes a word in some, rather than closing the tab and
+ *                     what's being written with it. On a Mac, the menu's items take the
  *                     first three before the page sees them (see menu.rs).
  *   nextTab,          Ctrl+Tab and Ctrl+Shift+Tab, from anywhere, as in a browser, and on
  *   previousTab       a Mac, Cmd+Shift+] and Cmd+Shift+[ too.
@@ -44,7 +46,7 @@ export function shortcutFor(event, where, mac = isMac) {
   const palaces = (mac || !inTerminal) && !dialogOpen;
   if (alone && event.code === "KeyT" && palaces) return "newTab";
   if (alone && key === "n" && palaces) return "newWindow";
-  if (alone && key === "w" && palaces) return "closeTab";
+  if (alone && key === "w" && palaces && (mac || !inTextField)) return "closeTab";
   if (alone && /^Digit[1-9]$/.test(event.code) && palaces) return "showTab";
   const tab = event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab";
   const bracket = mac && event.metaKey && event.shiftKey && !event.altKey && (event.code === "BracketRight" || event.code === "BracketLeft");
@@ -60,13 +62,16 @@ export function shortcutFor(event, where, mac = isMac) {
   if (alone && key === "p" && repository && !dialogOpen) return "findFile";
   if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !inTextField && !dialogOpen) return "search";
   if (inEditor) return null;
-  if (alone && key === "f") return "search";
+  if (alone && key === "f" && !dialogOpen) return "search";
   if (alone && key === "," && repository && !dialogOpen) return "settings";
-  if (event.altKey && !inTextField && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+  if (event.altKey && !inTextField && !dialogOpen && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
     return event.key === "ArrowLeft" ? "back" : "forward";
   }
   return null;
 }
+
+/** Whether a key pressed at `target` goes into a text field, which keeps some keys. */
+export const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
 
 /**
  * Listens for the shortcuts in the window while the component calling it is mounted.

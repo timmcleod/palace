@@ -4,9 +4,9 @@ import { untakenName } from "./names.js";
 
 // Commits a branch has lost outside this window: moved back, as by `git reset --hard` in
 // a terminal, or deleted, leaving commits that nothing else has. Git keeps them only for
-// a while, in its reflog, so the window says so as soon as it sees it, with a way to have
+// a while, in its reflog, so the tab says so as soon as it sees it, with a way to have
 // them back as a branch. A rewrite (amend, rebase) isn't counted, as what the old
-// commits held lives on (see lost.rs), nor what this window's own operations do, which
+// commits held lives on (see lost.rs), nor what this tab's own operations do, which
 // can be undone. Nor, so as not to take its doing for another's, what happens while one
 // of them runs.
 
@@ -23,7 +23,7 @@ export function branchChanges(before, after) {
 
 const commits = (count) => (count === 1 ? "a commit" : `${count >= 1000 ? "a thousand or more" : count} commits`);
 
-/** What the window says about `lost`, each { name, new, count }: { title, message }. */
+/** What the tab says about `lost`, each { name, new, count }: { title, message }. */
 export function describeLost(lost) {
   const [one] = lost;
   const title =
@@ -37,7 +37,7 @@ export function describeLost(lost) {
     title,
     message: [
       ...lines,
-      "This wasn't done in this window: an agent, a command in a terminal, or another Palace tab or window may have done it. Git keeps lost commits for a while; restored as a branch, they're kept.",
+      "This wasn't done in this tab: an agent, a command in a terminal, or another Palace tab or window may have done it. Git keeps lost commits for a while; restored as a branch, they're kept.",
     ].join("\n"),
   };
 }
@@ -46,14 +46,14 @@ export function describeLost(lost) {
 export const restoredName = (name, taken) => untakenName(`${name}-restored`, taken);
 
 /**
- * Watches the window's repository for branches losing commits, outside it. `overview` is
+ * Watches the tab's repository for branches losing commits, outside it. `overview` is
  * its overview ref, each with `readAt`, and `loadsStarted()` how many reads have started
- * (see repository.js); `busy()` whether an operation of the window's is running;
+ * (see repository.js); `busy()` whether an operation of the tab's is running;
  * `show(card)` puts a card in the status area (see statusCard.js); and `run(titles,
  * command, args)` runs a git operation (see gitRun.js), here to restore them.
  */
 export function useLostCommits({ overview, loadsStarted, busy, show, run }) {
-  // Overviews read while an operation of the window's ran, or before it ended, aren't
+  // Overviews read while an operation of the tab's ran, or before it ended, aren't
   // compared: the one read after is, with the next, so what the operation did is never
   // taken for a loss. By when they were read, not when they came: a slow one can come
   // after the operation's done.

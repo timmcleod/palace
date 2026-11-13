@@ -152,9 +152,12 @@ async function switchTo(name) {
 
 let app;
 let errors;
-afterEach(() => {
+afterEach(async () => {
   app?.unmount();
   document.body.replaceChildren();
+  // A question a test left unanswered would otherwise keep the next test's waiting.
+  const { closeConfirm, confirmDialog } = await import("./lib/overlays.js");
+  while (confirmDialog.value) closeConfirm(false);
 });
 
 // Starts the window as main.js does, and waits for it to show the repository it opens.
@@ -188,7 +191,7 @@ test("the window hangs up the terminals its page had before a reload, once", asy
   expect(calls("terminal_close_all")).toHaveLength(1);
 });
 
-test("a workspace that isn't the one showing leaves the window's title and keys alone, until it shows", async () => {
+test("a tab behind the one showing waits to open its repository until it's first shown", async () => {
   const { loadStore } = await import("./lib/storage.js");
   await loadStore();
   const { default: Workspace } = await import("./components/Workspace.vue");
@@ -197,7 +200,28 @@ test("a workspace that isn't the one showing leaves the window's title and keys 
   const root = document.createElement("div");
   document.body.append(root);
   app.mount(root);
+  await settle();
+  expect(calls("repo_overview")).toEqual([]);
+  expect(calls("watch_repo")).toEqual([]);
+
+  showing.value = true;
   await until(() => !!root.querySelector(".repo-name")?.textContent.includes("palace"));
+  expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
+});
+
+test("a workspace that isn't the one showing leaves the window's title and keys alone, until it shows again", async () => {
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: Workspace } = await import("./components/Workspace.vue");
+  const showing = ref(true);
+  app = createApp({ render: () => h(Workspace, { opens: PALACE, active: showing.value }) });
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => !!root.querySelector(".repo-name")?.textContent.includes("palace"));
+  showing.value = false;
+  await settle();
+  window.setTitle.mockClear();
 
   document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "r", metaKey: isMac, ctrlKey: !isMac, bubbles: true }));
   await settle();
@@ -532,8 +556,9 @@ test("a repository open in another window brings that forward, rather than openi
   await until(() => !!showing().querySelector(".recent"));
   [...showing().querySelectorAll(".recent")].find((el) => el.textContent.includes("other")).click();
   await until(() => calls("show_window_with").some((args) => args.path === OTHER));
-  await settle();
-  expect(tabNames()).toEqual(["palace", "New Tab"]);
+  // The tab opened to choose it in has done that, and goes.
+  await until(() => !document.querySelector(".tab-strip"));
+  expect(showing().querySelector(".repo-name").textContent).toContain("palace");
 });
 
 test("a worktree removed that's the window's last tab closes the window, asked already", async () => {
@@ -678,4 +703,29 @@ test("a tab letting go of a repository another tab shows leaves it watched for t
   app = null;
   await settle();
   expect(calls("release_repo")).toEqual([]);
+});
+
+test("a dangerous question coming after another opens with the keys on Cancel, not on going ahead", async () => {
+  await start();
+  const { askConfirm, tell } = await import("./lib/overlays.js");
+  tell("Done", "Something's done.");
+  askConfirm({ title: "Delete Branch?", message: "", confirmLabel: "Delete", danger: true });
+  await until(confirmShown);
+  button("OK").click();
+  await until(() => shown("Delete Branch?"));
+  await settle();
+  expect(document.activeElement?.textContent.trim()).toBe("Cancel");
+  button("Cancel").click();
+});
+
+test("switching repository in a tab takes away the card of what was done in the one before, with its buttons", async () => {
+  answers.fetch = async () => {
+    throw "Couldn't reach origin";
+  };
+  await start();
+  document.querySelector(".toolbar.actions .icon-button").click();
+  await until(() => shown("Fetch failed"));
+  await switchTo("other");
+  await settle();
+  expect(shown("Fetch failed")).toBe(false);
 });

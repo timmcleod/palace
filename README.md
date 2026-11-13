@@ -44,7 +44,7 @@ When your agent writes the code, your job changes: less typing, more steering, r
 - **GitHub:** sign in to see the repository's issues and pull requests in the sidebar: filter, comment, label, create pull requests and merge them. Clone your repositories, create new ones and manage SSH keys.
 - **Real Git underneath:** Palace runs your own `git` for every change, so your hooks, commit signing, SSH agent, credential helpers and `.gitconfig` work exactly as they do in a terminal.
 
-Palace updates itself when a new release comes out, and reopens your windows as they were. See the [website](https://timmcleod.github.io/palace/) for a tour.
+Palace updates itself when a new release comes out, and whenever it starts, reopens your windows and their tabs as they were. See the [website](https://timmcleod.github.io/palace/) for a tour.
 
 ## Install
 

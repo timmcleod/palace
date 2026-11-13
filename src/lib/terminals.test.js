@@ -3,7 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 // terminals.js reaches for the window, the clipboard and notifications as it loads, so
 // they're all stood in for, though only invoke is used here.
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {
+    onmessage = null;
+  },
+}));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({ getCurrentWebviewWindow: () => ({ label: "main" }) }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ setTheme: async () => {} }) }));
@@ -15,7 +20,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-const { busyIn, closeTerminalsOf, missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor, terminals, typePaths } = await import("./terminals.js");
+const { busyIn, closeTerminalsOf, missingAgent, removeTab, repositoryStates, sendToAgent, startAgentOn, startTab, tabsFor, terminals, typePaths } = await import("./terminals.js");
 const { nextTick } = await import("vue");
 
 beforeEach(() => vi.mocked(invoke).mockReset());
@@ -125,4 +130,25 @@ test("closing a repository's tab in the window says which of its terminals are b
   expect(terminals["/closing"]).toBeUndefined();
   const hungUp = vi.mocked(invoke).mock.calls.filter(([command]) => command === "terminal_close").map(([, args]) => args.id);
   expect(hungUp).toEqual([41, 42]);
+});
+
+test("a shell whose tab closed while it started is hung up as soon as it has one", async () => {
+  let opened;
+  vi.mocked(invoke).mockImplementation((command) => (command === "terminal_open" ? new Promise((resolve) => (opened = resolve)) : Promise.resolve(null)));
+  const session = { term: { open: vi.fn(), write: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24 }, el: { isConnected: false, remove: vi.fn() }, typed: [], command: "npm run dev", folder: "" };
+  const tab = { key: 77, kind: "shell", session };
+  tabsFor("/starting").tabs.push(tab);
+  const starting = startTab("/starting", tab);
+  removeTab("/starting", tab);
+  opened(31);
+  await starting;
+  expect(invoke).toHaveBeenCalledWith("terminal_close", { id: 31 });
+  // Nothing typed into it after.
+  expect(invoke).not.toHaveBeenCalledWith("terminal_write", expect.anything());
+});
+
+test("an agent no longer wanted, as its tab's closed while it was looked for, isn't started", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => (command === "program_available" ? true : null));
+  expect(await startAgentOn("/unwanted", "Fix it", { wanted: () => false })).toBeNull();
+  expect(tabsFor("/unwanted").tabs).toEqual([]);
 });

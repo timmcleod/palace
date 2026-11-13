@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { activeTab, closeTab, closingLoses, dropPlace, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabWith, tabsForBackend } from "./tabs.js";
+import { activeTab, closeTab, dropPlace, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabNames, tabWith, tabsForBackend } from "./tabs.js";
 
 // Tabs with the repositories at `paths` open, the first showing.
 function tabsOf(...paths) {
@@ -110,10 +110,14 @@ test("a tab remembers every repository it's shown, and closing it leaves those a
   expect(first).toMatchObject({ path: null, name: null, branch: null });
 });
 
-test("what closing a tab would lose is said, one or many, or nothing", () => {
-  expect(closingLoses({ edited: [], running: [] })).toBeNull();
-  expect(closingLoses({ edited: ["a.txt", "b.txt"], running: ["npm run dev"] })).toBe(
-    "Edits to “a.txt”, “b.txt” aren't saved. Closing the tab loses them.\n\n“npm run dev” is still running. Closing the tab stops it.",
-  );
-  expect(closingLoses({ edited: [], running: ["Claude", "zsh"] })).toBe("2 terminals are still running: “Claude”, “zsh”. Closing the tab stops them.");
+test("tabs are named for their repositories, with the folder they're in where two share a name", () => {
+  const tabs = tabsOf("/code/palace", "/work/palace", "/code/shop");
+  const [code, work, shop] = tabs.list;
+  const empty = openTab(tabs);
+  const names = tabNames(tabs.list);
+  expect([code, work, shop, empty].map((tab) => names.get(tab.id))).toEqual(["code/palace", "work/palace", "shop", "New Tab"]);
+  closeTab(tabs, work.id);
+  expect(tabNames(tabs.list).get(code.id)).toBe("palace");
+  expect(tabNames(tabs.list).get(shop.id)).toBe("shop");
+  expect(tabNames(tabs.list).get(empty.id)).toBe("New Tab");
 });

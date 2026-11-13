@@ -25,7 +25,7 @@ const props = defineProps({
   undoable: { type: Function, default: (step, work) => work() },
   // The GitHub repository ({ owner, repo }) whose issues "#" suggests, or null.
   issueRepo: { type: Object, default: null },
-  // The changed files as the window's last refresh read them, or null when it didn't:
+  // The changed files as the tab's last refresh read them, or null when it didn't:
   // then they're read here.
   statusFiles: { type: Array, default: null },
 });
@@ -54,7 +54,7 @@ function show(result) {
   emit("select", result.find((f) => f.path === props.selectedPath) ?? null);
 }
 
-// The window's refresh brings the files while this is showing, reading the status once
+// The tab's refresh brings the files while this is showing, reading the status once
 // for both; they're read here only when it hasn't, as when this has just opened.
 async function load() {
   if (props.statusFiles) return;
@@ -83,7 +83,7 @@ watch(
 );
 watch([() => props.path, () => props.refreshKey], load, { immediate: true });
 
-// Runs a git operation, then has the whole window refresh. With `step`, it can be
+// Runs a git operation, then has the whole tab refresh. With `step`, it can be
 // undone (see undoable).
 async function run(command, args, step) {
   busy.value = true;

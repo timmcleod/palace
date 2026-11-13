@@ -42,10 +42,11 @@ function actionsOn(parts = {}, { fails = {}, agentReady = async () => true } = {
   const run = vi.fn(async (_titles, command) => fails[command] ?? null);
   const openWorktree = vi.fn();
   const compare = vi.fn();
-  const actions = useGitActions({ overview: ref(repo(parts)), run, compare, openWorktree, agentReady, pullRequest: { available: () => false } });
+  const overview = ref(repo(parts));
+  const actions = useGitActions({ overview, run, compare, openWorktree, agentReady, pullRequest: { available: () => false } });
   // Each command run, as [command, args].
   const ran = () => run.mock.calls.map(([, command, args]) => [command, args]);
-  return { actions, run, ran, openWorktree, compare };
+  return { actions, run, ran, openWorktree, compare, overview };
 }
 
 // A menu's items by label, leaving out what it doesn't show.
@@ -134,6 +135,18 @@ describe("deleting a branch", () => {
     const again = actionsOn(parts, { fails: { delete_branch: "error: the branch 'feature' is not fully merged" } });
     await item(again.actions.branchMenu("feature"), "Delete…").action();
     expect(again.ran().at(-1)).toEqual(["delete_branch", { name: "feature", force: true }]);
+  });
+
+  test("doesn't force it once another repository's opened in the tab while it asked", async () => {
+    const { actions, ran, overview } = actionsOn(parts, { fails: { delete_branch: "error: the branch 'feature' is not fully merged" } });
+    vi.mocked(askConfirm)
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(async () => {
+        overview.value = { ...overview.value, path: "/code/other" };
+        return true;
+      });
+    await item(actions.branchMenu("feature"), "Delete…").action();
+    expect(ran()).toEqual([["delete_branch", { name: "feature", force: false }]]);
   });
 
   test("does nothing when canceled", async () => {

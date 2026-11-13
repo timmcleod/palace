@@ -220,3 +220,31 @@ test("undoing while the repository's switched for another moves the step among i
   await redoing;
   expect(undo.newest().label).toBe("Commit");
 });
+
+test("a step done once another repository's opened is kept with its own repository's", async () => {
+  const { undo, overview } = setUp();
+  const work = async () => {
+    undo.switchRepository("/repo", "/other");
+    overview.value = { path: "/other" };
+    return "";
+  };
+  await undo.undoable({ label: "Pull", mode: "keep" }, work);
+  expect(undo.newest()).toBeUndefined();
+  undo.switchRepository("/other", "/repo");
+  overview.value = { path: "/repo" };
+  expect(undo.newest().label).toBe("Pull");
+});
+
+test("a step stopped for conflicts is each repository's own: what's done in another doesn't leave it behind", async () => {
+  const { undo, overview } = setUp();
+  const conflicts = async () => {
+    throw "CONFLICT: stopped";
+  };
+  await undo.undoable({ label: "Rebase", mode: "keep" }, conflicts).catch(() => {});
+  undo.switchRepository("/repo", "/other");
+  overview.value = { path: "/other" };
+  await undo.undoable({ label: "Commit", mode: "keep" }, async () => "");
+  undo.switchRepository("/other", "/repo");
+  overview.value = { path: "/repo", operation: "rebase" };
+  expect(undo.stepFor("control_operation", { action: "continue" })?.label).toBe("Rebase");
+});

@@ -118,7 +118,7 @@ pub fn quit_confirmed(app: AppHandle, window: WebviewWindow, quitting: bool) {
         CONFIRMED.store(true, Ordering::Relaxed);
         app.exit(0);
     } else {
-        crate::reopen::remember_if_last(&app);
+        crate::reopen::closing(&app, window.label());
         let _ = window.destroy();
     }
 }

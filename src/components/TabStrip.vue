@@ -1,10 +1,10 @@
 <script setup>
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import Spinner from "./Spinner.vue";
 import { shortcut } from "../lib/platform.js";
 import { pointerDrag } from "../lib/rowDrag.js";
-import { dropPlace } from "../lib/tabs.js";
+import { dropPlace, tabNames } from "../lib/tabs.js";
 
 // The window's tabs, across its top (see tabs.js): each a card naming its repository,
 // with the branch checked out there and what its agents are doing below, as Worktrees
@@ -23,6 +23,8 @@ const emit = defineEmits(["select", "close", "new", "move"]);
 const STATUS = { working: "agent working", blocked: "needs you", done: "finished", error: "stopped with an error" };
 const SAYS = { working: "Its agent is working", blocked: "Its agent needs you", done: "Its agent has finished", error: "Its agent stopped with an error" };
 const agentOf = (tab) => (tab.path ? props.agents[tab.path] : null);
+// Each tab's name, with the folder it's in where two share one (see tabNames).
+const names = computed(() => tabNames(props.tabs));
 const titleOf = (tab) => [tab.path ?? "Choose a repository to open", agentOf(tab) && SAYS[agentOf(tab)]].filter(Boolean).join("\n");
 const detailOf = (tab) => [tab.branch, STATUS[agentOf(tab)]].filter(Boolean).join(" · ");
 
@@ -41,7 +43,7 @@ const dropAt = ref(null);
 const drag = pointerDrag({
   image({ data: tab }) {
     const image = document.createElement("div");
-    image.textContent = tab.name ?? "New Tab";
+    image.textContent = names.value.get(tab.id);
     return image;
   },
   start: ({ data: tab }) => (dragging.value = tab.id),
@@ -121,7 +123,7 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
           <span v-else class="dot" :class="agentOf(tab)" />
         </span>
         <span class="text">
-          <span class="name">{{ tab.name ?? "New Tab" }}</span>
+          <span class="name">{{ names.get(tab.id) }}</span>
           <span v-if="detailOf(tab)" class="detail">{{ detailOf(tab) }}</span>
         </span>
         <button class="close icon-button small" :title="`Close Tab (${shortcut('Ctrl+W')})`" aria-label="Close Tab" @click.stop="emit('close', tab.id)">
@@ -141,7 +143,8 @@ const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? 
   flex-shrink: 0;
   align-items: center;
   gap: 4px;
-  height: 48px;
+  /* See styles.css, where what's below it makes room for it. */
+  height: var(--tab-row-height);
   box-sizing: border-box;
   padding: 0 10px;
   border-bottom: 1px solid var(--border);

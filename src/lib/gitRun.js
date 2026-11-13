@@ -17,8 +17,8 @@ const NETWORK = new Set([
 ]);
 
 /**
- * Running the window's git operations, one at a time, each shown in the status card.
- * What it needs from the window, Workspace.vue:
+ * Running the tab's git operations, one at a time, each shown in the status card.
+ * What it needs from the tab, Workspace.vue:
  *   overview             the open repository's overview ref
  *   status               the status card (see statusCard.js)
  *   undo                 { stepFor, newest, undoable, undo } (see undo.js)
@@ -54,7 +54,7 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
       // Only what's done in the open repository can be undone.
       const step = path ? null : undo.stepFor(command, args, undoLabel);
       const newestBefore = undo.newest();
-      const message = await (step ? undo.undoable(step, work) : work());
+      const message = await (step ? undo.undoable(step, work, where) : work());
       // Undo is offered for what it did, while its repository's still the open one: after
       // another's opened, undo would undo that one's newest step.
       if (overview.value?.path === where && undo.newest() !== newestBefore) op.actions = [{ label: "Undo", run: undo.undo }];
@@ -92,7 +92,8 @@ export function useGitRun({ overview, status, undo, stopBackgroundFetch, refresh
         // A push rejected because the remote has commits this branch doesn't is usually
         // fixed by pulling them in. If the branch was rewritten (amend, rebase) instead,
         // force pushing publishes it.
-        if (command === "push") {
+        // Not once another repository's open, which they'd run in.
+        if (command === "push" && overview.value?.path === where) {
           const fetchFirst = message.includes("(fetch first)");
           const nonFastForward = message.includes("non-fast-forward");
           if (fetchFirst || nonFastForward) {

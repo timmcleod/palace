@@ -133,12 +133,19 @@ describe("watching for lost commits", () => {
 
   test("checks each change in turn, so a loss isn't missed for the next", async () => {
     // The backend slow to answer: the second change comes while the first's checked.
-    vi.mocked(invoke).mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(2), 5)));
+    // Each answer's given in turn, rather than after a wait, which the whole suite
+    // running at once could outlast.
+    const asked = [];
+    vi.mocked(invoke).mockImplementation(() => new Promise((resolve) => asked.push(resolve)));
     const { refresh, show } = watching([branch("main", "c3"), branch("spike", "s2")]);
     refresh([branch("main", "c1"), branch("spike", "s2")]);
     await settle();
     refresh([branch("main", "c1")]);
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await settle();
+    for (let i = 0; i < 10 && asked.length; i++) {
+      asked.shift()(2);
+      await settle();
+    }
     expect(show.mock.calls.map(([card]) => card.title)).toEqual([
       "“main” moved back, leaving 2 commits on no branch",
       "“spike” was deleted, with 2 commits on no other branch",

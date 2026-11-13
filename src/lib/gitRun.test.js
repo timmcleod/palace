@@ -112,11 +112,35 @@ describe("undo", () => {
     const run = runner({ step });
     await run.runGit(TITLES, "merge", { branch: "next" }, { undo: "Merge next" });
     expect(run.undo.stepFor).toHaveBeenCalledWith("merge", { branch: "next" }, "Merge next");
-    expect(run.undo.undoable).toHaveBeenCalledWith(step, expect.any(Function));
+    expect(run.undo.undoable).toHaveBeenCalledWith(step, expect.any(Function), "/repo");
     const [undoAction] = run.card.value.actions;
     expect(undoAction.label).toBe("Undo");
     undoAction.run();
     expect(run.undo.undo).toHaveBeenCalled();
+  });
+
+  test("once another repository's opened while it ran, offers nothing for it, and says where it ran", async () => {
+    const step = { label: "Merge" };
+    const run = runner({ step });
+    run.undo.undoable.mockImplementationOnce(async (_step, work) => {
+      const result = await work();
+      run.overview.value = { path: "/other", head: { branch: "main" } };
+      return result;
+    });
+    await run.runGit(TITLES, "merge", { branch: "next" });
+    expect(run.card.value.actions).toBeUndefined();
+    expect(run.onDone).toHaveBeenCalledWith(run.card.value, "merge", { branch: "next" }, "/repo");
+  });
+
+  test("a push rejected once another repository's opened offers no pull or force push, which would run there", async () => {
+    const run = runner();
+    vi.mocked(invoke).mockImplementationOnce(async () => {
+      run.overview.value = { path: "/other", head: { branch: "main" } };
+      throw "Updates were rejected (non-fast-forward)";
+    });
+    await run.runGit(TITLES, "push");
+    expect(run.card.value.state).toBe("failed");
+    expect(run.card.value.actions).toBeUndefined();
   });
 
   test("offers nothing to undo for what can't be, nor for what's run elsewhere", async () => {

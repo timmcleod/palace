@@ -275,21 +275,26 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
-            // Quitting (Cmd+Q, or the last window closing), or closing a window, with
-            // programs running in terminals or edits not saved asks first; see quit.rs.
-            // Not when Palace quits itself, as to restart into an update, which gives a
-            // code.
+            // Quitting, or closing a window, with programs running in terminals or edits
+            // not saved asks first; see quit.rs. On a Mac, Quit is Palace's own menu item,
+            // which asks as this does (see menu.rs). Not when Palace quits itself, as to
+            // restart into an update, which gives a code.
             tauri::RunEvent::ExitRequested { code: None, api, .. } if quit::hold(app, None) => api.prevent_exit(),
-            // Quitting after all: its windows are noted, to reopen as it next starts.
-            tauri::RunEvent::ExitRequested { .. } => reopen::remember(app, reopen::Why::Quit),
+            // Quitting after all: its windows are noted, to reopen as it next starts. And as
+            // it ends, as when the system quits it, at logout, or from the Dock, without
+            // asking first.
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => reopen::remember(app, reopen::Why::Quit),
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. }
                 if quit::hold(app, Some(&label)) =>
             {
                 api.prevent_close()
             }
-            // The last window, closing, is noted too: Palace quits with it.
-            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. } => reopen::remember_if_last(app),
-            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => windows::forget(app, &label),
+            // Closing: once every window is, they're noted, as Palace quits with them.
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { .. }, .. } => reopen::closing(app, &label),
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
+                reopen::closed(&label);
+                windows::forget(app, &label)
+            }
             _ => {}
         });
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { askConfirm, closeConfirm, confirmDialog, overlayOpen } from "./overlays.js";
+import { askConfirm, closeConfirm, closeForm, confirmDialog, formDialog, openForm, overlayOpen } from "./overlays.js";
 
 afterEach(() => {
   while (confirmDialog.value) closeConfirm(false);
@@ -27,4 +27,24 @@ test("a dialog's open while one shows, the window's or a tab's own, but not a hi
   document.body.innerHTML = "";
   askConfirm({ title: "Sure?", message: "" });
   expect(overlayOpen()).toBe(true);
+});
+
+test("quitting's question goes before one showing, which is asked again after", async () => {
+  const other = askConfirm({ title: "Discard?", message: "" });
+  const quitting = askConfirm({ title: "Quit Palace?", message: "", first: true });
+  expect(confirmDialog.value.title).toBe("Quit Palace?");
+  closeConfirm(false);
+  expect(confirmDialog.value.title).toBe("Discard?");
+  closeConfirm(true);
+  expect([await quitting, await other]).toEqual([false, true]);
+});
+
+test("each dialog is numbered afresh, and one opened over another of its kind settles that as canceled", async () => {
+  const first = openForm({ title: "Rename", fields: [] });
+  const id = formDialog.value.id;
+  const second = openForm({ title: "Rename", fields: [] });
+  expect(await first).toBeNull();
+  expect(formDialog.value.id).not.toBe(id);
+  closeForm({ name: "next" });
+  expect(await second).toEqual({ name: "next" });
 });

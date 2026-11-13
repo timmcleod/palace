@@ -25,11 +25,12 @@ impl<T: Clone + Default> PerRepo<T> {
 }
 
 impl<T> PerRepo<T> {
-    /// Puts `value` in place of whatever the repository had in the window.
-    pub fn set(&self, window: &str, path: &str, value: T) {
-        let replaced = self.0.lock().unwrap().insert((window.to_string(), path.to_string()), value);
-        // Dropped with the lock let go of: a watcher's drop waits for its thread.
-        drop(replaced);
+    /// Puts `value` in place of whatever the repository had in the window, and returns
+    /// what that was, for the caller to drop once it's let go of its own locks: a
+    /// watcher's drop waits for its thread.
+    #[must_use]
+    pub fn set(&self, window: &str, path: &str, value: T) -> Option<T> {
+        self.0.lock().unwrap().insert((window.to_string(), path.to_string()), value)
     }
 
     /// Takes away what the repository had in the window, as it's done with it.
@@ -67,9 +68,9 @@ mod tests {
     #[test]
     fn letting_go_of_a_repository_leaves_the_windows_others() {
         let kept: PerRepo<u32> = PerRepo::default();
-        kept.set("main", "/a", 1);
-        kept.set("main", "/b", 2);
-        kept.set("main", "/a", 3);
+        let _ = kept.set("main", "/a", 1);
+        let _ = kept.set("main", "/b", 2);
+        let _ = kept.set("main", "/a", 3);
         assert_eq!(kept.release("main", "/a"), Some(3));
         assert_eq!(kept.release("main", "/a"), None);
         assert_eq!(kept.of("main", "/b"), 2);
@@ -78,9 +79,9 @@ mod tests {
     #[test]
     fn a_window_closing_lets_go_of_all_its_repositories_and_no_others() {
         let kept: PerRepo<u32> = PerRepo::default();
-        kept.set("main", "/a", 1);
-        kept.set("main", "/b", 2);
-        kept.set("window-2", "/c", 3);
+        let _ = kept.set("main", "/a", 1);
+        let _ = kept.set("main", "/b", 2);
+        let _ = kept.set("window-2", "/c", 3);
         let mut gone = kept.forget("main");
         gone.sort();
         assert_eq!(gone, [1, 2]);

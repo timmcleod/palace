@@ -3,16 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { NOT_A_REPOSITORY, isError } from "./errors.js";
 
 /**
- * Loading the window's repository, and refreshing it as it changes. The state is the
- * window's, Workspace.vue's, as the rest of it reads it too:
+ * Loading the tab's repository, and refreshing it as it changes. The state is the
+ * tab's, Workspace.vue's, as the rest of it reads it too:
  *   overview     the open repository's overview (see repo_overview), or null
  *   loading      whether one the user chose is opening
  *   error        why the one chosen couldn't be opened, shown in its place
  *   refreshKey   counted up each refresh, for the views to read theirs again
  *   listsFiles   whether a view showing lists the changed files, read with the overview
  * And what Workspace.vue does around a load:
- *   onSwitch(data)                 another repository is about to show: views are reset
- *                                  (overview still holds the one before)
+ *   onSwitch(data)                 another repository is about to show, or with null,
+ *                                  none: views are reset (overview still holds the one
+ *                                  before)
  *   onLoaded(data, { quiet })      it's showing; `quiet` when it was read again in
  *                                  the background, rather than opened
  *   onNotRepository(path, options) the folder chosen isn't a repository
@@ -41,7 +42,7 @@ export function useRepository({
   // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
   let loadSeq = 0;
   // The open repository's folder, once it's gone: removed as a worktree, or moved or
-  // deleted. The window goes on showing it as it was, saying so, until it's closed.
+  // deleted. The tab goes on showing it as it was, saying so, until it's closed.
   const folderGone = ref(false);
 
   /**
@@ -90,6 +91,8 @@ export function useRepository({
       if (keepOnError && overview.value) {
         onOpenFailed(path, e);
       } else {
+        // The one showing goes, its steps and draft kept for when it's back.
+        if (overview.value) onSwitch(null);
         overview.value = null;
         error.value = `Couldn't open ${path}: ${e}`;
       }
