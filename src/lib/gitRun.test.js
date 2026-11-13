@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 const TITLES = ["Doing…", "Done", "Couldn't do it"];
 
-// The window's part, App.vue's, around running an operation, recorded.
+// The window's part, Workspace.vue's, around running an operation, recorded.
 function runner({ open = { path: "/repo", head: { branch: "main" } }, step = null } = {}) {
   const status = useStatusCard();
   let newest = 0;

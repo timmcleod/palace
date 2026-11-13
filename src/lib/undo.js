@@ -42,7 +42,7 @@ const MAX_UNDO = 50;
  * Undo and redo for the open repository: each step keeps take_snapshot's snapshots
  * from before and after, and undoing restores the one from before.
  *
- * overview: the repository overview ref. run: App's runGit, which undo and redo run
+ * overview: the repository overview ref. run: Workspace.vue's runGit, which undo and redo run
  * restore_snapshot through. busy(): whether an operation is under way, which they
  * wait for. draft: the commit message being written, which an undone commit's
  * message comes back to. settle(): finishes whatever runs unasked (a background

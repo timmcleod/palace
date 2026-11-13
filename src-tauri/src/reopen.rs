@@ -112,7 +112,7 @@ fn take(path: &Path, now: u64) -> Vec<Placed> {
 ///   than being kept as showing it, which would bring it forward whenever it's opened.
 /// - The first window goes first, given a repository, as it was; otherwise any with
 ///   one, as the first window opens the last repository used when given none (see
-///   App.vue), which could be open in another already.
+///   Workspace.vue), which could be open in another already.
 fn in_order(windows: Vec<Placed>, exists: impl Fn(&str) -> bool) -> Vec<Placed> {
     let mut seen = HashSet::new();
     let mut windows: Vec<Placed> = windows

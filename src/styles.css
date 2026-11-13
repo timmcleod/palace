@@ -620,6 +620,17 @@ kbd {
   display: none;
 }
 
+/* Where the window has no toolbar of its own, as on the welcome screen or with git
+   missing, a strip across its top, under the macOS window buttons, to drag it by. */
+.title-strip {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 28px;
+}
+
 /* The image that follows the pointer while dragging a branch (see Sidebar.vue). */
 .drag-image {
   position: fixed;

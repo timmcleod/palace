@@ -4,12 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { isMac } from "./lib/platform.js";
 
 // The whole window, started as main.js starts it, on a stand-in backend. First, a check
-// that App.vue sets itself up without an error, such as a name used before it's defined
-// or never imported, which nothing else here would catch, since the other tests each
-// take a piece of it on its own. Then how its pieces are wired together: what opening
-// and switching repositories does, and what the backend's events and the keyboard reach.
-// These say what the window does, not where in it that's done, so they hold as its code
-// moves about.
+// that App.vue and Workspace.vue set themselves up without an error, such as a name
+// used before it's defined or never imported, which nothing else here would catch, since
+// the other tests each take a piece of it on its own. Then how its pieces are wired
+// together: what opening and switching repositories does, and what the backend's events
+// and the keyboard reach. These say what the window does, not where in it that's done,
+// so they hold as its code moves about.
 
 // Who's listening for each event, from the backend to this window or to every window.
 const heard = vi.hoisted(() => ({}));

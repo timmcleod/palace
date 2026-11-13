@@ -52,9 +52,13 @@ do the same.
 
 ## The page
 
-- **`App.vue`** is the window: the state its views share (the open repository, what's
-  selected, the commit message being written) and the wiring between them. It should
-  stay wiring. When a piece of it grows logic of its own, that logic moves out.
+- **`App.vue`** is the window: what's its own whatever it shows. It checks for git at
+  startup, shows the dialogs and menus over everything, asks before the window closes,
+  and hears what every window's agents are doing.
+- **`components/Workspace.vue`** is what the window shows: the open repository, the
+  state its views share (what's selected, the commit message being written) and the
+  wiring between them, or with none open, the welcome screen. It should stay wiring.
+  When a piece of it grows logic of its own, that logic moves out.
 - **`src/lib/`** holds the logic, in plain modules. Some are composables, named
   `use…`, that own one job and its state for a window: loading and refreshing the
   repository, the terminal panel, keyboard shortcuts, undo, navigation and so on.
@@ -114,9 +118,10 @@ they check (`.github/workflows/`), so a push that breaks one shows up right away
 Lint matters more than it looks: the build doesn't catch a name used without being
 imported, or one a template uses that its component doesn't have. ESLint does.
 
-One test starts the whole window (`src/App.test.js`), on a stand-in backend. The other
-page tests each take one piece on its own, so a mistake in how `App.vue` wires the
-pieces together shows up only there.
+`src/App.test.js` starts the whole window on a stand-in backend, and checks how its
+pieces are wired together: opening and switching repositories, the backend's events, a
+shortcut. The other page tests each take one piece on its own, so a mistake in how
+`App.vue` and `Workspace.vue` wire the pieces together shows up only there.
 
 Run the app with `npm run tauri dev`. Changes to the page reload in place, but changes
 to the backend or its configuration need it restarted. If the page ever seems stuck in

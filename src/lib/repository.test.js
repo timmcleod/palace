@@ -47,7 +47,7 @@ function waiting() {
 // Every repository mounted, each unmounted after its test, so none goes on listening.
 let mounted;
 const allMounted = [];
-// The window's repository state, App.vue's, with useRepository looking after it.
+// The window's repository state, Workspace.vue's, with useRepository looking after it.
 function repository({ open = null, listsFiles = false } = {}) {
   const state = {
     overview: ref(open),

@@ -227,7 +227,7 @@ function focus() {
 }
 defineExpose({ focus });
 
-// Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's (see App.vue).
+// Cmd+T, or Ctrl+Shift+T on Linux, where Ctrl+T is the shell's (see shortcuts.js).
 
 
 function newTerminal() {

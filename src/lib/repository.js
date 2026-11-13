@@ -4,13 +4,13 @@ import { NOT_A_REPOSITORY, isError } from "./errors.js";
 
 /**
  * Loading the window's repository, and refreshing it as it changes. The state is the
- * window's, App.vue's, as the rest of it reads it too:
+ * window's, Workspace.vue's, as the rest of it reads it too:
  *   overview     the open repository's overview (see repo_overview), or null
  *   loading      whether one the user chose is opening
  *   error        why the one chosen couldn't be opened, shown in its place
  *   refreshKey   counted up each refresh, for the views to read theirs again
  *   listsFiles   whether a view showing lists the changed files, read with the overview
- * And what App.vue does around a load:
+ * And what Workspace.vue does around a load:
  *   onSwitch(data)                 another repository is about to show: views are reset
  *                                  (overview still holds the one before)
  *   onLoaded(data)                 it's showing: it's among the recent ones

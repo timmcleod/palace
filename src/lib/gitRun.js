@@ -18,7 +18,7 @@ const NETWORK = new Set([
 
 /**
  * Running the window's git operations, one at a time, each shown in the status card.
- * What it needs from the window, App.vue:
+ * What it needs from the window, Workspace.vue:
  *   overview             the open repository's overview ref
  *   status               the status card (see statusCard.js)
  *   undo                 { stepFor, newest, undoable, undo } (see undo.js)

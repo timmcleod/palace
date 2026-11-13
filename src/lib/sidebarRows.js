@@ -66,7 +66,7 @@ function branchRows(overview, { matches, isOpen }, dividers, order) {
 }
 
 // HEAD's commit, while no branch is checked out. Its key is HEAD's history's own, which
-// selecting it shows (see App.vue). None before the first commit, with nothing to show.
+// selecting it shows (see Workspace.vue). None before the first commit, with nothing to show.
 function detachedRow(overview, matches) {
   const head = overview.head;
   if (!head || head.branch || !head.short_id || !matches(head.short_id)) return [];
