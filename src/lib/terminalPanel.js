@@ -130,20 +130,15 @@ export function useTerminalPanel({ overview, loadRepository, window, active = ()
     notices.value = notices.value.filter((n) => n.id !== id);
   }
 
-  // Brings the notice's tab forward: here, or in its own window, which comes forward.
+  // Brings the notice's terminal tab forward, in the window it's in, which comes forward,
+  // even when it's this one: the window shows the tab its repository is in, then the
+  // terminal tab there ("show-terminal-tab", see App.vue).
   function openNotice(notice) {
     dismissNotice(notice);
-    if (notice.window === window.label) showTab(notice);
-    else invoke("show_terminal_tab", { label: notice.window, path: notice.path, key: notice.key }).catch(() => {});
+    invoke("show_terminal_tab", { label: notice.window, path: notice.path, key: notice.key }).catch(() => {});
   }
 
-  // Another window's notice, clicked there, or the system's notification, clicked.
-  const unlistenShowTab = window.listen("show-terminal-tab", ({ payload }) => active() && showTab(payload));
-
-  onBeforeUnmount(() => {
-    unlistenNotice.then((unlisten) => unlisten());
-    unlistenShowTab.then((unlisten) => unlisten());
-  });
+  onBeforeUnmount(() => unlistenNotice.then((unlisten) => unlisten()));
 
   return { open, loaded, unseen, panel, toggle, show, showTab, agentReady, startTask, pasteToAgent, notices, dismissNotice, openNotice };
 }

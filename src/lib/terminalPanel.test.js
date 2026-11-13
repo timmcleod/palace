@@ -152,17 +152,13 @@ describe("notices", () => {
     expect(notices.value).toEqual([]);
   });
 
-  test("bring their tab forward, here or in their own window", async () => {
+  test("bring their tab forward through the window it's in, this one too, which shows the tab its repository's in", async () => {
     vi.useRealTimers();
-    const { window, notices, openNotice, open } = panelFor();
-    groups["/repo"] = reactive({ tabs: [{ key: 1 }, { key: 2 }], active: 1 });
+    const { window, notices, openNotice } = panelFor();
     window.send("notice", notice(2));
     openNotice(notices.value[0]);
-    await settle();
     expect(notices.value).toEqual([]);
-    expect(open.value).toBe(true);
-    expect(groups["/repo"].active).toBe(2);
-
+    expect(invoke).toHaveBeenCalledWith("show_terminal_tab", { label: "main", path: "/repo", key: 2 });
     openNotice(notice(5, { window: "window-2", path: "/elsewhere" }));
     expect(invoke).toHaveBeenCalledWith("show_terminal_tab", { label: "window-2", path: "/elsewhere", key: 5 });
   });
@@ -177,27 +173,15 @@ test("showing a tab of a repository that isn't open opens it first", async () =>
   expect(groups["/other"].active).toBe(7);
 });
 
-test("comes when another window says to show a tab", async () => {
-  const { window } = panelFor();
-  groups["/repo"] = reactive({ tabs: [{ key: 1 }, { key: 3 }], active: 1 });
-  window.send("show-terminal-tab", { path: "/repo", key: 3 });
-  await settle();
-  expect(groups["/repo"].active).toBe(3);
-});
-
-test("notices, and showing a tab, are for the workspace showing only", async () => {
+test("notices are for the workspace showing only", async () => {
   let showing = false;
+  const notice = { window: "main", path: "/repo", key: 3, state: "done", title: "Agent finished" };
   const { window, notices } = panelFor("/repo", { active: () => showing });
-  groups["/repo"] = reactive({ tabs: [{ key: 1 }, { key: 3 }], active: 1 });
-  window.send("notice", { window: "main", path: "/repo", key: 3, state: "done", title: "Agent finished" });
-  window.send("show-terminal-tab", { path: "/repo", key: 3 });
-  await settle();
+  window.send("notice", notice);
   expect(notices.value).toEqual([]);
-  expect(groups["/repo"].active).toBe(1);
   showing = true;
-  window.send("show-terminal-tab", { path: "/repo", key: 3 });
-  await settle();
-  expect(groups["/repo"].active).toBe(3);
+  window.send("notice", notice);
+  expect(notices.value).toHaveLength(1);
 });
 
 test("says when the agent can't take what's pasted", async () => {
@@ -215,7 +199,6 @@ test("stops listening once the window's page goes", async () => {
   mounted = null;
   await settle();
   expect(window.listening("notice")).toBe(false);
-  expect(window.listening("show-terminal-tab")).toBe(false);
 });
 
 describe("a task", () => {

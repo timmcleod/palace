@@ -50,7 +50,7 @@ import WorkingFileDiff from "./WorkingFileDiff.vue";
 import ReviewTray from "./ReviewTray.vue";
 import { clearComments, commentsIn, deleteComments, reviewMessage } from "../lib/review.js";
 import { folderName } from "../lib/format.js";
-import { FILTER_RECENTS, RECENTS_KEY, forgetGoneRepositories, forgetRepositories, lastRepository, recentRepositories, rememberRepository } from "../lib/recents.js";
+import { FILTER_RECENTS, RECENTS_KEY, forgetGoneRepositories, forgetRepositories, recentRepositories, rememberRepository } from "../lib/recents.js";
 import {
   onSavedElsewhere,
   readJson,
@@ -65,20 +65,7 @@ import { useBackgroundFetch } from "../lib/backgroundFetch.js";
 import { useIssueRepo } from "../lib/issueRepo.js";
 import { useNavigation } from "../lib/navigation.js";
 import { splitKey } from "../lib/sidebarKeys.js";
-import {
-  askConfirm,
-  cloneDialog,
-  confirmDialog,
-  contextMenu,
-  formDialog,
-  mergeDialog,
-  openCloneDialog,
-  openMenu,
-  pullDialog,
-  resetDialog,
-  tagDialog,
-  tell,
-} from "../lib/overlays.js";
+import { askConfirm, openCloneDialog, openMenu, overlayOpen, tell } from "../lib/overlays.js";
 import { cloneFolder, rememberCloneFolder } from "../lib/clone.js";
 import { forgetAvatars, loadAvatars } from "../lib/avatars.js";
 import { provideActive } from "../lib/activeWorkspace.js";
@@ -106,6 +93,16 @@ import { afterResolving } from "../lib/conflictText.js";
 const props = defineProps({
   // Whether the window has found git usable, and this can open a repository.
   ready: { type: Boolean, default: false },
+  // The repository it opens as it starts, or null to choose one on the welcome screen;
+  // and what that one's agent is to start on, as for a worktree made for a task.
+  opens: { type: String, default: null },
+  task: { type: String, default: null },
+  // Whether it's the first of the first window at startup, which takes the recent
+  // repositories that have gone off the list.
+  tidyRecents: { type: Boolean, default: false },
+  // Shows the repository at `path` where it's open already, in another of the window's
+  // tabs or another window, and says whether it is (see App.vue).
+  openElsewhere: { type: Function, default: (path) => invoke("show_window_with", { path }).catch(() => false) },
   // What each repository's agents are doing, in every window, by path (see
   // agentStates.js), for Worktrees to show which is busy or wants you.
   agentStates: { type: Object, default: () => ({}) },
@@ -116,15 +113,20 @@ const props = defineProps({
 const active = () => props.active;
 provideActive(active);
 
+// What the window does, for its tabs: what this shows, for its tab to say ("shows",
+// { path, name, branch } or null); a tab to open, as for a worktree ("open-tab",
+// { path, task }), or one to choose a repository in ("new-tab"); a window ("new-window");
+// and this one's tab to close ("close").
+const emit = defineEmits(["shows", "open-tab", "new-tab", "new-window", "close"]);
+
 // --- State shared across views -----------------------------------------------------
 
 const overview = ref(null);
 const loading = ref(false);
 const error = ref("");
 const recents = ref(recentRepositories());
-// While the last repository reopens at startup, so the welcome screen doesn't flash up
-// first.
-const starting = ref(recents.value.length > 0);
+// While the repository it opens is opening, so the welcome screen doesn't flash up first.
+const starting = ref(!!props.opens);
 const selected = ref("workspace:history");
 // The ref whose history is shown, as { kind, name }; null means HEAD.
 const historyRef = ref(null);
@@ -497,8 +499,7 @@ function focusToolbarSearch() {
 }
 
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
-const dialogOpen = () =>
-  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog, pullRequestDialog].some((d) => d.value);
+const dialogOpen = () => overlayOpen() || !!pullRequestDialog.value;
 
 // The window's keyboard shortcuts: which key is which, and where each applies, is in
 // shortcuts.js; what each does is here.
@@ -511,9 +512,6 @@ useShortcuts(
     repository: !!overview.value,
   }),
   {
-    newWindow: () => {
-      newWindow();
-    },
     terminal: ({ inTerminal }) => {
       if (inTerminal && terminalOpen.value) terminalOpen.value = false;
       else showTerminal();
@@ -841,8 +839,6 @@ watch(
   () => overview.value?.path,
   (path, previous) => {
     if (previous) letGo(previous);
-    // Other windows show this one instead of opening the repository again.
-    invoke("set_window_repo", { path: path ?? null }).catch(() => {});
     showTitle();
     if (!path) return;
     invoke("watch_repo", { path }).catch(() => {});
@@ -859,6 +855,17 @@ function showTitle() {
 }
 watch(() => props.active, showTitle);
 
+// What it shows, for its tab to say, and the window to note, so it's shown here rather
+// than opened again elsewhere. That it shows none is said once it's tried to open what
+// it was given (see start): until then, its tab stands for that one.
+watch(
+  () => overview.value && [overview.value.path, overview.value.name, overview.value.head.branch ?? overview.value.head.short_id],
+  (shown) => emit("shows", shown && { path: shown[0], name: shown[1], branch: shown[2] }),
+);
+
+// Coming to show, it takes the recent repositories opened in another tab meanwhile.
+watch(active, (now) => now && (recents.value = recentRepositories()));
+
 // A repository no longer shown: the backend stops watching it and lets go of its
 // history, and its authors' pictures aren't asked for again.
 function letGo(path) {
@@ -872,20 +879,10 @@ onBeforeUnmount(() => overview.value && letGo(overview.value.path));
 // Recent repositories opened in other windows join the list here too.
 onBeforeUnmount(onSavedElsewhere((key) => key === RECENTS_KEY && (recents.value = recentRepositories())));
 
-// Opens the worktree at `path` in a window of its own, or
-// brings forward the window it's open in.
-async function openWorktree(path, { task = null } = {}) {
-  if (await invoke("show_window_with", { path }).catch(() => false)) return;
-  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark", path, task }).catch((e) =>
-    tell("Couldn't Open the Worktree", String(e)),
-  );
+// Opens the worktree at `path` in a tab of its own, or shows the one it's open in.
+function openWorktree(path, { task = null } = {}) {
+  emit("open-tab", { path, task });
 }
-
-/** Opens a new window, to open another repository in, side by side with this one. */
-const newWindow = () =>
-  invoke("new_window", { dark: document.documentElement.dataset.theme === "dark" }).catch((e) =>
-    tell("Couldn't Open a Window", String(e)),
-  );
 
 // Events for this window only, each saying which repository: only the open one's are
 // heard here.
@@ -1005,7 +1002,12 @@ const {
   notices: terminalNotices,
   dismissNotice,
   openNotice,
+  showTab: showTerminalTab,
 } = useTerminalPanel({ overview, loadRepository: (path) => loadRepository(path), window: thisWindow, active });
+
+// The window shows a terminal tab of this one's repository, as for its notice clicked
+// (see App.vue).
+defineExpose({ showTerminalTab });
 
 // --- Review comments for the agent -------------------------------------------------
 
@@ -1079,6 +1081,7 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     recents.value = recentRepositories();
   },
   onNotRepository: (path, options) => offerToCreateRepository(path, options),
+  openElsewhere: (path) => props.openElsewhere(path),
   onOpenFailed(path, e) {
     showStatus({
       title: "Couldn't open the repository",
@@ -1147,7 +1150,8 @@ function recentMenu(anchor) {
   const current = overview.value?.path;
   const tidy = (path) => (home.value && path.startsWith(`${home.value}/`) ? `~${path.slice(home.value.length)}` : path);
   openMenu(anchor, [
-    { label: "New Window", detail: shortcut("Ctrl+N"), action: newWindow },
+    { label: "New Tab", detail: shortcut("Ctrl+N"), action: () => emit("new-tab") },
+    { label: "New Window", detail: shortcut("Ctrl+Shift+N"), action: () => emit("new-window") },
     { separator: true },
     current && { label: `Open in ${fileManager}`, action: () => openOutside("open_folder", "Couldn't Open the Folder") },
     current && { label: "Open in Terminal", action: () => showTerminal({ newTab: true }) },
@@ -1174,26 +1178,17 @@ function removeRecent(path) {
 
 // --- Opening at startup ------------------------------------------------------------
 
-// Once the window has found git usable (see App.vue), what to open: the repository this
-// window had, as when its page reloads, or in the first window at startup, the last one
-// opened. A new window starts with none, to choose one.
+// Once the window has found git usable (see App.vue), what its tab gives it to open.
 async function start() {
-  if (!overview.value) {
-    const start = await invoke("window_start").catch(() => ({ repo: null, first: true }));
-    const reopen = start.repo ?? (start.first ? await lastRepository() : null);
-    if (reopen) await loadRepository(reopen);
-    // Repositories deleted since Palace last ran are taken off the list, once, by the
-    // first window, without holding up what it opens.
-    if (start.first) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
-    // Opened for a task (New Agent Task): its agent starts on it, or, with the worktree not
-    // open after all, the task's given back, so it isn't lost.
-    if (start.task && overview.value) startTask(start.task);
-    else if (start.task) tell("Couldn't Start the Task", `Its worktree didn't open. The task was:\n\n${start.task}`);
-  }
-  // Given a repository it couldn't open, the window lets go of it: otherwise opening it
-  // in another window would bring this one forward (see show_window_with), as the watch
-  // on overview only says when one opens.
-  if (!overview.value) invoke("set_window_repo", { path: null }).catch(() => {});
+  if (props.opens && !overview.value) await loadRepository(props.opens);
+  if (!overview.value) emit("shows", null);
+  // Repositories deleted since Palace last ran are taken off the list, once, without
+  // holding up what's opened.
+  if (props.tidyRecents) forgetGoneRepositories().then(() => (recents.value = recentRepositories()));
+  // Opened for a task (New Agent Task): its agent starts on it, or, with the worktree not
+  // open after all, the task's given back, so it isn't lost.
+  if (props.task && overview.value) startTask(props.task);
+  else if (props.task) tell("Couldn't Start the Task", `Its worktree didn't open. The task was:\n\n${props.task}`);
   starting.value = false;
 }
 
@@ -1460,7 +1455,7 @@ const breadcrumb = computed(() => {
         :name="overview.name"
         :path="overview.path"
         :worktree="isWorktree"
-        @close="thisWindow.close()"
+        @close="emit('close')"
       />
       <OperationBanner
         v-if="overview.operation"

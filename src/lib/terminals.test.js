@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-const { missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor, typePaths } = await import("./terminals.js");
+const { busyIn, closeTerminalsOf, missingAgent, repositoryStates, sendToAgent, startAgentOn, tabsFor, terminals, typePaths } = await import("./terminals.js");
 const { nextTick } = await import("vue");
 
 beforeEach(() => vi.mocked(invoke).mockReset());
@@ -111,4 +111,18 @@ test("types dropped files' paths in the tab, quoted for its shell, then a space"
   term.paste.mockClear();
   typePaths({ session: { term } }, []);
   expect(term.paste).not.toHaveBeenCalled();
+});
+
+test("closing a repository's tab in the window says which of its terminals are busy, then closes them all", async () => {
+  // A terminal tab as one stands, with what closing it reaches for.
+  const terminal = (id, title) => ({ id, key: id, title, kind: "shell", session: { term: { dispose: vi.fn() }, el: { remove: vi.fn() } } });
+  tabsFor("/closing").tabs.push(terminal(41, "npm run dev"), terminal(42, "zsh"));
+  vi.mocked(invoke).mockImplementation(async (command, args) => (command === "terminal_busy" ? args.id === 41 : null));
+  expect(await busyIn("/closing")).toEqual(["npm run dev"]);
+  expect(await busyIn("/none")).toEqual([]);
+
+  closeTerminalsOf("/closing");
+  expect(terminals["/closing"]).toBeUndefined();
+  const hungUp = vi.mocked(invoke).mock.calls.filter(([command]) => command === "terminal_close").map(([, args]) => args.id);
+  expect(hungUp).toEqual([41, 42]);
 });

@@ -4,7 +4,7 @@
 //! goes ahead only if told to.
 
 use crate::terminal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -13,9 +13,16 @@ use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewWindow};
 
 /// Set once the user has said to quit anyway.
 static CONFIRMED: AtomicBool = AtomicBool::new(false);
-/// The files with edits not saved in each window, by window, as the page last said,
-/// each described as “name” in repository.
-static UNSAVED: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(Default::default);
+/// The files with edits not saved in each window, by window, as the page last said.
+static UNSAVED: LazyLock<Mutex<HashMap<String, Vec<Unsaved>>>> = LazyLock::new(Default::default);
+
+/// A file with edits not saved: the repository it's in, and the file as the user's told
+/// of it, “name” in repository.
+#[derive(Deserialize, Clone)]
+pub struct Unsaved {
+    path: String,
+    described: String,
+}
 /// When a page was last asked, until it says it's asking the user. A page that never
 /// says so, broken or still loading, can't ask, so trying again goes ahead rather than
 /// leaving Palace impossible to close.
@@ -62,7 +69,7 @@ pub fn hold(app: &AppHandle, window: Option<&str>) -> bool {
         terminals: busy.iter().filter(|t| t.window == asking).map(|t| t.id).collect(),
         edits: unsaved.get(&asking).is_some_and(|files| !files.is_empty()),
         other_terminals: busy.iter().filter(|t| quitting && t.window != asking).map(|t| t.folder.clone()).collect(),
-        other_edits: unsaved.iter().filter(|(w, _)| quitting && **w != asking).flat_map(|(_, files)| files.clone()).collect(),
+        other_edits: unsaved.iter().filter(|(w, _)| quitting && **w != asking).flat_map(|(_, files)| files.iter().map(|f| f.described.clone())).collect(),
     };
     if held.terminals.is_empty() && !held.edits && held.other_terminals.is_empty() && held.other_edits.is_empty() {
         return false;
@@ -85,13 +92,16 @@ pub fn quit_asking() {
 
 /// The page saying which of its files have edits that aren't saved.
 #[tauri::command]
-pub fn set_unsaved_edits(window: WebviewWindow, files: Vec<String>) {
+pub fn set_unsaved_edits(window: WebviewWindow, files: Vec<Unsaved>) {
     UNSAVED.lock().unwrap().insert(window.label().to_string(), files);
 }
 
-/// The files with edits not saved in `window`, each described as “name” in repository.
-pub fn unsaved_in(window: &str) -> Vec<String> {
-    UNSAVED.lock().unwrap().get(window).cloned().unwrap_or_default()
+/// The files with edits not saved in the repository at `path`, in any window, each
+/// described as “name” in repository.
+pub fn unsaved_under(path: &str) -> Vec<String> {
+    let folder = crate::windows::same_folder(path);
+    let unsaved = UNSAVED.lock().unwrap();
+    unsaved.values().flatten().filter(|f| crate::windows::same_folder(&f.path) == folder).map(|f| f.described.clone()).collect()
 }
 
 /// Forgets the edits of a window that's closed.

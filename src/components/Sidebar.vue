@@ -639,22 +639,6 @@ function onRowClick(row, event) {
   color: var(--text-primary);
 }
 
-/* The drag image drawn on the page (see "What follows the pointer"). */
-:global(body.dragging-row),
-:global(body.dragging-row *) {
-  cursor: default !important;
-  user-select: none;
-}
-
-:global(.drag-image.following) {
-  top: 0;
-  left: 0;
-  z-index: 1000;
-  visibility: hidden;
-  pointer-events: none;
-  opacity: 0.9;
-}
-
 .row {
   display: flex;
   align-items: center;

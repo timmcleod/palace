@@ -1,18 +1,36 @@
-//! Palace's windows, each with a repository of its own, side by side. The first, "main",
-//! reopens the last repository at startup; New Window opens another, to choose one in.
-//! Restarted by Palace itself, as into an update, it reopens all it had (see reopen.rs).
-//! A repository is open in one window at a time: opening it again shows that window.
+//! Palace's windows, side by side, each with repositories open in tabs of its own. The
+//! first, "main", reopens the last repository at startup; New Window opens another, to
+//! choose one in. Restarted by Palace itself, as into an update, it reopens all it had
+//! (see reopen.rs). A repository is open in one tab at a time: opening it again shows
+//! that tab, and its window.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::window::Color;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, State, Theme, WebviewWindow, WebviewWindowBuilder, Wry};
 
-/// The repository open in each window, by window.
+/// Each window's tabs, by window.
 #[derive(Default)]
-pub struct Windows(Mutex<HashMap<String, String>>);
+pub struct Windows(Mutex<HashMap<String, Tabs>>);
+
+/// A window's tabs: the repositories open in them, in the order they're in, and which of
+/// them is showing. A tab with none open yet, still to choose one, isn't among them.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[serde(default)]
+pub struct Tabs {
+    pub repos: Vec<String>,
+    pub active: Option<usize>,
+}
+
+impl Tabs {
+    /// One tab, with the repository at `path` open and showing, as a new window for a
+    /// worktree has.
+    pub fn one(path: String) -> Self {
+        Tabs { repos: vec![path], active: Some(0) }
+    }
+}
 
 static NEXT: AtomicU32 = AtomicU32::new(2);
 
@@ -25,11 +43,13 @@ const CASCADE: f64 = 28.0;
 
 #[derive(Serialize)]
 pub struct Start {
-    /// The repository this window had open, as when its page reloads.
-    repo: Option<String>,
+    /// The tabs this window had, as when its page reloads, or is to open, as a new one
+    /// for a worktree is.
+    tabs: Tabs,
     /// Whether it's the first window, which reopens the last repository at startup.
     first: bool,
-    /// What its agent is to start on, the first time only: not again as its page reloads.
+    /// What the agent of the tab showing is to start on, the first time only: not again
+    /// as its page reloads.
     task: Option<String>,
 }
 
@@ -37,7 +57,7 @@ pub struct Start {
 #[tauri::command]
 pub fn window_start(window: WebviewWindow, windows: State<'_, Windows>) -> Start {
     Start {
-        repo: windows.0.lock().unwrap().get(window.label()).cloned(),
+        tabs: windows.0.lock().unwrap().get(window.label()).cloned().unwrap_or_default(),
         first: window.label() == "main",
         task: TASKS.lock().unwrap().remove(window.label()),
     }
@@ -82,82 +102,83 @@ pub fn agent_states() -> AgentStates {
     AGENT_STATES.lock().unwrap().clone()
 }
 
-/// Notes the repository the window has open, or None for none.
+/// Notes the window's tabs, as they change: the repositories open in them, in order,
+/// and which is showing.
 #[tauri::command]
-pub fn set_window_repo(window: WebviewWindow, windows: State<'_, Windows>, path: Option<String>) {
-    let mut open = windows.0.lock().unwrap();
-    match path {
-        Some(path) => open.insert(window.label().to_string(), path),
-        None => open.remove(window.label()),
-    };
+pub fn set_window_tabs(window: WebviewWindow, windows: State<'_, Windows>, tabs: Tabs) {
+    windows.0.lock().unwrap().insert(window.label().to_string(), tabs);
 }
 
-/// Brings forward the other window with the repository at `path` open, if there is one,
-/// and says whether there was.
+/// Which repository a window is told to show, or to close the tab of.
+#[derive(Serialize, Clone)]
+struct Repository {
+    path: String,
+}
+
+/// Brings forward the other window with the repository at `path` open in one of its
+/// tabs, if there is one, telling it to show that tab ("show-repo"), and says whether
+/// there was.
 #[tauri::command]
 pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, path: String) -> bool {
-    let other = windows.0.lock().unwrap().iter().find(|(label, open)| *label != window.label() && **open == path).map(|(label, _)| label.clone());
+    let other = windows.0.lock().unwrap().iter().find(|(label, tabs)| *label != window.label() && tabs.repos.contains(&path)).map(|(label, _)| label.clone());
     let Some(other) = other.and_then(|label| app.get_webview_window(&label)) else { return false };
     let _ = other.unminimize();
     let _ = other.show();
     let _ = other.set_focus();
+    let _ = app.emit_to(EventTarget::webview_window(other.label()), "show-repo", Repository { path });
     true
 }
 
-/// Another window with the folder at `path` open, as a worktree about to be removed,
-/// and what closing it would lose.
+/// A folder open in a tab, as a worktree about to be removed, and what closing it would
+/// lose.
 #[derive(Serialize)]
 pub struct Showing {
-    /// The windows, by label, for remove_worktree to close.
-    windows: Vec<String>,
     /// The programs running in its terminals, by name, or None for one it can't tell.
     programs: Vec<Option<String>>,
     /// Its files with edits not saved.
     edits: Vec<String>,
 }
 
-/// The labels of the windows other than `window` with the folder at `path` open.
-fn others_showing(windows: &Windows, window: &WebviewWindow, path: &str) -> Vec<String> {
+/// The labels of the windows with the folder at `path` open in one of their tabs.
+fn windows_showing(windows: &Windows, path: &str) -> Vec<String> {
     let path = same_folder(path);
-    windows.0.lock().unwrap().iter().filter(|(label, open)| *label != window.label() && same_folder(open) == path).map(|(label, _)| label.clone()).collect()
+    let open = windows.0.lock().unwrap();
+    open.iter().filter(|(_, tabs)| tabs.repos.iter().any(|repo| same_folder(repo) == path)).map(|(label, _)| label.clone()).collect()
 }
 
 /// A folder as its real path, through any symbolic links, so the same folder compares
 /// equal however it was reached; or once it's gone, as given, without a trailing slash.
-fn same_folder(path: &str) -> std::path::PathBuf {
+pub(crate) fn same_folder(path: &str) -> std::path::PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| std::path::Path::new(path).components().collect())
 }
 
-/// Whether another window has the folder at `path` open, and if so, what closing it
-/// would lose.
+/// Whether a tab, in any window, has the folder at `path` open, and if so, what closing
+/// it would lose.
 #[tauri::command]
-pub fn window_showing(window: WebviewWindow, windows: State<'_, Windows>, path: String) -> Option<Showing> {
-    let labels = others_showing(&windows, &window, &path);
-    if labels.is_empty() {
+pub fn window_showing(windows: State<'_, Windows>, path: String) -> Option<Showing> {
+    if windows_showing(&windows, &path).is_empty() {
         return None;
     }
     Some(Showing {
-        windows: labels.clone(),
-        programs: labels.iter().flat_map(|label| crate::terminal::busy_programs(label)).collect(),
-        edits: labels.iter().flat_map(|label| crate::quit::unsaved_in(label)).collect(),
+        programs: crate::terminal::busy_programs_in(&path),
+        edits: crate::quit::unsaved_under(&path),
     })
 }
 
-/// Closes the windows labeled `labels`, other than `window`, without asking: the user
-/// has been asked already, as about removing the worktree they show (see
-/// window_showing). Their terminals are hung up first, and what ran in them given a
-/// few seconds to stop, so it's done before the folder it was in is deleted.
-pub async fn close_windows(app: &AppHandle, window: &str, labels: Vec<String>) {
-    let labels: Vec<String> = labels.into_iter().filter(|label| label != window).collect();
-    let hung_up = labels.clone();
+/// Closes the tabs with the folder at `path` open, in every window, without asking: the
+/// user has been asked already, as about removing the worktree they show (see
+/// window_showing). Their terminals are hung up first, and what ran in them given a few
+/// seconds to stop, so it's done before the folder they were in is deleted; then each
+/// window's page is told to close its tab ("close-repo").
+pub async fn close_tabs_with(app: &AppHandle, path: &str) {
+    let labels = windows_showing(&app.state::<Windows>(), path);
+    let folder = path.to_string();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        crate::terminal::close_windows_and_wait(&hung_up, std::time::Duration::from_secs(3));
+        crate::terminal::close_in_and_wait(&folder, std::time::Duration::from_secs(3));
     })
     .await;
-    for label in &labels {
-        if let Some(other) = app.get_webview_window(label) {
-            let _ = other.destroy();
-        }
+    for label in labels {
+        let _ = app.emit_to(EventTarget::webview_window(&label), "close-repo", Repository { path: path.to_string() });
     }
 }
 
@@ -223,7 +244,7 @@ pub(crate) struct TerminalTab {
 }
 
 /// Opens a new window, a little below and to the right of `window`, with the repository
-/// at `path` open, as for a worktree, or with none open yet. `dark` is the theme Palace
+/// at `path` open in its tab, or with none open yet. `dark` is the theme Palace
 /// is showing, which the window takes from the start: otherwise it shows white until
 /// its page has loaded and turned it dark.
 #[tauri::command]
@@ -235,7 +256,7 @@ pub async fn new_window(
     path: Option<String>,
     task: Option<String>,
 ) -> Result<(), String> {
-    let (label, mut builder) = make(&app, &windows, path, dark)?;
+    let (label, mut builder) = make(&app, &windows, path.map(Tabs::one).unwrap_or_default(), dark)?;
     if let Some(task) = task.filter(|t| !t.trim().is_empty()) {
         TASKS.lock().unwrap().insert(label, task);
     }
@@ -249,18 +270,16 @@ pub async fn new_window(
 }
 
 /// A new window, to build: the first window's settings, a label of its own, returned
-/// with it, and the repository at `path` for its page to open (see window_start).
+/// with it, and the tabs for its page to open (see window_start).
 pub(crate) fn make<'a>(
     app: &'a AppHandle,
     windows: &Windows,
-    path: Option<String>,
+    tabs: Tabs,
     dark: bool,
 ) -> Result<(String, WebviewWindowBuilder<'a, Wry, AppHandle>), String> {
     let mut config = app.config().app.windows.first().cloned().ok_or("Palace has no window settings.")?;
     config.label = format!("window-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    if let Some(path) = path {
-        start_with(windows, &config.label, path);
-    }
+    start_with(windows, &config.label, tabs);
     let theme = if dark { Theme::Dark } else { Theme::Light };
     let builder = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|e| format!("Couldn't open a window: {e}"))?
@@ -277,17 +296,17 @@ pub(crate) fn open(builder: WebviewWindowBuilder<'_, Wry, AppHandle>) -> Result<
     Ok(opened)
 }
 
-/// The repository open in the window labeled `window`, if any.
-pub(crate) fn repository_in(app: &AppHandle, window: &str) -> Option<String> {
-    app.state::<Windows>().0.lock().unwrap().get(window).cloned()
+/// The tabs of the window labeled `window`.
+pub(crate) fn tabs_in(app: &AppHandle, window: &str) -> Tabs {
+    app.state::<Windows>().0.lock().unwrap().get(window).cloned().unwrap_or_default()
 }
 
-/// Has the window labeled `window` open the repository at `path` as its page starts
-/// (see window_start), as a new one for a worktree does, or the first with the one it
-/// had before Palace restarted (see reopen.rs). Its page lets go of it if it can't open
-/// it, so it doesn't stand for a repository that isn't showing.
-pub(crate) fn start_with(windows: &Windows, window: &str, path: String) {
-    windows.0.lock().unwrap().insert(window.to_string(), path);
+/// Has the window labeled `window` open `tabs` as its page starts (see window_start),
+/// as a new one for a worktree does, or one with those it had before Palace restarted
+/// (see reopen.rs). Its page notes them again as they open, leaving out any it couldn't,
+/// so none stands for a repository that isn't showing.
+pub(crate) fn start_with(windows: &Windows, window: &str, tabs: Tabs) {
+    windows.0.lock().unwrap().insert(window.to_string(), tabs);
 }
 
 /// The sidebar's color in each theme (--sidebar-bg in styles.css), the page's
@@ -358,6 +377,22 @@ pub fn forget(app: &AppHandle, window: &str) {
 mod tests {
     use super::*;
     use crate::test_support::TempRepo;
+
+    #[test]
+    fn a_folder_open_in_any_tab_of_a_window_is_found_however_its_reached() {
+        let t = TempRepo::new("windows-showing");
+        let folder = t.dir.to_string_lossy().into_owned();
+        let link = t.dir.with_extension("link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&t.dir, &link).unwrap();
+        let windows = Windows::default();
+        start_with(&windows, "main", Tabs { repos: vec!["/code/other".into(), folder.clone()], active: Some(0) });
+        start_with(&windows, "window-2", Tabs::one("/code/else".into()));
+        assert_eq!(windows_showing(&windows, &link.to_string_lossy()), ["main"]);
+        assert_eq!(windows_showing(&windows, &format!("{folder}/")), ["main"]);
+        assert!(windows_showing(&windows, "/code/nowhere").is_empty());
+        std::fs::remove_file(&link).unwrap();
+    }
 
     #[test]
     fn telling_a_deleted_folder_from_one_on_a_drive_not_connected() {

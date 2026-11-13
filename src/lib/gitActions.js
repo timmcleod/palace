@@ -692,8 +692,8 @@ export function useGitActions({
   async function removeWorktree(worktree) {
     const name = folderName(worktree.path);
     const changed = !worktree.prunable && (await invoke("worktree_has_changes", { worktree: worktree.path }).catch(() => false));
-    // Open in another window, that window closes, its terminals stopped: left open,
-    // they'd go on in a folder that's gone.
+    // Open in a tab, that tab closes, its terminals stopped: left open, they'd go on in a
+    // folder that's gone.
     const showing = await invoke("window_showing", { path: worktree.path }).catch(() => null);
     const ok = await confirm(
       [
@@ -708,21 +708,21 @@ export function useGitActions({
       changed ? "Remove and Lose Changes" : showing?.programs.length ? "Remove and Stop" : "Remove",
     );
     if (!ok) return;
-    // The other window closes first, as part of removing it, so what its terminals run is
-    // stopped before the folder's deleted, rather than writing into it as it goes.
+    // The tab closes first, as part of removing it, so what its terminals run is stopped
+    // before the folder's deleted, rather than writing into it as it goes.
     const error = await run(["Removing worktree…", "Removed worktree", "Couldn't remove the worktree"], "remove_worktree", {
       worktree: worktree.path,
-      close: showing?.windows ?? [],
+      close: !!showing,
       force: changed || worktree.locked,
     });
     // Its agent command, as New Agent Task gives a worktree, goes with it.
     if (!error) setAgentCommand(worktree.path, "");
   }
 
-  // What closing the other window a worktree's open in loses: what its terminals are
-  // running, and edits not saved.
+  // What closing the tab a worktree's open in loses: what its terminals are running,
+  // and edits not saved.
   function openElsewhere({ programs, edits }) {
-    const lines = ["It's open in another window, which closes."];
+    const lines = ["It's open in a tab, which closes."];
     if (programs.length) {
       const names = programs.map((program) => (program ? (agentOfProgram(program) ?? `“${program}”`) : "a program"));
       const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;

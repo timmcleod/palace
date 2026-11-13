@@ -8,8 +8,14 @@ import { isMac } from "./platform.js";
  * they're Cmd; elsewhere Ctrl.
  *
  * In the order they're tried:
- *   newWindow         Cmd+N; on a Mac from a terminal too, where Cmd keys are Palace's,
- *                     while Ctrl+N is the shell's on Linux.
+ *   newTab            Cmd+N opens a tab, and newWindow, Cmd+Shift+N, a window; closeTab,
+ *                     Cmd+W, closes the tab showing; showTab, Cmd+1 to Cmd+9, shows that
+ *                     tab, Cmd+9 the last. On a Mac from a terminal too, where Cmd keys
+ *                     are Palace's, while on Linux, Ctrl+N, Ctrl+W and the rest are the
+ *                     shell's there. On a Mac, the menu's items take the first three
+ *                     before the page sees them (see menu.rs).
+ *   nextTab,          Ctrl+Tab and Ctrl+Shift+Tab, from anywhere, as in a browser, and on
+ *   previousTab       a Mac, Cmd+Shift+] and Cmd+Shift+[ too.
  *   terminal          Cmd+' shows the terminal panel and goes to it, or from it, hides it.
  *                     A terminal's programs can't use it, so it's Palace's there too. By
  *                     the key, not the character, which needs Shift on some layouts.
@@ -35,7 +41,13 @@ export function shortcutFor(event, where, mac = isMac) {
   // Cmd with a key, and no Shift or Alt.
   const alone = command && !event.shiftKey && !event.altKey;
 
-  if (alone && key === "n" && (mac || !inTerminal) && !dialogOpen) return "newWindow";
+  const palaces = (mac || !inTerminal) && !dialogOpen;
+  if (command && !event.altKey && key === "n" && palaces) return event.shiftKey ? "newWindow" : "newTab";
+  if (alone && key === "w" && palaces) return "closeTab";
+  if (alone && /^Digit[1-9]$/.test(event.code) && palaces) return "showTab";
+  const tab = event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab";
+  const bracket = mac && event.metaKey && event.shiftKey && !event.altKey && (event.code === "BracketRight" || event.code === "BracketLeft");
+  if ((tab || bracket) && !dialogOpen) return (tab ? event.shiftKey : event.code === "BracketLeft") ? "previousTab" : "nextTab";
   if (alone && event.code === "Quote" && repository && !dialogOpen) return "terminal";
   const newTab = mac ? event.metaKey && !event.ctrlKey && !event.shiftKey : event.ctrlKey && !event.metaKey && event.shiftKey;
   if (newTab && !event.altKey && event.code === "KeyT" && repository && !dialogOpen) return "newTerminalTab";
@@ -59,16 +71,17 @@ export function shortcutFor(event, where, mac = isMac) {
 /**
  * Listens for the shortcuts in the window while the component calling it is mounted.
  * `where(event)` says where a key was pressed (see shortcutFor), and `actions` does each
- * by name, given that; one that returns false didn't apply after all, as / with no
- * search showing, and leaves the key to whatever else takes it. Only while `active()`,
- * the workspace calling it is showing, does it act on them.
+ * by name, given that and the key's event; one that returns false didn't apply after
+ * all, as / with no search showing, and leaves the key to whatever else takes it. Those
+ * it has no action for, it leaves to another: the window's, for tabs, and its workspace's
+ * own. Only while `active()`, the workspace calling it is showing, does it act on them.
  */
 export function useShortcuts(where, actions, { active = () => true } = {}) {
   function onKeydown(event) {
     if (!active()) return;
     const here = where(event);
     const name = shortcutFor(event, here);
-    if (name && actions[name](here) !== false) event.preventDefault();
+    if (name && actions[name] && actions[name](here, event) !== false) event.preventDefault();
   }
   window.addEventListener("keydown", onKeydown);
   onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));

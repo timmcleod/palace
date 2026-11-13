@@ -1,9 +1,9 @@
 <script setup>
 import { FolderX } from "lucide-vue-next";
 
-// Shown when the window's repository folder is gone: removed as a worktree, or moved or
+// Shown when a tab's repository folder is gone: removed as a worktree, or moved or
 // deleted outside Palace. What's on screen is as it was, the terminals' output with it,
-// until the window is closed.
+// until the tab is closed.
 defineProps({
   name: { type: String, required: true },
   path: { type: String, required: true },
@@ -19,7 +19,7 @@ const emit = defineEmits(["close"]);
       <strong>{{ worktree ? `The worktree “${name}” was removed` : `“${name}” was moved or deleted` }}</strong>
       <span>Its folder, {{ path }}, is gone. What's shown is as it was.</span>
     </div>
-    <button class="primary-button" @click="emit('close')">Close Window</button>
+    <button class="primary-button" @click="emit('close')">Close Tab</button>
   </div>
 </template>
 

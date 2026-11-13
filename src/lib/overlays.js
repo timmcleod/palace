@@ -140,6 +140,10 @@ export function askConfirm({ title, message, confirmLabel = "OK", danger = false
   });
 }
 
+/** Whether a dialog or menu is showing over the window. */
+export const overlayOpen = () =>
+  [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value);
+
 /** Says something, with only an OK button. */
 export function tell(title, message) {
   return askConfirm({ title, message, cancel: false });

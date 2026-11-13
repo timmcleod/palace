@@ -342,16 +342,24 @@ pub fn busy_terminals() -> Vec<Busy> {
         .collect()
 }
 
-/// The programs running in `window`'s terminals, by name, as "vim" or "claude", or None
-/// where it can't tell.
-pub fn busy_programs(window: &str) -> Vec<Option<String>> {
+/// The programs running in terminals started in the folder at `path`, or a folder in it,
+/// in any window, by name, as "vim" or "claude", or None where it can't tell.
+pub fn busy_programs_in(path: &str) -> Vec<Option<String>> {
+    let within = within(path);
     TERMINALS
         .lock()
         .unwrap()
         .values()
-        .filter(|t| t.window == window && is_busy(t))
+        .filter(|t| within(t) && is_busy(t))
         .map(|t| t.master.process_group_leader().and_then(program_name))
         .collect()
+}
+
+/// Whether a terminal was started in the folder at `path`, or a folder in it, however
+/// either was reached.
+fn within(path: &str) -> impl Fn(&Terminal) -> bool {
+    let folder = crate::windows::same_folder(path);
+    move |t| crate::windows::same_folder(&t.folder).starts_with(&folder)
 }
 
 /// Hangs up the terminal, which ends its shell and what the shell started.
@@ -372,8 +380,13 @@ pub async fn terminal_close_all(app: tauri::AppHandle, window: WebviewWindow) {
 
 /// Hangs up the terminals in `window`, as when it closes.
 pub fn close_window(window: &str) {
+    close(|t| t.window == window);
+}
+
+/// Hangs up the terminals `which` picks.
+fn close(which: impl Fn(&Terminal) -> bool) {
     let mut terminals = TERMINALS.lock().unwrap();
-    let ids: Vec<u32> = terminals.iter().filter(|(_, t)| t.window == window).map(|(id, _)| *id).collect();
+    let ids: Vec<u32> = terminals.iter().filter(|(_, t)| which(t)).map(|(id, _)| *id).collect();
     for id in ids {
         if let Some(mut terminal) = terminals.remove(&id) {
             let _ = terminal.killer.kill();
@@ -381,25 +394,25 @@ pub fn close_window(window: &str) {
     }
 }
 
-/// Hangs up the terminals in `windows`, as close_window does, then waits, up to `limit`
-/// for all of them, for their shells and the programs in front in them to exit: hung
-/// up, a program may take a moment to stop, writing as it goes.
-pub fn close_windows_and_wait(windows: &[String], limit: Duration) {
+/// Hangs up the terminals started in the folder at `path`, or a folder in it, in any
+/// window, as for a worktree about to be removed, then waits, up to `limit` for all of
+/// them, for their shells and the programs in front in them to exit: hung up, a program
+/// may take a moment to stop, writing as it goes.
+pub fn close_in_and_wait(path: &str, limit: Duration) {
+    let within = within(path);
     // A shell by its process, and what's in front by its process group, which holds
     // what it started.
     let running: Vec<(i32, bool)> = TERMINALS
         .lock()
         .unwrap()
         .values()
-        .filter(|t| windows.contains(&t.window))
+        .filter(|t| within(t))
         .flat_map(|t| {
             let front = t.master.process_group_leader().filter(|front| Some(*front as u32) != t.shell).map(|front| (front, true));
             t.shell.map(|shell| (shell as i32, false)).into_iter().chain(front)
         })
         .collect();
-    for window in windows {
-        close_window(window);
-    }
+    close(within);
     let started = Instant::now();
     while running.iter().any(|&(id, group)| still_running(id, group)) && started.elapsed() < limit {
         std::thread::sleep(Duration::from_millis(50));
@@ -527,7 +540,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("palace-test-terminal-close-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // A window of its own, so closing it hangs up no other test's terminals.
+        // In a folder of its own, so closing what's in it hangs up no other test's terminals.
         let window = "test-close-and-wait";
         let output = Channel::new(|_| Ok(()));
         let exited = Channel::new(|_| Ok(()));
@@ -545,9 +558,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         };
 
-        close_windows_and_wait(&[window.into()], Duration::from_secs(10));
+        assert_eq!(busy_programs_in(&dir.to_string_lossy()), [Some("sleep".to_string())]);
+        close_in_and_wait(&dir.to_string_lossy(), Duration::from_secs(10));
         assert!(!still_running(front, true), "sleep is still running");
-        assert!(busy_programs(window).is_empty());
+        assert!(busy_programs_in(&dir.to_string_lossy()).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

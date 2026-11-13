@@ -1,14 +1,14 @@
 //! Palace's windows, reopened as they were when Palace restarts itself, as into an
-//! update: each with the repository it had, where it was on the screen and how big.
+//! update: each with the tabs it had, where it was on the screen and how big.
 //! They're noted just before the restart (see restart_after_update), and the new copy
 //! takes the note once, as it starts. Otherwise Palace opens with its first window
 //! only, as it always does.
 //!
 //! On Linux under Wayland the desktop places windows itself, and doesn't say where
-//! they are, so there they reopen with their repositories and sizes, where it puts them.
+//! they are, so there they reopen with their tabs and sizes, where it puts them.
 
 use crate::store::seconds_now;
-use crate::windows::{make, open, show_first, show_themed, start_with, Windows};
+use crate::windows::{make, open, show_first, show_themed, start_with, Tabs, Windows};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,10 @@ type Pair = (f64, f64);
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 struct Placed {
+    tabs: Tabs,
+    /// The window's one repository, as a version before tabs noted it, read as its one
+    /// tab (see take).
+    #[serde(skip_serializing)]
     repo: Option<String>,
     corner: Option<Pair>,
     size: Option<Pair>,
@@ -69,7 +73,8 @@ pub fn remember(app: &AppHandle) {
 fn placed(app: &AppHandle, label: &str, window: &WebviewWindow) -> Placed {
     let scale = window.scale_factor().unwrap_or(1.0);
     Placed {
-        repo: crate::windows::repository_in(app, label),
+        tabs: crate::windows::tabs_in(app, label),
+        repo: None,
         corner: window.outer_position().ok().map(|p| p.to_logical::<f64>(scale)).map(|p| (p.x, p.y)),
         size: size_of(window, scale),
         maximized: window.is_maximized().unwrap_or(false),
@@ -102,37 +107,53 @@ fn take(path: &Path, now: u64) -> Vec<Placed> {
         return Vec::new();
     }
     note.windows
+        .into_iter()
+        .map(|mut window| {
+            if let Some(repo) = window.repo.take().filter(|_| window.tabs.repos.is_empty()) {
+                window.tabs = Tabs::one(repo);
+            }
+            window
+        })
+        .collect()
 }
 
 /// The windows to open, in order, the first in Palace's first window.
 ///
-/// - A repository is open in one window at a time, so a second window noted with one
-///   already noted isn't opened: both would find it open in the other, and open nothing.
-/// - One whose folder is gone (`exists` says) opens with none, to choose one in, rather
-///   than being kept as showing it, which would bring it forward whenever it's opened.
+/// - A repository is open in one tab at a time, so one noted again, after the first
+///   time, is left out: both would find it open in the other, and show nothing. A
+///   window whose tabs were all left out that way isn't opened.
+/// - One whose folder is gone (`exists` says) is left out too, rather than being kept
+///   as showing it, which would bring it forward whenever it's opened. A window whose
+///   tabs were all gone opens with none, to choose one in.
+/// - The tab that was showing shows again, or with it left out, the first.
 /// - The first window goes first, given a repository, as it was; otherwise any with
 ///   one, as the first window opens the last repository used when given none (see
-///   Workspace.vue), which could be open in another already.
+///   App.vue), which could be open in another already.
 fn in_order(windows: Vec<Placed>, exists: impl Fn(&str) -> bool) -> Vec<Placed> {
     let mut seen = HashSet::new();
     let mut windows: Vec<Placed> = windows
         .into_iter()
         .filter_map(|mut window| {
-            if let Some(repo) = window.repo.clone() {
-                if !seen.insert(repo.clone()) {
-                    return None;
-                }
-                if !exists(&repo) {
-                    window.repo = None;
-                }
+            let had = window.tabs.repos.len();
+            let showing = window.tabs.active.and_then(|at| window.tabs.repos.get(at)).cloned();
+            let mut again = 0;
+            window.tabs.repos.retain(|repo| {
+                let first_time = seen.insert(repo.clone());
+                again += usize::from(!first_time);
+                first_time && exists(repo)
+            });
+            if had > 0 && again == had {
+                return None;
             }
+            let repos = &window.tabs.repos;
+            window.tabs.active = showing.and_then(|repo| repos.iter().position(|r| *r == repo)).or((!repos.is_empty()).then_some(0));
             Some(window)
         })
         .collect();
     let first = windows
         .iter()
-        .position(|w| w.first && w.repo.is_some())
-        .or_else(|| windows.iter().position(|w| w.repo.is_some()))
+        .position(|w| w.first && !w.tabs.repos.is_empty())
+        .or_else(|| windows.iter().position(|w| !w.tabs.repos.is_empty()))
         .or_else(|| windows.iter().position(|w| w.first));
     if let Some(at) = first {
         let window = windows.remove(at);
@@ -188,9 +209,7 @@ pub fn show_windows(app: &AppHandle) {
     let windows = app.state::<Windows>();
     let mut front = None;
     if let Some(first) = noted.first() {
-        if let Some(repo) = &first.repo {
-            start_with(&windows, "main", repo.clone());
-        }
+        start_with(&windows, "main", first.tabs.clone());
         let (corner, size) = fit(first, &screens);
         if let Some((width, height)) = size {
             let _ = main.set_size(LogicalSize::new(width, height));
@@ -207,7 +226,7 @@ pub fn show_windows(app: &AppHandle) {
 
     for placed in noted.iter().skip(1) {
         // One that can't be made is left out, the others still reopening.
-        let Ok((_, mut builder)) = make(app, &windows, placed.repo.clone(), dark) else { continue };
+        let Ok((_, mut builder)) = make(app, &windows, placed.tabs.clone(), dark) else { continue };
         let (corner, size) = fit(placed, &screens);
         if let Some((width, height)) = size {
             builder = builder.inner_size(width, height);
@@ -230,22 +249,24 @@ pub fn show_windows(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    fn window(repo: Option<&str>) -> Placed {
-        Placed { repo: repo.map(String::from), corner: Some((10.0, 20.0)), size: Some((1200.0, 800.0)), ..Default::default() }
+    // A window with tabs open on `repos`, the first showing.
+    fn window(repos: &[&str]) -> Placed {
+        let tabs = Tabs { repos: repos.iter().map(|r| r.to_string()).collect(), active: (!repos.is_empty()).then_some(0) };
+        Placed { tabs, corner: Some((10.0, 20.0)), size: Some((1200.0, 800.0)), ..Default::default() }
     }
 
     fn note_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("palace-reopen-{name}-{}.json", std::process::id()))
     }
 
-    fn repos(windows: &[Placed]) -> Vec<Option<&str>> {
-        windows.iter().map(|w| w.repo.as_deref()).collect()
+    fn repos(windows: &[Placed]) -> Vec<Vec<&str>> {
+        windows.iter().map(|w| w.tabs.repos.iter().map(String::as_str).collect()).collect()
     }
 
     #[test]
     fn the_note_is_taken_once() {
         let path = note_file("once");
-        let windows = vec![window(Some("/code/palace")), window(None)];
+        let windows = vec![window(&["/code/palace"]), window(&[])];
         std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
         assert_eq!(take(&path, 1005), windows);
         assert!(!path.exists());
@@ -255,7 +276,7 @@ mod tests {
     #[test]
     fn a_note_left_from_long_ago_reopens_nothing() {
         let path = note_file("stale");
-        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: vec![window(Some("/code/a"))] }).unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: vec![window(&["/code/a"])] }).unwrap()).unwrap();
         assert_eq!(take(&path, 1000 + FRESH_FOR + 1), vec![]);
         assert!(!path.exists());
     }
@@ -274,28 +295,38 @@ mod tests {
     fn a_note_from_another_version_reads_what_it_has() {
         let path = note_file("version");
         std::fs::write(&path, r#"{"written": 1000, "windows": [{"repo": "/code/a", "spaces": 3}], "more": true}"#).unwrap();
-        assert_eq!(take(&path, 1000), vec![Placed { repo: Some("/code/a".into()), ..Default::default() }]);
+        // Before tabs, a window's one repository: its one tab now.
+        assert_eq!(take(&path, 1000), vec![Placed { tabs: Tabs::one("/code/a".into()), ..Default::default() }]);
+    }
+
+    #[test]
+    fn a_windows_tabs_are_noted_in_order_with_the_one_showing() {
+        let path = note_file("tabs");
+        let tabs = Tabs { repos: vec!["/code/a".into(), "/code/b".into()], active: Some(1) };
+        let windows = vec![Placed { tabs, first: true, ..Default::default() }];
+        std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
+        assert_eq!(take(&path, 1000), windows);
     }
 
     #[test]
     fn the_first_window_goes_first_given_a_repository() {
-        let first = Placed { first: true, ..window(Some("/code/b")) };
-        let ordered = in_order(vec![window(Some("/code/a")), first.clone(), window(None)], |_| true);
-        assert_eq!(repos(&ordered), [Some("/code/b"), Some("/code/a"), None]);
+        let first = Placed { first: true, ..window(&["/code/b"]) };
+        let ordered = in_order(vec![window(&["/code/a"]), first.clone(), window(&[])], |_| true);
+        assert_eq!(repos(&ordered), [vec!["/code/b"], vec!["/code/a"], vec![]]);
         assert!(ordered[0].first);
     }
 
     #[test]
     fn otherwise_any_window_with_a_repository_goes_first() {
-        let first = Placed { first: true, ..window(None) };
-        let ordered = in_order(vec![first, window(None), window(Some("/code/a"))], |_| true);
-        assert_eq!(repos(&ordered), [Some("/code/a"), None, None]);
+        let first = Placed { first: true, ..window(&[]) };
+        let ordered = in_order(vec![first, window(&[]), window(&["/code/a"])], |_| true);
+        assert_eq!(repos(&ordered), [vec!["/code/a"], vec![], vec![]]);
     }
 
     #[test]
     fn a_repository_noted_twice_opens_once() {
-        let ordered = in_order(vec![window(Some("/code/a")), window(Some("/code/b")), window(Some("/code/a"))], |_| true);
-        assert_eq!(repos(&ordered), [Some("/code/a"), Some("/code/b")]);
+        let ordered = in_order(vec![window(&["/code/a"]), window(&["/code/b", "/code/a", "/code/c"]), window(&["/code/a"])], |_| true);
+        assert_eq!(repos(&ordered), [vec!["/code/a"], vec!["/code/b", "/code/c"]]);
     }
 
     // A laptop's screen, and a larger one to its left, higher up.
@@ -334,7 +365,18 @@ mod tests {
 
     #[test]
     fn a_window_whose_repository_is_gone_opens_with_none() {
-        let ordered = in_order(vec![window(Some("/code/gone")), window(Some("/code/a"))], |path| path != "/code/gone");
-        assert_eq!(repos(&ordered), [Some("/code/a"), None]);
+        let ordered = in_order(vec![window(&["/code/gone"]), window(&["/code/a"])], |path| path != "/code/gone");
+        assert_eq!(repos(&ordered), [vec!["/code/a"], vec![]]);
+    }
+
+    #[test]
+    fn the_tab_showing_shows_again_or_with_it_gone_the_first() {
+        let showing_b = |repos: &[&str]| Placed { tabs: Tabs { active: Some(1), ..window(repos).tabs }, ..window(repos) };
+        let ordered = in_order(vec![showing_b(&["/code/a", "/code/b", "/code/c"])], |_| true);
+        assert_eq!(ordered[0].tabs.active, Some(1));
+        let ordered = in_order(vec![showing_b(&["/code/a", "/code/gone", "/code/c"])], |path| path != "/code/gone");
+        assert_eq!((repos(&ordered), ordered[0].tabs.active), (vec![vec!["/code/a", "/code/c"]], Some(0)));
+        let ordered = in_order(vec![showing_b(&["/code/a", "/code/b"])], |path| path == "/nothing");
+        assert_eq!(ordered[0].tabs.active, None);
     }
 }

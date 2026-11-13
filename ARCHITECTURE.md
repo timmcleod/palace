@@ -45,30 +45,37 @@ back only what the operation changed, and only if nothing else has changed it si
 
 ## Windows
 
-Each window shows one repository, with its own terminals, and a repository is open in
-one window at a time. The backend keeps track of what belongs to which window, and lets
-it all go when the window closes. Code that keeps per-window state on the backend should
-do the same.
+Each window holds repositories in tabs down its left side, each with its own terminals,
+and a repository is open in one tab at a time: opening it again shows that tab, and its
+window. The page tells the backend each window's tabs as they change
+(`set_window_tabs`), so another window can find one, and Palace reopens them after
+restarting itself (`reopen.rs`). The backend keeps track of what belongs to which window,
+and lets it all go when the window closes. Code that keeps per-window state on the
+backend should do the same.
 
 What it keeps for a repository, its file watcher, its history and its network work, is
 kept by window and repository (`per_repo.rs`), not by window alone, and the events they
-send say which repository they're about. So nothing assumes a window holds only one: a
-window done with a repository lets go of its part (`release_repo`), and the page hears
-only its own repository's events.
+send say which repository they're about. A tab done with a repository lets go of its
+part (`release_repo`), and each tab's page hears only its own repository's events.
+
+On a Mac, the File menu's New Tab and Close Tab take ⌘N and ⌘W (`menu.rs`), so Close
+Window, on ⇧⌘W, is the one that closes every tab at once, asking first as the window's
+close button does.
 
 ## The page
 
 - **`App.vue`** is the window: what's its own whatever it shows. It checks for git at
-  startup, shows the dialogs and menus over everything, asks before the window closes,
-  and hears what every window's agents are doing.
-- **`components/Workspace.vue`** is what the window shows: the open repository, the
-  state its views share (what's selected, the commit message being written) and the
-  wiring between them, or with none open, the welcome screen. It should stay wiring.
-  When a piece of it grows logic of its own, that logic moves out. A window can hold
-  more than one, each kept running while another shows, so what's meant for the whole
-  window (a key, the menu, a notice, the window's title) is acted on only by the one
-  showing, its `active` prop: composables take it as `active`, and components inside
-  read it with `inActiveWorkspace()`.
+  startup, holds the tabs (`tabs.js`, drawn by `TabStrip.vue`), shows the dialogs and
+  menus over everything, asks before a tab or the window closes, and hears what every
+  window's agents are doing.
+- **`components/Workspace.vue`** is a tab: the open repository, the state its views
+  share (what's selected, the commit message being written) and the wiring between
+  them, or with none open, the welcome screen. It should stay wiring. When a piece of
+  it grows logic of its own, that logic moves out. Each is kept running while another
+  shows, so what's meant for the whole window (a key, the menu, a notice, the window's
+  title) is acted on only by the one showing, its `active` prop: composables take it as
+  `active`, and components inside read it with `inActiveWorkspace()`. What's the
+  window's to do, opening a tab or closing its own, it asks `App.vue` for, by events.
 - **`src/lib/`** holds the logic, in plain modules. Some are composables, named
   `use…`, that own one job and its state for a window: loading and refreshing the
   repository, the terminal panel, keyboard shortcuts, undo, navigation and so on.

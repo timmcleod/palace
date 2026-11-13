@@ -240,7 +240,7 @@ pub fn run() {
             watch::watch_repo,
 
             windows::window_start,
-            windows::set_window_repo,
+            windows::set_window_tabs,
             windows::release_repo,
             windows::show_window_with,
             windows::show_notice,

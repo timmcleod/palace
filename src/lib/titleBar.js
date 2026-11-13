@@ -6,10 +6,11 @@ import { isMac } from "./platform.js";
 // empty parts then do what a title bar does: dragging moves the window, and
 // double-clicking zooms it. Screens without those bars, such as the welcome screen,
 // get a strip along the top instead. The GitHub view's headers count as bars, and in
-// Settings, whose page has none, so does a strip as tall as the toolbars elsewhere.
+// Settings, whose page has none, so does a strip as tall as the toolbars elsewhere. So
+// does the strip of tabs down the window's side, where there's no tab (see TabStrip.vue).
 
-const BARS = ".toolbar, .sidebar-toolbar, .title-strip, .owners-header, .repos-header";
-const CONTROLS = "button, a, input, select, textarea, label, [role=button]";
+const BARS = ".toolbar, .sidebar-toolbar, .title-strip, .owners-header, .repos-header, .tab-strip";
+const CONTROLS = "button, a, input, select, textarea, label, [role=button], [role=tab]";
 // The toolbars' height, which Settings' strip matches.
 const barHeight = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--toolbar-height")) || 56;
 

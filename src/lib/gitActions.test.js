@@ -219,18 +219,18 @@ describe("worktrees", () => {
     expect(ran()).toEqual([["add_worktree", { folder: "/code/palace-next", branch: "next", create: null, remote: false }]]);
   });
 
-  test("removing one open in another window says what stops there, and closes it", async () => {
+  test("removing one open in a tab says what stops there, and closes it", async () => {
     const other = worktree("/code/palace-feature", { branch: "feature" });
     const { actions, ran } = actionsOn({ worktrees: [main, other] });
     vi.mocked(invoke).mockImplementation(async (command) =>
-      command === "worktree_has_changes" ? false : { windows: ["window-2"], programs: ["claude"], edits: [] },
+      command === "worktree_has_changes" ? false : { programs: ["claude"], edits: [] },
     );
     vi.mocked(askConfirm).mockResolvedValue(true);
     await item(actions.worktreeMenu(other.path), "Remove…").action();
     const asked = vi.mocked(askConfirm).mock.calls[0][0];
-    expect(asked.message).toContain("Claude is still running in a terminal there, and is stopped.");
+    expect(asked.message).toContain("It's open in a tab, which closes. Claude is still running in a terminal there, and is stopped.");
     expect(asked.confirmLabel).toBe("Remove and Stop");
-    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: ["window-2"], force: false }]]);
+    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: true, force: false }]]);
   });
 
   test("removing one forgets the agent command New Agent Task gave it", async () => {
@@ -249,7 +249,7 @@ describe("worktrees", () => {
     vi.mocked(askConfirm).mockResolvedValue(true);
     await item(actions.worktreeMenu(other.path), "Remove…").action();
     expect(vi.mocked(askConfirm).mock.calls[0][0].confirmLabel).toBe("Remove and Lose Changes");
-    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: [], force: true }]]);
+    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: false, force: true }]]);
   });
 
   test("the repository's own, and the one showing, can't be removed", () => {

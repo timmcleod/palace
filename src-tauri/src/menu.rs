@@ -1,19 +1,29 @@
-//! The macOS menu bar: the system's usual menus, with the Palace menu's About Palace and
-//! Check for Updates… opening Palace's own page for them, the top of Settings, rather
-//! than the system's About panel, which can't check for updates or link anywhere. The
-//! window in front is told which was chosen ("menu"), and shows it.
+//! The macOS menu bar: the system's usual menus, as Tauri's default has them, with
+//! Palace's own where it differs.
+//!
+//! - The Palace menu's About Palace and Check for Updates… open Palace's own page for
+//!   them, the top of Settings, rather than the system's About panel, which can't check
+//!   for updates or link anywhere.
+//! - The File menu works on tabs: New Tab (⌘N) and Close Tab (⌘W), with New Window and
+//!   Close Window on ⇧⌘N and ⇧⌘W. The default's Close Window, on ⌘W, would close every
+//!   tab in the window at once.
+//!
+//! The window in front is told which was chosen ("menu"), and does it; Close Window
+//! closes it here, which asks first, as its close button does, with work to lose.
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, EventTarget, Manager};
+use tauri::menu::{HELP_SUBMENU_ID, Menu, MenuItem, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewWindow};
 
 /// What's chosen, as the page is told it.
 const ABOUT: &str = "about";
 const CHECK_FOR_UPDATES: &str = "check-for-updates";
+const NEW_TAB: &str = "new-tab";
+const NEW_WINDOW: &str = "new-window";
+const CLOSE_TAB: &str = "close-tab";
+/// Done here, not told.
+const CLOSE_WINDOW: &str = "close-window";
 
 pub fn set(app: &AppHandle) -> tauri::Result<()> {
-    let menu = Menu::default(app)?;
-    // The default's first menu is the Palace menu, which this one replaces, in the
-    // order the system's has.
     let palace = Submenu::with_items(
         app,
         "Palace",
@@ -31,23 +41,66 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::quit(app, None)?,
         ],
     )?;
-    menu.remove_at(0)?;
-    menu.prepend(&palace)?;
-    app.set_menu(menu)?;
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+N"))?,
+            &MenuItem::with_id(app, NEW_WINDOW, "New Window", true, Some("CmdOrCtrl+Shift+N"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
+            &MenuItem::with_id(app, CLOSE_WINDOW, "Close Window", true, Some("CmdOrCtrl+Shift+W"))?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let view = Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+    // By these ids, the system lists the windows in the one, and puts its search in the
+    // other.
+    let window = Submenu::with_id_and_items(
+        app,
+        WINDOW_SUBMENU_ID,
+        "Window",
+        true,
+        &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::maximize(app, None)?],
+    )?;
+    let help = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?;
+    app.set_menu(Menu::with_items(app, &[&palace, &file, &edit, &view, &window, &help])?)?;
     app.on_menu_event(|app, event| {
         let id = event.id().as_ref();
-        if id == ABOUT || id == CHECK_FOR_UPDATES {
+        if [ABOUT, CHECK_FOR_UPDATES, NEW_TAB, NEW_WINDOW, CLOSE_TAB].contains(&id) {
             tell_front_window(app, id);
+        } else if id == CLOSE_WINDOW
+            && let Some(window) = front_window(app)
+        {
+            let _ = window.close();
         }
     });
     Ok(())
 }
 
-/// Tells the window in front, or with none focused, any window, that `id` was chosen.
-fn tell_front_window(app: &AppHandle, id: &str) {
+/// The window in front, or with none focused, any window.
+fn front_window(app: &AppHandle) -> Option<WebviewWindow> {
     let windows = app.webview_windows();
-    let front = windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next());
-    if let Some(window) = front {
+    windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next()).cloned()
+}
+
+/// Tells the window in front that `id` was chosen.
+fn tell_front_window(app: &AppHandle, id: &str) {
+    if let Some(window) = front_window(app) {
         let _ = window.set_focus();
         let _ = app.emit_to(EventTarget::webview_window(window.label()), "menu", id);
     }

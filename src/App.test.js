@@ -77,7 +77,7 @@ beforeEach(() => {
   };
   answers = {
     git_check: { supported: true, version: "2.50.0" },
-    window_start: { repo: PALACE, first: true },
+    window_start: { tabs: { repos: [PALACE], active: 0 }, first: true },
     folders_gone: [],
     folder_exists: true,
     load_store: { "palace.recentRepositories": [{ name: "palace", path: PALACE }, { name: "other", path: OTHER }] },
@@ -121,7 +121,9 @@ async function until(seen) {
 
 const button = (text) => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
 const shown = (text) => document.body.textContent.includes(text);
-const subject = () => document.querySelector("input.subject");
+// What's in the tab showing: the others, hidden, are still in the page.
+const showing = () => [...document.querySelectorAll(".workspace")].find((el) => el.style.display !== "none") ?? document;
+const subject = () => showing().querySelector("input.subject");
 
 function choose(label) {
   const item = [...document.querySelectorAll(".menu [role=menuitem]")].find((i) => i.textContent.includes(label));
@@ -129,15 +131,15 @@ function choose(label) {
 }
 
 async function showWorkingCopy() {
-  [...document.querySelectorAll(".sidebar *")].find((el) => el.textContent.trim() === "Working Copy" && el.closest("[role], button, li, .row")).click();
+  [...showing().querySelectorAll(".sidebar *")].find((el) => el.textContent.trim() === "Working Copy" && el.closest("[role], button, li, .row")).click();
   await until(() => !!subject());
 }
 
 async function switchTo(name) {
-  document.querySelector("button.repo-name").click();
+  showing().querySelector("button.repo-name").click();
   await until(() => !!document.querySelector(".menu"));
   choose(name);
-  await until(() => document.querySelector(".repo-name")?.textContent.includes(name));
+  await until(() => showing().querySelector(".repo-name")?.textContent.includes(name));
 }
 
 let app;
@@ -183,7 +185,7 @@ test("a workspace that isn't the one showing leaves the window's title and keys 
   await loadStore();
   const { default: Workspace } = await import("./components/Workspace.vue");
   const showing = ref(false);
-  app = createApp({ render: () => h(Workspace, { ready: true, active: showing.value }) });
+  app = createApp({ render: () => h(Workspace, { ready: true, opens: PALACE, active: showing.value }) });
   const root = document.createElement("div");
   document.body.append(root);
   app.mount(root);
@@ -202,7 +204,7 @@ test("a workspace that isn't the one showing leaves the window's title and keys 
 test("a repository opened is the window's: the backend's told, the window's titled, and its folder watched", async () => {
   await start();
   await until(() => calls("watch_repo").length > 0);
-  expect(calls("set_window_repo").at(-1)).toEqual({ path: PALACE });
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE], active: 0 } });
   expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
   expect(calls("watch_repo")).toEqual([{ path: PALACE }]);
 });
@@ -242,12 +244,12 @@ test("a change the backend sees in the folder refreshes the repository, and one 
   expect(calls("repo_overview").length).toBeGreaterThan(before);
 });
 
-test("a folder that's gone says so, and its Close Window closes the window", async () => {
+test("a folder that's gone says so, and its Close Tab closes its tab, the window with its last", async () => {
   await start();
   answers.folder_exists = false;
   send("repo-changed", { path: PALACE });
   await until(() => shown("“palace” was moved or deleted"));
-  button("Close Window").click();
+  button("Close Tab").click();
   expect(window.close).toHaveBeenCalled();
 });
 
@@ -337,4 +339,117 @@ test("undo steps stay with their repository, while another's open", async () => 
   undoKey();
   await until(() => calls("restore_snapshot").length > 0);
   expect(calls("restore_snapshot")[0]).toMatchObject({ path: PALACE });
+});
+
+// --- Tabs --------------------------------------------------------------------------
+
+const tabNames = () => [...document.querySelectorAll(".tab-strip .tab .name")].map((el) => el.textContent);
+const showingTab = () => document.querySelector(".tab-strip .tab.active .name")?.textContent;
+const tabNamed = (name) => [...document.querySelectorAll(".tab-strip .tab")].find((el) => el.querySelector(".name")?.textContent === name);
+const press = (key, init = {}) =>
+  document.body.dispatchEvent(new KeyboardEvent("keydown", { key, code: init.code, metaKey: isMac, ctrlKey: !isMac, bubbles: true, cancelable: true, ...init }));
+const confirmShown = () => !!document.querySelector("[role=alertdialog]");
+
+// Opens a new tab, then the repository named `name` in it, from the welcome screen.
+async function openInNewTab(name) {
+  document.querySelector(".tab-strip .open").click();
+  await until(() => !!showing()?.querySelector(".recent"));
+  [...showing().querySelectorAll(".recent")].find((el) => el.textContent.includes(name)).click();
+  await until(() => showingTab() === name);
+}
+
+test("+ Open opens a tab to choose a repository in, which opens there, beside the other", async () => {
+  await start();
+  expect(tabNames()).toEqual(["palace"]);
+  await openInNewTab("other");
+  expect(tabNames()).toEqual(["palace", "other"]);
+  await until(() => calls("set_window_tabs").at(-1)?.tabs.repos.length === 2);
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE, OTHER], active: 1 } });
+  // Each keeps its own repository, watched, while the other shows.
+  expect(calls("watch_repo")).toEqual([{ path: PALACE }, { path: OTHER }]);
+  expect(calls("release_repo")).toEqual([]);
+  expect(window.setTitle).toHaveBeenLastCalledWith("other — Palace");
+});
+
+test("clicking a tab, or the keys for one, shows it, and the window's title names it", async () => {
+  await start();
+  await openInNewTab("other");
+  tabNamed("palace").click();
+  await until(() => showingTab() === "palace");
+  expect(window.setTitle).toHaveBeenLastCalledWith("palace — Palace");
+  press("2", { code: "Digit2" });
+  await until(() => showingTab() === "other");
+  press("Tab", { metaKey: false, ctrlKey: true, code: "Tab" });
+  await until(() => showingTab() === "palace");
+  // Only the tab showing acts on keys meant for one: ⌘R refreshes and fetches it.
+  press("r", { code: "KeyR" });
+  await until(() => calls("fetch").length > 0);
+  expect(calls("fetch").map((args) => args.path)).toEqual([PALACE]);
+});
+
+test("opening a repository open in another tab shows that tab rather than opening it twice", async () => {
+  await start();
+  await openInNewTab("other");
+  await switchTo("palace");
+  expect(tabNames()).toEqual(["palace", "other"]);
+  expect(showingTab()).toBe("palace");
+});
+
+test("closing a tab asks first when it has edits not saved, and the last tab closes the window", async () => {
+  await start();
+  await openInNewTab("other");
+  const { markUnsaved } = await import("./lib/editing.js");
+  markUnsaved(OTHER, "notes.txt", true);
+  tabNamed("other").querySelector(".close").click();
+  await until(() => shown("Edits to “notes.txt” aren't saved. Closing the tab loses them."));
+  button("Cancel").click();
+  await settle();
+  expect(tabNames()).toEqual(["palace", "other"]);
+
+  tabNamed("other").querySelector(".close").click();
+  await until(() => !!button("Close"));
+  button("Close").click();
+  await until(() => tabNames().length === 1);
+  // Gone with it: its edits, and its watcher.
+  const { unsavedFiles } = await import("./lib/editing.js");
+  expect(unsavedFiles()).toEqual([]);
+  await until(() => calls("release_repo").length > 0);
+  expect(calls("release_repo")).toEqual([{ path: OTHER }]);
+
+  tabNamed("palace").querySelector(".close").click();
+  await settle();
+  expect(window.close).toHaveBeenCalled();
+});
+
+test("the window starts with the tabs it had, the one that was showing showing", async () => {
+  answers.window_start = { tabs: { repos: [PALACE, OTHER], active: 1 }, first: false };
+  errors = [];
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: App } = await import("./App.vue");
+  app = createApp(App);
+  app.config.errorHandler = (error) => errors.push(error);
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => tabNames().join() === "palace,other" && showingTab() === "other");
+  expect(errors).toEqual([]);
+});
+
+test("another window asking for a repository open here shows its tab; a worktree removed closes its", async () => {
+  await start();
+  await openInNewTab("other");
+  send("show-repo", { path: PALACE });
+  await until(() => showingTab() === "palace");
+  send("close-repo", { path: OTHER });
+  await until(() => tabNames().join() === "palace");
+  // Asked already, as the worktree was removed: not again.
+  expect(confirmShown()).toBe(false);
+});
+
+test("a notice clicked shows the tab its terminal's repository is in", async () => {
+  await start();
+  await openInNewTab("other");
+  send("show-terminal-tab", { path: PALACE, key: 3 });
+  await until(() => showingTab() === "palace");
 });

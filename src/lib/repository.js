@@ -17,11 +17,26 @@ import { NOT_A_REPOSITORY, isError } from "./errors.js";
  *   onNotRepository(path, options) the folder chosen isn't a repository
  *   onOpenFailed(path, error)      the one chosen couldn't open, and the one showing
  *                                  stays
+ * And `openElsewhere(path)`, which shows the repository at `path` where it's open
+ * already, in another of the window's tabs or another window, and says whether it is;
+ * then it isn't opened here too.
  * Returns folderGone, whether the one showing's folder has gone, as removed or moved,
  * loadRepository, refresh, and loadsStarted, for telling which overviews were read
  * after something happened (each has `readAt`).
  */
-export function useRepository({ overview, loading, error, refreshKey, listsFiles, onSwitch, onLoaded, onNotRepository, onOpenFailed, active = () => true }) {
+export function useRepository({
+  overview,
+  loading,
+  error,
+  refreshKey,
+  listsFiles,
+  onSwitch,
+  onLoaded,
+  onNotRepository,
+  onOpenFailed,
+  openElsewhere = (path) => invoke("show_window_with", { path }).catch(() => false),
+  active = () => true,
+}) {
   // Each load gets a sequence number so a slow, older load can't overwrite a newer one.
   let loadSeq = 0;
   // The open repository's folder, once it's gone: removed as a worktree, or moved or
@@ -49,8 +64,8 @@ export function useRepository({ overview, loading, error, refreshKey, listsFiles
       // With another refresh to follow, as for files just staged, the files this one read
       // may be from before: they wait for it, rather than undo what the list shows.
       if (quiet && refreshAgain && data.path === overview.value?.path) data.files = overview.value.files;
-      // Open in another window already, that window comes forward instead.
-      if (data.path !== overview.value?.path && (await invoke("show_window_with", { path: data.path }).catch(() => false))) return;
+      // Open elsewhere already, that tab, or window, comes forward instead.
+      if (data.path !== overview.value?.path && (await openElsewhere(data.path))) return;
       if (seq !== loadSeq) return;
       if (data.path !== overview.value?.path) onSwitch(data);
       overview.value = data;

@@ -6,7 +6,7 @@ use crate::cli::git;
 use git2::{Repository, WorktreeLockStatus};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::AppHandle;
 
 #[derive(Serialize, Clone)]
 pub struct Worktree {
@@ -105,19 +105,12 @@ pub async fn add_worktree(path: String, folder: String, branch: String, create: 
 
 /// Removes the worktree at `worktree`: its folder, and the repository's note of it.
 /// With `force`, even with changes in it that would be lost, or while it's locked.
-/// The windows labeled `close`, which have it open, close first (see close_windows),
-/// so what their terminals run has stopped before its folder's deleted.
+/// With `close`, the tabs that have it open close first (see close_tabs_with), so what
+/// their terminals run has stopped before its folder's deleted.
 #[tauri::command]
-pub async fn remove_worktree(
-    app: AppHandle,
-    window: WebviewWindow,
-    path: String,
-    worktree: String,
-    force: bool,
-    close: Option<Vec<String>>,
-) -> Result<String, String> {
-    if let Some(labels) = close.filter(|labels| !labels.is_empty()) {
-        crate::windows::close_windows(&app, window.label(), labels).await;
+pub async fn remove_worktree(app: AppHandle, path: String, worktree: String, force: bool, close: Option<bool>) -> Result<String, String> {
+    if close.unwrap_or(false) {
+        crate::windows::close_tabs_with(&app, &worktree).await;
     }
     remove(&path, &worktree, force)
 }

@@ -40,6 +40,22 @@ export function tabsFor(path) {
   return terminals[path];
 }
 
+/**
+ * The labels of the repository's terminal tabs with something running in them other
+ * than the shell, as a dev server or an agent at work, which closing its tab stops.
+ */
+export async function busyIn(path) {
+  const tabs = terminals[path]?.tabs ?? [];
+  const busy = await Promise.all(tabs.map(isBusy));
+  return tabs.filter((_, i) => busy[i]).map(tabLabel);
+}
+
+/** Closes all the repository's terminal tabs, as when its tab in the window closes. */
+export function closeTerminalsOf(path) {
+  for (const tab of [...(terminals[path]?.tabs ?? [])]) removeTab(path, tab);
+  delete terminals[path];
+}
+
 // --- Agents -----------------------------------------------------------------------
 
 // Which agent a repository's agent tabs run, and what they're called: see agents.js.
@@ -552,6 +568,9 @@ function onKey(tab, event) {
   // Ctrl+' (Cmd+') shows and hides the panel, in Workspace.vue, and isn't typed.
   if ((isMac ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey && event.code === "Quote") return false;
   // Cmd+T (Ctrl+Shift+T) opens a terminal tab, in Workspace.vue, and isn't typed.
+  // Nor is Ctrl+Tab, or Ctrl+Shift+Tab, which shows another of the window's tabs (see
+  // App.vue).
+  if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab") return false;
   if (event.code === "KeyT" && !event.altKey && (isMac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey)) return false;
   if (!isMac && event.ctrlKey && !event.altKey && !event.metaKey) {
     if (event.shiftKey && event.code === "KeyC") {

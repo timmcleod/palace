@@ -56,7 +56,7 @@ export function markUnsaved(path, file, dirty) {
   if (dirty === unsaved.has(key)) return;
   if (dirty) unsaved.add(key);
   else unsaved.delete(key);
-  const files = unsavedFiles().map((f) => `“${f.file.split("/").pop()}” in ${folderName(f.path)}`);
+  const files = unsavedFiles().map((f) => ({ path: f.path, described: `“${f.file.split("/").pop()}” in ${folderName(f.path)}` }));
   invoke("set_unsaved_edits", { files }).catch(() => {});
 }
 
@@ -65,6 +65,16 @@ export function forgetEdits(path, file) {
   for (const key of [...unsaved, ...buffers.keys()]) {
     const [repo, edited] = key.split("\n");
     if (repo !== path || (edited !== file && !edited.startsWith(`${file}/`))) continue;
+    buffers.delete(key);
+    markUnsaved(repo, edited, false);
+  }
+}
+
+/** Drops the edits not saved in the repository at `path`, as when its tab closes. */
+export function forgetEditsIn(path) {
+  for (const key of [...unsaved, ...buffers.keys()]) {
+    const [repo, edited] = key.split("\n");
+    if (repo !== path) continue;
     buffers.delete(key);
     markUnsaved(repo, edited, false);
   }
