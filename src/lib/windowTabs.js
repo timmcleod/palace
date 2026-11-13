@@ -182,10 +182,16 @@ export function useTabs({ window }) {
   // A worktree removed (see close_tabs_with): its tab closes, the user having been asked
   // already about the worktree, and its terminals already hung up. What else the tab's
   // shown, that no other tab has, is asked about as closing it would be: kept, the tab
-  // stays, saying its folder's gone. The window goes with its last tab.
+  // stays, saying its folder's gone. The window goes with its last tab. With no tab
+  // showing it now, the tabs that did before let go of it, and stay.
   const unlistenCloseRepo = window.listen("close-repo", async ({ payload }) => {
     const tab = tabWith(tabs, payload.path);
-    if (!tab) return;
+    if (!tab) {
+      for (const other of tabs.list) other.seen = other.seen.filter((path) => path !== payload.path);
+      await letGoOf([payload.path]);
+      invoke("release_repo", { path: payload.path }).catch(() => {});
+      return;
+    }
     const removed = tab.path;
     if (!(await agreedToLose(leftBy(tabs, tab).filter((path) => path !== removed)))) return letGoOf([removed]);
     if (!tabs.list.includes(tab)) return;

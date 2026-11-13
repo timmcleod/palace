@@ -117,11 +117,14 @@ export function moveTab(tabs, id, to) {
 
 /**
  * The tabs as the backend keeps them (see Tabs in windows.rs): the repositories open,
- * in order, and which of them is showing, by its place among them. Tabs with none open
- * are left out, and a repository is open in one tab at a time.
+ * in order, and which of them is showing, by its place among them; and `kept`, those
+ * tabs showed before and keep the terminals and edits of, not open now. Tabs with none
+ * open are left out, and a repository is open in one tab at a time.
  */
 export function tabsForBackend(tabs) {
   const open = tabs.list.filter((tab) => tab.path);
   const at = open.findIndex((tab) => tab.id === tabs.active);
-  return { repos: open.map((tab) => tab.path), active: at < 0 ? null : at };
+  const repos = open.map((tab) => tab.path);
+  const kept = [...new Set(tabs.list.flatMap((tab) => tab.seen))].filter((path) => !repos.includes(path));
+  return { repos, active: at < 0 ? null : at, kept };
 }

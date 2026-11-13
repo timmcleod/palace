@@ -86,9 +86,9 @@ test("the backend's told the repositories open, in order, and which shows among 
   const tabs = tabsOf("/a");
   openTab(tabs);
   openTab(tabs, "/b");
-  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 1 });
+  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 1, kept: [] });
   showNumber(tabs, 2);
-  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: null });
+  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: null, kept: [] });
   expect(tabWith(tabs, null)).toBeNull();
 });
 
@@ -120,4 +120,14 @@ test("tabs are named for their repositories, with the folder they're in where tw
   expect(tabNames(tabs.list).get(code.id)).toBe("palace");
   expect(tabNames(tabs.list).get(shop.id)).toBe("shop");
   expect(tabNames(tabs.list).get(empty.id)).toBe("New Tab");
+});
+
+test("the backend's told the repositories tabs showed before and keep, once each, but not those open", () => {
+  const tabs = tabsOf("/a", "/b");
+  const [first, second] = tabs.list;
+  showIn(first, { path: "/w", name: "w", branch: "main" });
+  showIn(first, { path: "/a", name: "a", branch: "main" });
+  showIn(second, { path: "/w", name: "w", branch: "main" });
+  showIn(second, { path: "/b", name: "b", branch: "main" });
+  expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: 0, kept: ["/w"] });
 });

@@ -65,7 +65,16 @@ export function afterResolving(files, from, shown, asTree) {
  * first, past the end; null for none left.
  */
 export function nextConflicted(files, path, asTree) {
-  const listed = listedOrder(files ?? [], asTree);
+  files ??= [];
+  // Gone from the list, as a file resolved to the side already checked out, which
+  // leaves it unchanged, it goes on from where it was: put back where git lists it, by
+  // path, for the list to place it.
+  if (!files.some((f) => f.path === path)) {
+    const at = files.findIndex((f) => f.path > path);
+    const where = at < 0 ? files.length : at;
+    files = [...files.slice(0, where), { path, conflicted: false }, ...files.slice(where)];
+  }
+  const listed = listedOrder(files, asTree);
   const at = listed.findIndex((f) => f.path === path);
   const after = [...listed.slice(at + 1), ...listed.slice(0, Math.max(at, 0))];
   return after.find((f) => f.conflicted && f.path !== path) ?? null;

@@ -36,8 +36,13 @@ test("the next conflicted file is the one after, or the first past the end", () 
   expect(nextConflicted(files, "a.js").path).toBe("c.js");
   expect(nextConflicted(files, "c.js").path).toBe("d.js");
   expect(nextConflicted(files, "d.js").path).toBe("a.js");
-  // The one resolved may be gone from the list, as a file deleted.
+  // The one resolved may be gone from the list, as a file resolved to the side checked
+  // out, unchanged then, or deleted: it goes on from where that was.
   expect(nextConflicted(files, "b.js").path).toBe("c.js");
+  const gone = files.filter((f) => f.path !== "c.js");
+  expect(nextConflicted(gone, "c.js").path).toBe("d.js");
+  expect(nextConflicted(gone, "e.js").path).toBe("a.js");
+  expect(nextConflicted([], "a.js")).toBeNull();
   expect(nextConflicted([{ path: "a.js", conflicted: true }], "a.js")).toBeNull();
 });
 
@@ -49,6 +54,9 @@ test("the next conflicted file is the next as Working Copy lists them", () => {
   expect(nextConflicted(files, "README.md", true).path).toBe("Z.txt");
   expect(nextConflicted(files, "Z.txt", true).path).toBe("src/a.js");
   expect(nextConflicted(files, "README.md", false).path).toBe("Z.txt");
+  // Gone from the list, in a folder: on to what's after that folder.
+  const gone = [{ path: "lib/x.js", conflicted: true }, ...files, { path: "src/b.js", conflicted: true }].filter((f) => f.path !== "src/a.js");
+  expect(nextConflicted(gone, "src/a.js", true).path).toBe("src/b.js");
 });
 
 test("once one's resolved, the next shows, while it's still the one shown", () => {

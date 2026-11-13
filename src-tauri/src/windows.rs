@@ -22,13 +22,18 @@ pub struct Windows(Mutex<HashMap<String, Tabs>>);
 pub struct Tabs {
     pub repos: Vec<String>,
     pub active: Option<usize>,
+    /// Repositories a tab showed before the one it shows now, whose terminals and edits
+    /// it keeps: a worktree among them, removed, has those to stop too. Only told, by the
+    /// page: not saved for reopening, as a window starts with none kept.
+    #[serde(skip_serializing)]
+    pub kept: Vec<String>,
 }
 
 impl Tabs {
     /// One tab, with the repository at `path` open and showing, as a window noted before
     /// tabs had (see reopen.rs).
     pub fn one(path: String) -> Self {
-        Tabs { repos: vec![path], active: Some(0) }
+        Tabs { repos: vec![path], active: Some(0), ..Default::default() }
     }
 }
 
@@ -125,21 +130,29 @@ pub fn show_window_with(app: AppHandle, window: WebviewWindow, windows: State<'_
 /// lose.
 #[derive(Serialize)]
 pub struct Showing {
+    /// Whether a tab has it open, which closes, rather than only keeping its terminals and
+    /// edits from showing it before, which stop.
+    open: bool,
     /// The programs running in its terminals, by name, or None for one it can't tell.
     programs: Vec<Option<String>>,
     /// Its files with edits not saved.
     edits: Vec<String>,
 }
 
-/// The windows with the folder at `path` open in one of their tabs: each window's label,
-/// and the folder as its tab has it, however that was reached.
-fn windows_showing(windows: &Windows, path: &str) -> Vec<(String, String)> {
+/// The windows with the folder at `path` open in one of their tabs, or kept from a tab
+/// showing it before: each window's label, the folder as its tab has it, however that
+/// was reached, and whether it's open.
+fn windows_showing(windows: &Windows, path: &str) -> Vec<(String, String, bool)> {
     let path = same_folder(path);
     // Looked up with no lock held: see terminal::within.
     let open: Vec<(String, Tabs)> = windows.0.lock().unwrap().iter().map(|(label, tabs)| (label.clone(), tabs.clone())).collect();
     open.into_iter()
-        .flat_map(|(label, tabs)| tabs.repos.into_iter().map(move |repo| (label.clone(), repo)))
-        .filter(|(_, repo)| same_folder(repo) == path)
+        .flat_map(|(label, tabs)| {
+            let open = tabs.repos.into_iter().map(|repo| (repo, true));
+            let kept = tabs.kept.into_iter().map(|repo| (repo, false));
+            open.chain(kept).map(move |(repo, open)| (label.clone(), repo, open)).collect::<Vec<_>>()
+        })
+        .filter(|(_, repo, _)| same_folder(repo) == path)
         .collect()
 }
 
@@ -154,10 +167,12 @@ pub(crate) fn same_folder(path: &str) -> std::path::PathBuf {
 #[tauri::command]
 pub async fn window_showing(app: AppHandle, path: String) -> Option<Showing> {
     tauri::async_runtime::spawn_blocking(move || {
-        if windows_showing(&app.state::<Windows>(), &path).is_empty() {
+        let showing = windows_showing(&app.state::<Windows>(), &path);
+        if showing.is_empty() {
             return None;
         }
         Some(Showing {
+            open: showing.iter().any(|(_, _, open)| *open),
             programs: crate::terminal::busy_programs_in(&path),
             edits: crate::quit::unsaved_under(&path),
         })
@@ -171,7 +186,8 @@ pub async fn window_showing(app: AppHandle, path: String) -> Option<Showing> {
 /// user has been asked already, as about removing the worktree they show (see
 /// window_showing). Their terminals are hung up first, and what ran in them given a few
 /// seconds to stop, so it's done before the folder they were in is deleted; then each
-/// window's page is told to close its tab ("close-repo").
+/// window's page is told to close its tab ("close-repo"), or with the folder only kept
+/// from a tab showing it before, to let go of it.
 pub async fn close_tabs_with(app: &AppHandle, path: &str) {
     let labels = windows_showing(&app.state::<Windows>(), path);
     let folder = path.to_string();
@@ -180,7 +196,7 @@ pub async fn close_tabs_with(app: &AppHandle, path: &str) {
     })
     .await;
     // Told as its tab has it, which it finds the tab by.
-    for (label, repo) in labels {
+    for (label, repo, _) in labels {
         let _ = app.emit_to(EventTarget::webview_window(&label), "close-repo", Repository { path: repo });
     }
 }
@@ -351,6 +367,7 @@ fn saved_theme(app: &AppHandle, window: &WebviewWindow) -> (Option<Theme>, bool)
 pub fn release_repo(app: AppHandle, window: WebviewWindow, path: String) {
     app.state::<crate::watch::RepoWatcher>().release(window.label(), &path);
     app.state::<crate::history::HistoryState>().release(window.label(), &path);
+    app.state::<crate::cli::Runnings>().release(window.label(), &path);
 }
 
 /// Lets go of everything a closed window had: its terminals, the watch on its
@@ -379,12 +396,16 @@ mod tests {
         let _ = std::fs::remove_file(&link);
         std::os::unix::fs::symlink(&t.dir, &link).unwrap();
         let windows = Windows::default();
-        start_with(&windows, "main", Tabs { repos: vec!["/code/other".into(), folder.clone()], active: Some(0) });
-        start_with(&windows, "window-2", Tabs::one("/code/else".into()));
-        // Each window's told the folder as its tab has it.
-        let showing = [("main".to_string(), folder.clone())];
-        assert_eq!(windows_showing(&windows, &link.to_string_lossy()), showing);
-        assert_eq!(windows_showing(&windows, &format!("{folder}/")), showing);
+        start_with(&windows, "main", Tabs { repos: vec!["/code/other".into(), folder.clone()], active: Some(0), ..Default::default() });
+        start_with(&windows, "window-2", Tabs { kept: vec![folder.clone()], ..Tabs::one("/code/else".into()) });
+        // Each window's told the folder as its tab has it: open, or kept from before.
+        let showing = [("main".to_string(), folder.clone(), true), ("window-2".to_string(), folder.clone(), false)];
+        let mut found = windows_showing(&windows, &link.to_string_lossy());
+        found.sort();
+        assert_eq!(found, showing);
+        let mut found = windows_showing(&windows, &format!("{folder}/"));
+        found.sort();
+        assert_eq!(found, showing);
         assert!(windows_showing(&windows, "/code/nowhere").is_empty());
         std::fs::remove_file(&link).unwrap();
     }

@@ -118,6 +118,13 @@ impl Runnings {
         self.0.of(window, path)
     }
 
+    /// Lets go of a repository the window's done with, so a long-open window doesn't keep
+    /// one for every repository it's had. Work still running goes on to the end, holding
+    /// its own: a push isn't cut off as its tab closes.
+    pub fn release(&self, window: &str, path: &str) {
+        let _ = self.0.release(window, path);
+    }
+
     /// Stops the network work of a window that's closed.
     pub fn forget(&self, window: &str) {
         for running in self.0.forget(window) {

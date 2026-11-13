@@ -60,7 +60,7 @@ test("starts with the tabs the window had, the one that was showing showing; or 
   mounted.unmount();
   const first = await windowWith({ tabs: { repos: [], active: null }, first: true });
   expect([paths(first), first.first.value]).toEqual([["/code/last"], first.tabs.active]);
-  expect(invoke).toHaveBeenCalledWith("set_window_tabs", { tabs: { repos: ["/code/last"], active: 0 } });
+  expect(invoke).toHaveBeenCalledWith("set_window_tabs", { tabs: { repos: ["/code/last"], active: 0, kept: [] } });
 });
 
 test("a repository open in another tab shows that tab, and the empty tab it was chosen in goes", async () => {
@@ -141,4 +141,20 @@ test("a removed worktree's tab asks before what else it's shown is lost, and kep
   await vi.waitFor(() => expect(terminals.closeTerminalsOf).toHaveBeenCalledWith("/w"));
   expect(paths(w)).toEqual(["/w", "/b"]);
   expect(terminals.closeTerminalsOf).not.toHaveBeenCalledWith("/r");
+});
+
+test("a removed worktree only kept from before is let go of, and the tab that showed it stays", async () => {
+  const w = await windowWith({ tabs: { repos: ["/r", "/b"], active: 0 }, first: false });
+  const [tab] = w.tabs.list;
+  // The tab showed the worktree, then went back to the repository.
+  tab.path = "/w";
+  opened(tab);
+  tab.path = "/r";
+  opened(tab);
+  w.window.send("close-repo", { path: "/w" });
+  await vi.waitFor(() => expect(terminals.closeTerminalsOf).toHaveBeenCalledWith("/w"));
+  expect(paths(w)).toEqual(["/r", "/b"]);
+  expect(tab.seen).toEqual(["/r"]);
+  expect(invoke).toHaveBeenCalledWith("release_repo", { path: "/w" });
+  expect(askConfirm).not.toHaveBeenCalled();
 });

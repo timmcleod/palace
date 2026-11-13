@@ -9,12 +9,16 @@ import { settings } from "./settings.js";
 // the same in each.
 export const avatars = reactive({});
 
-// The repositories open, whose authors' pictures are asked for.
-const open = new Set();
+// The repositories open, whose authors' pictures are asked for, each with the emails
+// of those its reports brought: a repository closed takes those only it had with it, so
+// pictures don't pile up as one tab after another opens repositories.
+const open = new Map();
 
 listen("avatars", (event) => {
-  if (!open.has(event.payload.path) || !settings.githubAvatars) return;
-  Object.assign(avatars, event.payload.avatars);
+  const { path, avatars: found } = event.payload;
+  if (!open.has(path) || !settings.githubAvatars) return;
+  for (const email of Object.keys(found)) open.get(path).add(email);
+  Object.assign(avatars, found);
 });
 
 function clear() {
@@ -23,21 +27,24 @@ function clear() {
 
 /** Asks for the pictures of the authors in the repository at `path`, as it opens. */
 export function loadAvatars(path) {
-  open.add(path);
+  if (!open.has(path)) open.set(path, new Set());
   // Turned off in Settings: nothing is looked up, and everyone shows initials.
   if (settings.githubAvatars) invoke("github_avatars", { path }).catch(() => {});
 }
 
-/** The repository at `path` is closed: its pictures aren't asked for again. */
+/** The repository at `path` is closed: its pictures aren't asked for again, and those no other open one has go. */
 export function forgetAvatars(path) {
+  const emails = open.get(path);
   open.delete(path);
+  const kept = new Set([...open.values()].flatMap((theirs) => [...theirs]));
+  for (const email of emails ?? []) if (!kept.has(email)) delete avatars[email];
 }
 
 watch(
   () => settings.githubAvatars,
   (on) => {
     if (!on) return clear();
-    for (const path of open) loadAvatars(path);
+    for (const path of open.keys()) loadAvatars(path);
   },
 );
 

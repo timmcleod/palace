@@ -742,8 +742,9 @@ export function useGitActions({
 
   // What closing the tab a worktree's open in loses: what its terminals are running,
   // and edits not saved.
-  function lostWithItsTab({ programs, edits }) {
-    const lines = ["It's open in a tab, which closes."];
+  function lostWithItsTab({ open, programs, edits }) {
+    // Not open, a tab that showed it before keeps its terminals, which stop, and stays.
+    const lines = [open ? "It's open in a tab, which closes." : "A tab showed it before, and still has its terminals."];
     if (programs.length) {
       const names = programs.map((program) => (program ? (agentOfProgram(program) ?? `“${program}”`) : "a program"));
       const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;

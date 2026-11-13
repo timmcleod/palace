@@ -3,7 +3,7 @@ import { createApp, h } from "vue";
 import { shortcutFor, useShortcuts } from "./shortcuts.js";
 
 // A key press: "Cmd+Shift+Z", "Ctrl+T", "Alt+ArrowLeft", "/". `code` is the physical key,
-// where it matters (' and T), as a layout can put the character elsewhere.
+// where it matters ('), as a layout can put the character elsewhere.
 function press(keys, code) {
   const parts = keys.split("+");
   const key = parts.pop();
@@ -62,6 +62,14 @@ describe("shortcutFor", () => {
     expect(mac("Cmd+t", { inTerminal: true })).toBe("newTab");
     expect(linux("Ctrl+t")).toBe("newTab");
     expect(linux("Ctrl+t", { inTerminal: true })).toBeNull();
+  });
+
+  test("goes by the letter typed, not where it is on a US keyboard", () => {
+    // On Dvorak, Y is where T is on a US keyboard, and T where K is.
+    expect(linux("Ctrl+y", {}, "KeyT")).toBe("redo");
+    expect(linux("Ctrl+Shift+y", {}, "KeyT")).toBe("redo");
+    expect(linux("Ctrl+t", {}, "KeyK")).toBe("newTab");
+    expect(mac("Cmd+Shift+t", {}, "KeyK")).toBe("newTerminalTab");
   });
 
   test("goes between the window's tabs, from a terminal too where the keys are Palace's", () => {

@@ -44,7 +44,9 @@ export function shortcutFor(event, where, mac = isMac) {
   const alone = command && !event.shiftKey && !event.altKey;
 
   const palaces = (mac || !inTerminal) && !dialogOpen;
-  if (alone && event.code === "KeyT" && palaces) return "newTab";
+  // By the letter, as N and W are, and undo's Z and Y: by where T is on a US keyboard,
+  // Ctrl+Y on Dvorak, which is redo, would open a tab.
+  if (alone && key === "t" && palaces) return "newTab";
   if (alone && key === "n" && palaces) return "newWindow";
   if (alone && key === "w" && palaces && (mac || !inTextField)) return "closeTab";
   if (alone && /^Digit[1-9]$/.test(event.code) && palaces) return "showTab";
@@ -52,7 +54,7 @@ export function shortcutFor(event, where, mac = isMac) {
   const bracket = mac && event.metaKey && event.shiftKey && !event.altKey && (event.code === "BracketRight" || event.code === "BracketLeft");
   if ((tab || bracket) && !dialogOpen) return (tab ? event.shiftKey : event.code === "BracketLeft") ? "previousTab" : "nextTab";
   if (alone && event.code === "Quote" && repository && !dialogOpen) return "terminal";
-  if (command && event.shiftKey && !event.altKey && event.code === "KeyT" && repository && !dialogOpen) return "newTerminalTab";
+  if (command && event.shiftKey && !event.altKey && key === "t" && repository && !dialogOpen) return "newTerminalTab";
   if (inTerminal) return null;
 
   if (command && !event.altKey && (key === "z" || key === "y") && !inTextField && !dialogOpen) {

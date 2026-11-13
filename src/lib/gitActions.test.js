@@ -274,13 +274,26 @@ describe("worktrees", () => {
     const other = worktree("/code/palace-feature", { branch: "feature" });
     const { actions, ran } = actionsOn({ worktrees: [main, other] });
     vi.mocked(invoke).mockImplementation(async (command) =>
-      command === "worktree_has_changes" ? false : { programs: ["claude"], edits: [] },
+      command === "worktree_has_changes" ? false : { open: true, programs: ["claude"], edits: [] },
     );
     vi.mocked(askConfirm).mockResolvedValue(true);
     await item(actions.worktreeMenu(other.path), "Remove…").action();
     const asked = vi.mocked(askConfirm).mock.calls[0][0];
     expect(asked.message).toContain("It's open in a tab, which closes. Claude is still running in a terminal there, and is stopped.");
     expect(asked.confirmLabel).toBe("Remove and Stop");
+    expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: true, force: false }]]);
+  });
+
+  test("removing one a tab showed before says its terminals there stop, and the tab stays", async () => {
+    const other = worktree("/code/palace-feature", { branch: "feature" });
+    const { actions, ran } = actionsOn({ worktrees: [main, other] });
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "worktree_has_changes" ? false : { open: false, programs: ["npm"], edits: [] },
+    );
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await item(actions.worktreeMenu(other.path), "Remove…").action();
+    const asked = vi.mocked(askConfirm).mock.calls[0][0];
+    expect(asked.message).toContain("A tab showed it before, and still has its terminals. “npm” is still running in a terminal there, and is stopped.");
     expect(ran()).toEqual([["remove_worktree", { worktree: other.path, close: true, force: false }]]);
   });
 

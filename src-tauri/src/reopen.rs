@@ -315,7 +315,7 @@ mod tests {
 
     // A window with tabs open on `repos`, the first showing.
     fn window(repos: &[&str]) -> Placed {
-        let tabs = Tabs { repos: repos.iter().map(|r| r.to_string()).collect(), active: (!repos.is_empty()).then_some(0) };
+        let tabs = Tabs { repos: repos.iter().map(|r| r.to_string()).collect(), active: (!repos.is_empty()).then_some(0), ..Default::default() };
         Placed { tabs, corner: Some((10.0, 20.0)), size: Some((1200.0, 800.0)), ..Default::default() }
     }
 
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn a_windows_tabs_are_noted_in_order_with_the_one_showing() {
         let path = note_file("tabs");
-        let tabs = Tabs { repos: vec!["/code/a".into(), "/code/b".into()], active: Some(1) };
+        let tabs = Tabs { repos: vec!["/code/a".into(), "/code/b".into()], active: Some(1), ..Default::default() };
         let windows = vec![Placed { tabs, first: true, ..Default::default() }];
         std::fs::write(&path, serde_json::to_vec(&Note { written: 1000, windows: windows.clone() }).unwrap()).unwrap();
         assert_eq!(take(&path), windows);

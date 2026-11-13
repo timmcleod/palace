@@ -28,6 +28,17 @@ test("keeps the pictures of every repository open, together, and none of one nev
   forgetAvatars("/b");
 });
 
+test("a repository closed takes the pictures only it had with it", () => {
+  loadAvatars("/a");
+  loadAvatars("/b");
+  send("/a", { "ada@example.com": "https://avatars/ada", "both@example.com": "https://avatars/both" });
+  send("/b", { "both@example.com": "https://avatars/both" });
+  forgetAvatars("/a");
+  expect(avatars).toEqual({ "both@example.com": "https://avatars/both" });
+  forgetAvatars("/b");
+  expect(avatars).toEqual({});
+});
+
 test("turned off, everyone shows initials; turned on again, the repositories still open are asked", async () => {
   loadAvatars("/a");
   loadAvatars("/b");
