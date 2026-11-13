@@ -1,8 +1,9 @@
 //! What the backend keeps for each repository a window has open, by window and
 //! repository: its file watcher, its history and its network work. Each repository's is
 //! its own, so one loading or running doesn't wait for or replace another's, in the same
-//! window or another; a window that's done with a repository lets go of its part, and one
-//! that closes lets go of all of it.
+//! window or another. A window that's done with a repository lets go of its watcher and
+//! history, while network work under way goes on to the end; one that closes lets go of
+//! all of it.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

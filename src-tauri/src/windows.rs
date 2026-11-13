@@ -34,23 +34,16 @@ impl Tabs {
 
 static NEXT: AtomicU32 = AtomicU32::new(2);
 
-/// What each new window's agent is to start on, by window, as for a worktree made for a
-/// task (New Agent Task), until the window's page takes it as it starts.
-static TASKS: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
-
 /// How far each new window sits from the one it was opened from, so it doesn't hide it.
 const CASCADE: f64 = 28.0;
 
 #[derive(Serialize)]
 pub struct Start {
-    /// The tabs this window had, as when its page reloads, or is to open, as a new one
-    /// for a worktree is.
+    /// The tabs this window had, as when its page reloads, or is to open, as one
+    /// reopened after Palace restarts itself.
     tabs: Tabs,
     /// Whether it's the first window, which reopens the last repository at startup.
     first: bool,
-    /// What the agent of the tab showing is to start on, the first time only: not again
-    /// as its page reloads.
-    task: Option<String>,
 }
 
 /// What a window's page opens as it starts.
@@ -59,7 +52,6 @@ pub fn window_start(window: WebviewWindow, windows: State<'_, Windows>) -> Start
     Start {
         tabs: windows.0.lock().unwrap().get(window.label()).cloned().unwrap_or_default(),
         first: window.label() == "main",
-        task: TASKS.lock().unwrap().remove(window.label()),
     }
 }
 
@@ -243,23 +235,13 @@ pub(crate) struct TerminalTab {
     pub key: u32,
 }
 
-/// Opens a new window, a little below and to the right of `window`, with the repository
-/// at `path` open in its tab, or with none open yet. `dark` is the theme Palace
-/// is showing, which the window takes from the start: otherwise it shows white until
-/// its page has loaded and turned it dark.
+/// Opens a new window, a little below and to the right of `window`, with a tab to
+/// choose a repository in. `dark` is the theme Palace is showing, which the window takes
+/// from the start: otherwise it shows white until its page has loaded and turned it
+/// dark.
 #[tauri::command]
-pub async fn new_window(
-    app: AppHandle,
-    window: WebviewWindow,
-    windows: State<'_, Windows>,
-    dark: bool,
-    path: Option<String>,
-    task: Option<String>,
-) -> Result<(), String> {
-    let (label, mut builder) = make(&app, &windows, path.map(Tabs::one).unwrap_or_default(), dark)?;
-    if let Some(task) = task.filter(|t| !t.trim().is_empty()) {
-        TASKS.lock().unwrap().insert(label, task);
-    }
+pub async fn new_window(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, dark: bool) -> Result<(), String> {
+    let (_, mut builder) = make(&app, &windows, Tabs::default(), dark)?;
     if let (Ok(position), Ok(scale)) = (window.outer_position(), window.scale_factor()) {
         let position = position.to_logical::<f64>(scale);
         builder = builder.position(position.x + CASCADE, position.y + CASCADE);
@@ -302,8 +284,8 @@ pub(crate) fn tabs_in(app: &AppHandle, window: &str) -> Tabs {
 }
 
 /// Has the window labeled `window` open `tabs` as its page starts (see window_start),
-/// as a new one for a worktree does, or one with those it had before Palace restarted
-/// (see reopen.rs). Its page notes them again as they open, leaving out any it couldn't,
+/// as one does with those it had before Palace restarted (see reopen.rs), or a new one
+/// with none. Its page notes them again as they open, leaving out any it couldn't,
 /// so none stands for a repository that isn't showing.
 pub(crate) fn start_with(windows: &Windows, window: &str, tabs: Tabs) {
     windows.0.lock().unwrap().insert(window.to_string(), tabs);
@@ -363,7 +345,6 @@ pub fn release_repo(app: AppHandle, window: WebviewWindow, path: String) {
 /// repository, its history and network work, its edits, and its notifications.
 pub fn forget(app: &AppHandle, window: &str) {
     app.state::<Windows>().0.lock().unwrap().remove(window);
-    TASKS.lock().unwrap().remove(window);
     forget_agent_states(app, window);
     crate::terminal::close_window(window);
     app.state::<crate::watch::RepoWatcher>().forget(window);

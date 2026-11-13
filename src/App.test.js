@@ -65,6 +65,7 @@ const repository = (path, name, extra = {}) => ({
 });
 const PALACE = "/code/palace";
 const OTHER = "/code/other";
+const THIRD = "/code/third";
 const changed = (path, more = {}) => ({ path, old_path: null, staged: null, unstaged: "modified", conflicted: false, ...more });
 
 // What each command answers, by name: a value, or a function of its arguments.
@@ -74,13 +75,20 @@ beforeEach(() => {
   repositories = {
     [PALACE]: repository(PALACE, "palace", { changes: 1, files: [changed("README.md")] }),
     [OTHER]: repository(OTHER, "other", { changes: 1, files: [changed("notes.txt")] }),
+    [THIRD]: repository(THIRD, "third"),
   };
   answers = {
     git_check: { supported: true, version: "2.50.0" },
     window_start: { tabs: { repos: [PALACE], active: 0 }, first: true },
     folders_gone: [],
     folder_exists: true,
-    load_store: { "palace.recentRepositories": [{ name: "palace", path: PALACE }, { name: "other", path: OTHER }] },
+    load_store: {
+      "palace.recentRepositories": [
+        { name: "palace", path: PALACE },
+        { name: "other", path: OTHER },
+        { name: "third", path: THIRD },
+      ],
+    },
     repo_overview: ({ path }) => structuredClone(repositories[path]),
     working_status: ({ path }) => structuredClone(repositories[path].files),
   };
@@ -185,7 +193,7 @@ test("a workspace that isn't the one showing leaves the window's title and keys 
   await loadStore();
   const { default: Workspace } = await import("./components/Workspace.vue");
   const showing = ref(false);
-  app = createApp({ render: () => h(Workspace, { ready: true, opens: PALACE, active: showing.value }) });
+  app = createApp({ render: () => h(Workspace, { opens: PALACE, active: showing.value }) });
   const root = document.createElement("div");
   document.body.append(root);
   app.mount(root);
@@ -466,4 +474,136 @@ test("a notice clicked shows the tab its terminal's repository is in", async () 
   await openInNewTab("other");
   send("show-terminal-tab", { path: PALACE, key: 3 });
   await until(() => showingTab() === "palace");
+});
+
+// A terminal tab in the repository at `path`, with something running in it, or not.
+async function terminalIn(path, id, title, busy) {
+  const { tabsFor } = await import("./lib/terminals.js");
+  tabsFor(path).tabs.push({ id, key: id, title, kind: "shell", session: { term: { dispose() {} }, el: { remove() {} } } });
+  const before = answers.terminal_busy;
+  answers.terminal_busy = (args) => (args.id === id ? busy : (typeof before === "function" ? before(args) : false));
+}
+
+test("closing a tab asks about what runs in its terminals, those of a repository it showed before too, then stops them", async () => {
+  await start();
+  await openInNewTab("other");
+  await terminalIn(OTHER, 91, "npm run dev", true);
+  // The tab goes on to another repository: what runs in the one before goes on running.
+  await switchTo("third");
+  tabNamed("third").querySelector(".close").click();
+  await until(() => shown("“npm run dev” is still running. Closing the tab stops it."));
+  button("Close").click();
+  await until(() => calls("terminal_close").some((args) => args.id === 91));
+  expect(document.querySelector(".tab-strip")).toBeNull();
+});
+
+test("a tab with no repository closes without asking", async () => {
+  await start();
+  press("t", { code: "KeyT" });
+  await until(() => tabNames().length === 2);
+  press("w", { code: "KeyW" });
+  await until(() => !document.querySelector(".tab-strip"));
+  expect(confirmShown()).toBe(false);
+});
+
+test("the File menu opens and closes tabs, and opens windows, but not under a dialog", async () => {
+  await start();
+  send("menu", "new-tab");
+  await until(() => tabNames().length === 2);
+  send("menu", "new-window");
+  await until(() => calls("new_window").length > 0);
+  // Under a dialog, nothing.
+  const { tell } = await import("./lib/overlays.js");
+  tell("Something", "To read first.");
+  await until(confirmShown);
+  send("menu", "close-tab");
+  await settle();
+  expect(tabNames().length).toBe(2);
+  button("OK").click();
+  await until(() => !confirmShown());
+  send("menu", "close-tab");
+  await until(() => !document.querySelector(".tab-strip"));
+});
+
+test("a repository open in another window brings that forward, rather than opening here", async () => {
+  answers.show_window_with = ({ path }) => path === OTHER;
+  await start();
+  press("t", { code: "KeyT" });
+  await until(() => !!showing().querySelector(".recent"));
+  [...showing().querySelectorAll(".recent")].find((el) => el.textContent.includes("other")).click();
+  await until(() => calls("show_window_with").some((args) => args.path === OTHER));
+  await settle();
+  expect(tabNames()).toEqual(["palace", "New Tab"]);
+});
+
+test("a worktree removed that's the window's last tab closes the window, asked already", async () => {
+  await start();
+  send("close-repo", { path: PALACE });
+  await until(() => calls("quit_confirmed").length > 0);
+  expect(calls("quit_confirmed")).toEqual([{ quitting: false }]);
+});
+
+test("a notice clicked for a tab closed since opens it once, not twice", async () => {
+  await start();
+  await openInNewTab("other");
+  tabNamed("other").querySelector(".close").click();
+  await until(() => !document.querySelector(".tab-strip"));
+  const before = calls("repo_overview").filter((args) => args.path === OTHER).length;
+  send("show-terminal-tab", { path: OTHER, key: 3 });
+  await until(() => showingTab() === "other");
+  await settle();
+  expect(calls("repo_overview").filter((args) => args.path === OTHER).length - before).toBe(1);
+  expect(calls("set_window_tabs").at(-1)).toEqual({ tabs: { repos: [PALACE, OTHER], active: 1 } });
+});
+
+test("with git missing, the tabs the window had are kept for when it's found", async () => {
+  answers.git_check = { supported: false, version: "2.10.0" };
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: App } = await import("./App.vue");
+  app = createApp(App);
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => calls("git_check").length > 0);
+  await settle();
+  expect(calls("set_window_tabs")).toEqual([]);
+});
+
+test("a tab closed while it opens starts no agent on its task", async () => {
+  // The agent's there to start, so only the tab's being closed stops it.
+  answers.program_available = true;
+  let opened;
+  answers.repo_overview = ({ path }) => new Promise((resolve) => (opened = () => resolve(structuredClone(repositories[path]))));
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: Workspace } = await import("./components/Workspace.vue");
+  app = createApp({ render: () => h(Workspace, { opens: OTHER, task: "Fix the README" }) });
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => !!opened);
+  app.unmount();
+  app = null;
+  opened();
+  await settle();
+  // No agent tab made, to run with nothing to show it.
+  const { terminals } = await import("./lib/terminals.js");
+  expect(terminals[OTHER]?.tabs ?? []).toEqual([]);
+  expect(confirmShown()).toBe(false);
+});
+
+test("at startup, the last repository open in another window brings that forward, and this one starts with none", async () => {
+  answers.window_start = { tabs: { repos: [], active: null }, first: true };
+  answers.show_window_with = ({ path }) => path === PALACE;
+  const { loadStore } = await import("./lib/storage.js");
+  await loadStore();
+  const { default: App } = await import("./App.vue");
+  app = createApp(App);
+  const root = document.createElement("div");
+  document.body.append(root);
+  app.mount(root);
+  await until(() => calls("show_window_with").some((args) => args.path === PALACE));
+  await until(() => !!document.querySelector(".welcome"));
+  expect(calls("watch_repo")).toEqual([]);
 });

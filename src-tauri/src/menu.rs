@@ -9,7 +9,8 @@
 //!   tab in the window at once.
 //!
 //! The window in front is told which was chosen ("menu"), and does it; Close Window
-//! closes it here, which asks first, as its close button does, with work to lose.
+//! closes it here, which asks first, as its close button does, with work to lose. With
+//! no window in front, as with all of them minimized, closing does nothing.
 
 use tauri::menu::{HELP_SUBMENU_ID, Menu, MenuItem, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewWindow};
@@ -81,10 +82,14 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
     app.set_menu(Menu::with_items(app, &[&palace, &file, &edit, &view, &window, &help])?)?;
     app.on_menu_event(|app, event| {
         let id = event.id().as_ref();
-        if [ABOUT, CHECK_FOR_UPDATES, NEW_TAB, NEW_WINDOW, CLOSE_TAB].contains(&id) {
+        if [ABOUT, CHECK_FOR_UPDATES, NEW_TAB, NEW_WINDOW].contains(&id) {
             tell_front_window(app, id);
+        } else if id == CLOSE_TAB
+            && let Some(window) = focused_window(app)
+        {
+            let _ = app.emit_to(EventTarget::webview_window(window.label()), "menu", id);
         } else if id == CLOSE_WINDOW
-            && let Some(window) = front_window(app)
+            && let Some(window) = focused_window(app)
         {
             let _ = window.close();
         }
@@ -92,10 +97,15 @@ pub fn set(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The window in front, or with none focused, any window.
+/// The window in front, if one is: closing acts only on that, as the system's own Close
+/// Window does, never on one minimized or behind another app's.
+fn focused_window(app: &AppHandle) -> Option<WebviewWindow> {
+    app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false))
+}
+
+/// The window in front, or with none focused, any window, for what opens something.
 fn front_window(app: &AppHandle) -> Option<WebviewWindow> {
-    let windows = app.webview_windows();
-    windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next()).cloned()
+    focused_window(app).or_else(|| app.webview_windows().into_values().next())
 }
 
 /// Tells the window in front that `id` was chosen.

@@ -62,9 +62,14 @@ export function markUnsaved(path, file, dirty) {
 
 /** Drops the edits not saved to `file`, or to anything in it if it's a folder, as when it's deleted. */
 export function forgetEdits(path, file) {
+  forgetWhere((repo, edited) => repo === path && (edited === file || edited.startsWith(`${file}/`)));
+}
+
+// Drops the edits not saved to each file `which(repo, file)` picks.
+function forgetWhere(which) {
   for (const key of [...unsaved, ...buffers.keys()]) {
     const [repo, edited] = key.split("\n");
-    if (repo !== path || (edited !== file && !edited.startsWith(`${file}/`))) continue;
+    if (!which(repo, edited)) continue;
     buffers.delete(key);
     markUnsaved(repo, edited, false);
   }
@@ -72,12 +77,7 @@ export function forgetEdits(path, file) {
 
 /** Drops the edits not saved in the repository at `path`, as when its tab closes. */
 export function forgetEditsIn(path) {
-  for (const key of [...unsaved, ...buffers.keys()]) {
-    const [repo, edited] = key.split("\n");
-    if (repo !== path) continue;
-    buffers.delete(key);
-    markUnsaved(repo, edited, false);
-  }
+  forgetWhere((repo) => repo === path);
 }
 
 /** Moves the edits not saved to `from`, or to anything in it if it's a folder, as when it's renamed to `to`. */

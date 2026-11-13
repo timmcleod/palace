@@ -5,9 +5,9 @@ import { isMac } from "./platform.js";
 // edge, with the window buttons in the sidebar's, or with two tabs or more, in the
 // tabs' row (see tauri.macos.conf.json, TabStrip.vue). Their empty parts do what a
 // title bar does: dragging moves the window, and double-clicking zooms it. Screens
-// without those bars, such as the welcome screen, get a strip along the top instead. The GitHub view's headers count as
-// bars, and in Settings, whose page has none, so does a strip at its top as tall as the
-// toolbars elsewhere.
+// without those bars, such as the welcome screen, get a strip along the top instead.
+// The GitHub view's headers count as bars, and in Settings, whose page has none, so does
+// a strip at its top as tall as the toolbars elsewhere.
 
 const BARS = ".toolbar, .sidebar-toolbar, .title-strip, .owners-header, .repos-header, .tab-strip";
 const CONTROLS = "button, a, input, select, textarea, label, [role=button], [role=tab]";

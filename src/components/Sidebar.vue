@@ -24,6 +24,7 @@ import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { repositoryFolder } from "../lib/recents.js";
 import { splitKey } from "../lib/sidebarKeys.js";
 import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
+import { pointerDrag } from "../lib/rowDrag.js";
 
 const props = defineProps({
   overview: { type: Object, required: true },
@@ -106,9 +107,8 @@ function toggleSection(id) {
 // move. Dragging a branch, local or remote, onto the Branches header creates a branch
 // starting there.
 //
-// It's done with pointer events rather than the web view's drag and drop: during one
-// of those, the page doesn't hear keys pressed (GNOME on Wayland and macOS keep them
-// while they run the drag), so it couldn't tell Alt was held.
+// It's done with pointer events rather than the web view's drag and drop, so Alt is
+// heard (see rowDrag.js).
 
 // The name of the branch being dragged, if it can be merged; the row being dragged;
 // and where it would land: { key, merge } or { key, after }.
@@ -147,61 +147,68 @@ const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? splitKey
 const rowsByKey = computed(() => new Map(sections.value.flatMap((s) => s.rows.map((row) => [row.key, row]))));
 const scroller = ref(null);
 
-// How far the pointer moves, pressed, before it's a drag rather than a click.
-const DRAG_DISTANCE = 4;
-
-// What follows the pointer: the row's icon and name. What dropping would do is told
-// below where it'd land (see .drop-sentence).
-let dragImage = null;
-// The press that may become a drag: { row, element, x, y }.
-let pressed = null;
+// Where the pointer is while dragging, for what's under it, and the scrolling it does
+// near the list's ends.
 let pointer = null;
 let scrolling = 0;
 
+// See rowDrag.js for what's the same as dragging a tab.
+const drag = pointerDrag({
+  // What follows the pointer: the row's icon and name. What dropping would do is told
+  // below where it'd land (see .drop-sentence).
+  image({ data: row, element }) {
+    const image = document.createElement("div");
+    const icon = element.querySelector(".row-icon")?.cloneNode(true);
+    if (icon) image.append(icon);
+    image.append(row.divider ? row.label || "Divider" : row.label);
+    return image;
+  },
+  start({ data: row }) {
+    dragRow.value = row;
+    dragging.value = canMerge(row) && !row.head ? splitKey(row.key)[1] : null;
+    if (isMac) altPoll = setInterval(updateAlt, 100);
+  },
+  move(event) {
+    updateAlt(event);
+    pointer = { x: event.clientX, y: event.clientY };
+    aim();
+    if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
+  },
+  key(event) {
+    if (event.key !== "Alt") return;
+    event.preventDefault();
+    event.stopPropagation();
+    altHeld.value = event.type === "keydown";
+  },
+  drop(event) {
+    const row = dragRow.value;
+    const at = dropAt.value;
+    if (overBranches.value) {
+      emit("new-branch-from", draggedBranch());
+    } else if (at?.merge) {
+      emit(altHeld.value || (!isMac && event.altKey) ? "rebase-head-onto" : "merge-into-head", dragging.value);
+    } else if (at) {
+      const siblings = branchRows.value.filter((r) => r.parent === row.parent).map((r) => r.key);
+      moveKey(arrangedIn.value, row.key, at.key, at.after, siblings);
+    }
+  },
+  end() {
+    pointer = null;
+    cancelAnimationFrame(scrolling);
+    scrolling = 0;
+    dragging.value = null;
+    dragRow.value = null;
+    dropAt.value = null;
+    overBranches.value = false;
+    altHeld.value = false;
+    clearInterval(altPoll);
+    altPoll = 0;
+  },
+});
+
 function onPointerDown(row, event) {
   if (event.button !== 0 || !canDrag(row) || commandKey(event) || event.shiftKey) return;
-  pressed = { row, element: event.currentTarget, x: event.clientX, y: event.clientY };
-  window.addEventListener("pointermove", onPointerMove, true);
-  window.addEventListener("pointerup", onPointerUp, true);
-  window.addEventListener("pointercancel", endDrag, true);
-  window.addEventListener("keydown", onDragKey, true);
-  window.addEventListener("keyup", onDragKey, true);
-  window.addEventListener("blur", endDrag);
-}
-
-function startDrag() {
-  const { row, element } = pressed;
-  dragRow.value = row;
-  dragging.value = canMerge(row) && !row.head ? splitKey(row.key)[1] : null;
-  dragImage = document.createElement("div");
-  dragImage.className = "drag-image following";
-  const icon = element.querySelector(".row-icon")?.cloneNode(true);
-  if (icon) dragImage.append(icon);
-  dragImage.append(row.divider ? row.label || "Divider" : row.label);
-  document.body.append(dragImage);
-  document.body.classList.add("dragging-row");
-  if (isMac) altPoll = setInterval(updateAlt, 100);
-  window.getSelection()?.removeAllRanges();
-}
-
-function onPointerMove(event) {
-  if (!pressed) return;
-  if (!dragRow.value) {
-    if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < DRAG_DISTANCE) return;
-    startDrag();
-  }
-  event.preventDefault();
-  updateAlt(event);
-  pointer = { x: event.clientX, y: event.clientY };
-  // Held 14px into its left end, at its middle. With the pointer out of the window, it
-  // stays at the window's edge nearest it, as the page can't draw beyond the window.
-  const { offsetWidth: width, offsetHeight: height } = dragImage;
-  const x = Math.min(Math.max(pointer.x - 14, 0), innerWidth - width);
-  const y = Math.min(Math.max(pointer.y - height / 2, 0), innerHeight - height);
-  dragImage.style.transform = `translate(${x}px, ${y}px)`;
-  dragImage.style.visibility = "visible";
-  aim();
-  if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
+  drag.press(event, row);
 }
 
 // What's under the pointer, for where a drop would land.
@@ -230,70 +237,7 @@ function autoScroll() {
   scrolling = requestAnimationFrame(autoScroll);
 }
 
-function onDragKey(event) {
-  if (!dragRow.value) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    endDrag();
-  } else if (event.key === "Alt") {
-    event.preventDefault();
-    event.stopPropagation();
-    altHeld.value = event.type === "keydown";
-  }
-}
-
-function onPointerUp(event) {
-  const row = dragRow.value;
-  const at = dropAt.value;
-  const creates = overBranches.value;
-  const name = dragging.value;
-  const branch = draggedBranch();
-  const rebase = altHeld.value || (!isMac && event.altKey);
-  endDrag();
-  if (!row) return;
-  // The click that follows the release isn't one.
-  window.addEventListener("click", swallowClick, true);
-  setTimeout(() => window.removeEventListener("click", swallowClick, true));
-  if (creates) {
-    emit("new-branch-from", branch);
-  } else if (at?.merge) {
-    emit(rebase ? "rebase-head-onto" : "merge-into-head", name);
-  } else if (at) {
-    const siblings = branchRows.value.filter((r) => r.parent === row.parent).map((r) => r.key);
-    moveKey(arrangedIn.value, row.key, at.key, at.after, siblings);
-  }
-}
-
-function swallowClick(event) {
-  event.stopPropagation();
-  window.removeEventListener("click", swallowClick, true);
-}
-
-function endDrag() {
-  pressed = null;
-  pointer = null;
-  cancelAnimationFrame(scrolling);
-  scrolling = 0;
-  dragging.value = null;
-  dragRow.value = null;
-  dropAt.value = null;
-  overBranches.value = false;
-  altHeld.value = false;
-  clearInterval(altPoll);
-  altPoll = 0;
-  window.removeEventListener("pointermove", onPointerMove, true);
-  window.removeEventListener("pointerup", onPointerUp, true);
-  window.removeEventListener("pointercancel", endDrag, true);
-  window.removeEventListener("keydown", onDragKey, true);
-  window.removeEventListener("keyup", onDragKey, true);
-  window.removeEventListener("blur", endDrag);
-  document.body.classList.remove("dragging-row");
-  dragImage?.remove();
-  dragImage = null;
-}
-
-onBeforeUnmount(endDrag);
+onBeforeUnmount(() => drag.cancel());
 
 // Whether what dropping would do is told above where it'd land, rather than below,
 // for lack of room at the bottom of the sidebar. Asked again as the sidebar scrolls

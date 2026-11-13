@@ -32,8 +32,8 @@ const PUBLISH_KEY = "palace.publishNewBranches";
 // repository overview ref. `pullRequest` is { available(), create(branch) }, for
 // branches' Create Pull Request. `viewedBranch()` is the local branch whose history is
 // shown, when it isn't the current one. `openWorktree(path, { task })` opens a worktree
-// in a window of its own, or brings forward the one it's open in; with `task`, its agent
-// starts on that. `agentReady()` says whether the repository's agent can start, offering
+// in a tab of its own, or shows the one it's open in; with `task`, its agent starts on
+// that. `agentReady()` says whether the repository's agent can start, offering
 // to install it where it can't.
 export function useGitActions({
   overview,
@@ -602,7 +602,7 @@ export function useGitActions({
 
   // --- Worktrees -------------------------------------------------------------------
   // More working copies of the repository, each with its own branch checked out (see
-  // worktree.rs). Each opens in a window of its own.
+  // worktree.rs). Each opens in a tab of its own.
 
   const worktrees = () => overview.value?.worktrees ?? [];
   const worktreeOf = (branch) => overview.value?.branches.find((b) => b.name === branch)?.worktree ?? null;
@@ -650,7 +650,7 @@ export function useGitActions({
   }
 
   // A task for an agent to work on beside this one: a new branch, from the current one,
-  // in a worktree of its own, opened in a window of its own, where the agent starts on
+  // in a worktree of its own, opened in a tab of its own, where the agent starts on
   // what's said here. Several can go at once, each on its own branch.
   async function newTask() {
     // Without the agent, there'd be a worktree and nothing to work in it.
@@ -660,7 +660,7 @@ export function useGitActions({
     const draft = `new-task:${overview.value.path}`;
     const values = await openForm({
       title: "New Agent Task",
-      message: `A new branch from ${from}, in a worktree of its own, opens in a window where the agent starts on the task.`,
+      message: `A new branch from ${from}, in a worktree of its own, opens in a tab where the agent starts on the task.`,
       fields: [
         { key: "task", label: "What should the agent do?", type: "textarea" },
         { key: "name", label: "Branch name", type: "text", optional: true, placeholder: "Named after the task" },
@@ -700,7 +700,7 @@ export function useGitActions({
         changed
           ? `“${name}” has changes that haven't been committed. Removing the worktree deletes its folder, ${worktree.path}, and those changes with it.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}`
           : `This deletes its folder, ${worktree.path}.${worktree.branch ? ` The branch “${worktree.branch}” and its commits stay.` : ""}${worktree.locked ? " It's locked, so it's kept from being removed by mistake." : ""}`,
-        showing && openElsewhere(showing),
+        showing && lostWithItsTab(showing),
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -721,7 +721,7 @@ export function useGitActions({
 
   // What closing the tab a worktree's open in loses: what its terminals are running,
   // and edits not saved.
-  function openElsewhere({ programs, edits }) {
+  function lostWithItsTab({ programs, edits }) {
     const lines = ["It's open in a tab, which closes."];
     if (programs.length) {
       const names = programs.map((program) => (program ? (agentOfProgram(program) ?? `“${program}”`) : "a program"));
@@ -752,7 +752,7 @@ export function useGitActions({
       !worktree.main && { label: worktree.locked ? "Unlock" : "Lock", action: () => lockWorktree(worktree, !worktree.locked) },
       worktree.prunable && { label: "Prune Worktrees", action: pruneWorktrees },
       !worktree.main && { separator: true },
-      // Its own folder can't be deleted from under the window showing it.
+      // Its own folder can't be deleted from under the tab showing it.
       !worktree.main && { label: "Remove…", action: () => removeWorktree(worktree), disabled: worktree.current, danger: true },
     ];
   }

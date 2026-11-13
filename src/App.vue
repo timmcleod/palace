@@ -35,7 +35,7 @@ import {
 import { isMac } from "./lib/platform.js";
 import { lastRepository } from "./lib/recents.js";
 import { useShortcuts } from "./lib/shortcuts.js";
-import { activeTab, closeTab, moveTab, openTab, showNext, showNumber, tabWith, tabsForBackend } from "./lib/tabs.js";
+import { closeTab, closingLoses, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabWith, tabsForBackend } from "./lib/tabs.js";
 import { settings } from "./lib/settings.js";
 import { starRequest } from "./lib/star.js";
 import { updateNoticeShown } from "./lib/updates.js";
@@ -66,9 +66,8 @@ async function checkGit() {
   } finally {
     checkingGit.value = false;
   }
-  // With git missing, the window has no repositories: otherwise opening one it had in
-  // another window would bring this one forward (see show_window_with).
-  if (gitMissing.value) invoke("set_window_tabs", { tabs: { repos: [], active: null } }).catch(() => {});
+  // With git missing, the tabs it had, as after Palace restarted into an update, are
+  // kept, for when git's been installed and Recheck finds it.
   gitChecked.value = true;
 }
 
@@ -89,9 +88,9 @@ const workspaces = {};
 // where its views were scrolled to.
 const opened = computed(() => [...tabs.list].sort((a, b) => a.id - b.id));
 
-// What the window starts with: the tabs it had, as when its page reloads, or is to
-// open, as a new one for a worktree is; or in the first window at startup, the last
-// repository opened; otherwise one tab, to choose a repository in.
+// What the window starts with: the tabs it had, as when its page reloads or Palace has
+// restarted into an update; or in the first window at startup, the last repository
+// opened; otherwise one tab, to choose a repository in.
 async function startTabs() {
   const start = await invoke("window_start").catch(() => ({ tabs: { repos: [], active: null }, first: true }));
   const repos = [...(start.tabs?.repos ?? [])];
@@ -102,8 +101,6 @@ async function startTabs() {
   for (const path of repos) openTab(tabs, path);
   if (!tabs.list.length) openTab(tabs);
   tabs.active = (tabs.list[start.tabs?.active ?? 0] ?? tabs.list[0]).id;
-  // Opened for a task (New Agent Task), the tab showing's agent starts on it.
-  if (start.task) activeTab(tabs).task = start.task;
   if (start.first) tidies = tabs.active;
   started.value = true;
 }
@@ -130,12 +127,20 @@ watch(manyTabs, (many) => {
 });
 onBeforeUnmount(() => delete document.documentElement.dataset.tabs);
 
-// What a tab's workspace shows, for the tab to say.
-function onShows(tab, shown) {
-  tab.path = shown?.path ?? null;
-  tab.name = shown?.name ?? null;
-  tab.branch = shown?.branch ?? null;
-}
+// Leaving a tab, the keys go with it: a text field or terminal of one that's hidden
+// would otherwise go on taking what's typed.
+watch(
+  () => tabs.active,
+  async () => {
+    await nextTick();
+    const focused = document.activeElement;
+    if (focused?.closest?.(".workspace")?.style.display === "none") focused.blur();
+  },
+);
+
+// Whether a dialog or menu is open, the window's or the tab showing's own, as Create
+// Pull Request, which the window's keys and menu mustn't go out from under.
+const dialogOpen = () => overlayOpen() || !!workspaces[tabs.active]?.dialogOpen();
 
 /** Opens a tab to choose a repository in. */
 const newTab = () => openTab(tabs);
@@ -147,14 +152,15 @@ const newWindow = () =>
   );
 
 // Shows the repository at `path` where it's open already, rather than opening it again
-// in the tab `from`: in another tab here, or another window. Says whether it is.
+// in the tab `from`: in another tab here, or another window. Says whether it is. `from`
+// may have it already, as one opening it does: that isn't elsewhere.
 async function showElsewhere(path, from) {
   const other = tabWith(tabs, path);
   if (other && other !== from) {
     tabs.active = other.id;
     return true;
   }
-  return !other && (await invoke("show_window_with", { path }).catch(() => false));
+  return await invoke("show_window_with", { path }).catch(() => false);
 }
 
 // Opens the repository at `path` in a tab of its own, as for a worktree, with `task`
@@ -165,35 +171,40 @@ async function openRepoTab({ path, task = null }) {
 }
 
 // Closes the tab `id`, asking first while programs run in its terminals or its files
-// have edits not saved. Its terminals are hung up, and those edits let go of. The last
-// closes the window, which asks as its close button does.
+// have edits not saved, in any repository it's shown that no other tab has open (see
+// leftBy). Those terminals are hung up, and those edits let go of. The last closes the
+// window, which asks as its close button does.
 async function askToClose(id) {
   const tab = tabs.list.find((t) => t.id === id);
   if (!tab) return;
   if (tabs.list.length === 1) return thisWindow.close();
-  const { busyIn, closeTerminalsOf } = await import("./lib/terminals.js");
-  if (tab.path) {
-    if (settings.autoSave) await finishSaving();
-    const lines = [];
-    const edited = unsavedFiles().filter((f) => f.path === tab.path).map((f) => `“${f.file.split("/").pop()}”`);
-    if (edited.length) lines.push(`Edits to ${edited.join(", ")} aren't saved. Closing the tab loses them.`);
-    const running = (await busyIn(tab.path)).map((label) => `“${label}”`);
-    if (running.length === 1) lines.push(`${running[0]} is still running. Closing the tab stops it.`);
-    else if (running.length) lines.push(`${running.length} terminals are still running: ${running.join(", ")}. Closing the tab stops them.`);
-    const ok = !lines.length || (await askConfirm({ title: "Close Tab?", message: lines.join("\n\n"), confirmLabel: "Close", danger: true }));
-    if (!ok) return;
-  }
-  dropTab(tab, closeTerminalsOf);
+  const { busyIn } = await import("./lib/terminals.js");
+  if (settings.autoSave) await finishSaving();
+  const paths = leftBy(tabs, tab);
+  const edited = unsavedFiles()
+    .filter((f) => paths.includes(f.path))
+    .map((f) => f.file.split("/").pop());
+  const running = (await Promise.all(paths.map(busyIn))).flat();
+  const loses = closingLoses({ edited, running });
+  if (loses && !(await askConfirm({ title: "Close Tab?", message: loses, confirmLabel: "Close", danger: true }))) return;
+  // Meanwhile, another may have closed, or this one: the last closes the window.
+  if (!tabs.list.includes(tab)) return;
+  if (tabs.list.length === 1) return thisWindow.close();
+  dropTab(tab);
 }
 
-// Takes the tab away, with its terminals and edits not saved.
-function dropTab(tab, closeTerminalsOf) {
-  if (tab.path) {
-    closeTerminalsOf(tab.path);
-    forgetEditsIn(tab.path);
-  }
+// Takes the tab away, then, its workspace gone, the terminals and edits not saved of
+// what it's shown that no other tab has: before, its editor, closing, would keep its
+// edits again.
+async function dropTab(tab) {
+  const paths = leftBy(tabs, tab);
   closeTab(tabs, tab.id);
-  delete workspaces[tab.id];
+  await nextTick();
+  const { closeTerminalsOf } = await import("./lib/terminals.js");
+  for (const path of paths) {
+    closeTerminalsOf(path);
+    forgetEditsIn(path);
+  }
 }
 
 // A worktree removed (see close_tabs_with): its tab closes without asking, the user
@@ -203,8 +214,7 @@ const unlistenCloseRepo = thisWindow.listen("close-repo", async ({ payload }) =>
   const tab = tabWith(tabs, payload.path);
   if (!tab) return;
   if (tabs.list.length === 1) return invoke("quit_confirmed", { quitting: false }).catch(() => {});
-  const { closeTerminalsOf } = await import("./lib/terminals.js");
-  dropTab(tab, closeTerminalsOf);
+  dropTab(tab);
 });
 
 // Another window opening a repository open here shows its tab (see show_window_with).
@@ -223,12 +233,13 @@ const unlistenShowTerminalTab = thisWindow.listen("show-terminal-tab", async ({ 
 });
 
 // The File menu's items, on a Mac (see menu.rs); the Palace menu's are the workspace
-// showing's. Not while a dialog's open, which they'd go out from under.
+// showing's. Not while a dialog's open, which they'd go out from under. Before there are
+// tabs, as with git missing, Close Tab closes the window, as a new window's does.
 const unlistenMenu = thisWindow.listen("menu", ({ payload }) => {
-  if (!started.value || overlayOpen()) return;
-  if (payload === "new-tab") newTab();
+  if (dialogOpen()) return;
   if (payload === "new-window") newWindow();
-  if (payload === "close-tab") askToClose(tabs.active);
+  if (payload === "new-tab" && started.value) newTab();
+  if (payload === "close-tab") started.value ? askToClose(tabs.active) : thisWindow.close();
 });
 
 onBeforeUnmount(() => {
@@ -242,7 +253,7 @@ useShortcuts(
     inTerminal: !!event.target.closest?.(".terminal-panel"),
     inTextField: false,
     inEditor: false,
-    dialogOpen: overlayOpen(),
+    dialogOpen: dialogOpen(),
     repository: false,
   }),
   {
@@ -348,15 +359,14 @@ onBeforeUnmount(() => unlistenQuit.then((unlisten) => unlisten()));
       <!-- Hidden rather than removed, each tab's workspace goes on running. -->
       <div v-for="tab in opened" v-show="tab.id === tabs.active" :key="tab.id" class="workspace">
         <Workspace
-          :ref="(workspace) => (workspaces[tab.id] = workspace ?? undefined)"
-          ready
+          :ref="(workspace) => (workspace ? (workspaces[tab.id] = workspace) : delete workspaces[tab.id])"
           :opens="tab.path"
           :task="tab.task"
           :tidy-recents="tab.id === tidies"
           :open-elsewhere="(path) => showElsewhere(path, tab)"
           :agent-states="agentStates"
           :active="tab.id === tabs.active"
-          @shows="(shown) => onShows(tab, shown)"
+          @shows="(shown) => showIn(tab, shown)"
           @open-tab="openRepoTab"
           @new-tab="newTab"
           @new-window="newWindow"

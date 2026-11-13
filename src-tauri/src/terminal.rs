@@ -536,15 +536,17 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_window_waits_for_what_its_terminals_run_to_stop() {
+    fn closing_a_folders_terminals_waits_for_what_they_run_to_stop() {
         let dir = std::env::temp_dir().join(format!("palace-test-terminal-close-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        // In a folder of its own, so closing what's in it hangs up no other test's terminals.
+        // In a folder of its own, so closing what's in it hangs up no other test's
+        // terminals; started in a folder inside that, as a worktree's terminal can be.
+        let inner = dir.join("src");
+        std::fs::create_dir_all(&inner).unwrap();
         let window = "test-close-and-wait";
         let output = Channel::new(|_| Ok(()));
         let exited = Channel::new(|_| Ok(()));
-        let id = open(window.into(), dir.to_string_lossy().into_owned(), 80, 24, output, exited, None).unwrap();
+        let id = open(window.into(), inner.to_string_lossy().into_owned(), 80, 24, output, exited, None).unwrap();
         tauri::async_runtime::block_on(terminal_write(id, "sleep 30\n".into())).unwrap();
         let started = Instant::now();
         let front = loop {
@@ -558,7 +560,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         };
 
-        assert_eq!(busy_programs_in(&dir.to_string_lossy()), [Some("sleep".to_string())]);
+        // What's in front can be the shell for a moment yet, before it's become sleep.
+        while busy_programs_in(&dir.to_string_lossy()) != [Some("sleep".to_string())] {
+            assert!(started.elapsed() < Duration::from_secs(10), "sleep never showed as running");
+            std::thread::sleep(Duration::from_millis(50));
+        }
         close_in_and_wait(&dir.to_string_lossy(), Duration::from_secs(10));
         assert!(!still_running(front, true), "sleep is still running");
         assert!(busy_programs_in(&dir.to_string_lossy()).is_empty());

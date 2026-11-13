@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use crate::per_repo::PerRepo;
 use serde::Serialize;
-use tauri::{Emitter, EventTarget, WebviewWindow};
+use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
 
 /// The watcher for each repository a window has open (see per_repo.rs). Replacing one,
 /// or letting it go, stops it.
@@ -42,16 +42,24 @@ struct Changed {
     path: String,
 }
 
+/// Starts watching the repository at `path` for the window. Off the main thread: it
+/// walks the working tree first (see start), which takes a while in a large one, and a
+/// window opening several tabs at once would otherwise stand still for all of them.
 #[tauri::command]
-pub fn watch_repo(window: WebviewWindow, state: tauri::State<'_, RepoWatcher>, path: String) -> Result<(), String> {
-    let label = window.label().to_string();
-    let target = EventTarget::webview_window(label.clone());
-    let changed = Changed { path: path.clone() };
-    let watcher = start(&path, move || {
-        let _ = window.emit_to(target.clone(), "repo-changed", changed.clone());
-    })?;
-    state.0.set(&label, &path, watcher);
-    Ok(())
+pub async fn watch_repo(window: WebviewWindow, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let label = window.label().to_string();
+        let target = EventTarget::webview_window(label.clone());
+        let changed = Changed { path: path.clone() };
+        let emitter = window.clone();
+        let watcher = start(&path, move || {
+            let _ = emitter.emit_to(target.clone(), "repo-changed", changed.clone());
+        })?;
+        window.state::<RepoWatcher>().0.set(&label, &path, watcher);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Couldn't watch the repository: {e}"))?
 }
 
 /// Changes arriving closer together than this are reported once.

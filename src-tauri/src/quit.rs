@@ -96,12 +96,13 @@ pub fn set_unsaved_edits(window: WebviewWindow, files: Vec<Unsaved>) {
     UNSAVED.lock().unwrap().insert(window.label().to_string(), files);
 }
 
-/// The files with edits not saved in the repository at `path`, in any window, each
-/// described as “name” in repository.
+/// The files with edits not saved in the repository at `path`, or one in a folder in
+/// it, as terminals are counted (see busy_programs_in), in any window, each described as
+/// “name” in repository.
 pub fn unsaved_under(path: &str) -> Vec<String> {
     let folder = crate::windows::same_folder(path);
     let unsaved = UNSAVED.lock().unwrap();
-    unsaved.values().flatten().filter(|f| crate::windows::same_folder(&f.path) == folder).map(|f| f.described.clone()).collect()
+    unsaved.values().flatten().filter(|f| crate::windows::same_folder(&f.path).starts_with(&folder)).map(|f| f.described.clone()).collect()
 }
 
 /// Forgets the edits of a window that's closed.
@@ -117,5 +118,24 @@ pub fn quit_confirmed(app: AppHandle, window: WebviewWindow, quitting: bool) {
         app.exit(0);
     } else {
         let _ = window.destroy();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edits_not_saved_in_a_repository_or_one_in_a_folder_of_it_are_found_in_any_window() {
+        let unsaved = |path: &str, described: &str| Unsaved { path: path.into(), described: described.into() };
+        UNSAVED.lock().unwrap().insert("test-unsaved-1".into(), vec![unsaved("/code/palace-unsaved", "“a.rs” in palace")]);
+        UNSAVED.lock().unwrap().insert("test-unsaved-2".into(), vec![unsaved("/code/palace-unsaved/inner", "“b.rs” in inner"), unsaved("/code/other-unsaved", "“c.rs” in other")]);
+        let mut found = unsaved_under("/code/palace-unsaved");
+        found.sort();
+        assert_eq!(found, ["“a.rs” in palace", "“b.rs” in inner"]);
+        // A folder that only starts the same way isn't one in it.
+        assert!(unsaved_under("/code/palace").is_empty());
+        forget("test-unsaved-1");
+        forget("test-unsaved-2");
     }
 }

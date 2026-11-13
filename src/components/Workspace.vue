@@ -58,6 +58,7 @@ import {
   storeProblem,
   writeJson,
 } from "../lib/storage.js";
+import { panes, savePanes } from "../lib/panes.js";
 import { useGitActions } from "../lib/gitActions.js";
 import { useUndo } from "../lib/undo.js";
 import { useStatusCard } from "../lib/statusCard.js";
@@ -84,15 +85,13 @@ import { issueError } from "../lib/issues.js";
 import { pullRequestPlan } from "../lib/pullRequests.js";
 import { afterResolving } from "../lib/conflictText.js";
 
-// What a window shows: a repository, its views, and the state they share (what's
-// selected, the commit message being written), with the wiring between them; or with
-// none open, the welcome screen, to open one. What's the window's own, whatever it
-// shows, is App.vue's. Like App.vue was, it should stay wiring: when a piece of it
+// What a tab shows: a repository, its views, and the state they share (what's selected,
+// the commit message being written), with the wiring between them; or with none open,
+// the welcome screen, to open one. What's the window's own, whatever its tabs show, is
+// App.vue's. Like App.vue was, it should stay wiring: when a piece of it
 // grows logic of its own, that logic moves to src/lib/.
 
 const props = defineProps({
-  // Whether the window has found git usable, and this can open a repository.
-  ready: { type: Boolean, default: false },
   // The repository it opens as it starts, or null to choose one on the welcome screen;
   // and what that one's agent is to start on, as for a worktree made for a task.
   opens: { type: String, default: null },
@@ -101,8 +100,9 @@ const props = defineProps({
   // repositories that have gone off the list.
   tidyRecents: { type: Boolean, default: false },
   // Shows the repository at `path` where it's open already, in another of the window's
-  // tabs or another window, and says whether it is (see App.vue).
-  openElsewhere: { type: Function, default: (path) => invoke("show_window_with", { path }).catch(() => false) },
+  // tabs or another window, and says whether it is (see App.vue); without it, another
+  // window only (see repository.js).
+  openElsewhere: { type: Function, default: undefined },
   // What each repository's agents are doing, in every window, by path (see
   // agentStates.js), for Worktrees to show which is busy or wants you.
   agentStates: { type: Object, default: () => ({}) },
@@ -501,7 +501,7 @@ function focusToolbarSearch() {
 const inTextField = (target) => !!target.closest?.("input, textarea, select, [contenteditable]");
 const dialogOpen = () => overlayOpen() || !!pullRequestDialog.value;
 
-// The window's keyboard shortcuts: which key is which, and where each applies, is in
+// The tab's keyboard shortcuts: which key is which, and where each applies, is in
 // shortcuts.js; what each does is here.
 useShortcuts(
   (event) => ({
@@ -873,8 +873,13 @@ function letGo(path) {
   forgetAvatars(path);
 }
 
-// Gone, the backend lets go of the repository it showed too.
-onBeforeUnmount(() => overview.value && letGo(overview.value.path));
+// Gone, as its tab closes, the backend lets go of the repository it showed too, and what
+// it was fetching, pulling or pushing stops, with nothing left to show how it went.
+onBeforeUnmount(() => {
+  if (overview.value) letGo(overview.value.path);
+  if (remoteBusy.value && remoteOp.value?.cancellable) invoke("cancel_remote", { path: remoteOp.value.path }).catch(() => {});
+  stopBackgroundFetch();
+});
 
 // Recent repositories opened in other windows join the list here too.
 onBeforeUnmount(onSavedElsewhere((key) => key === RECENTS_KEY && (recents.value = recentRepositories())));
@@ -917,9 +922,7 @@ onBeforeUnmount(() => unlistenProgress.then((unlisten) => unlisten()));
 
 // --- Pane widths -------------------------------------------------------------------
 
-const PANES_KEY = "palace.paneWidths";
-const panes = reactive({ sidebar: 300, history: 580, terminal: 300, ...readJson(PANES_KEY, {}) });
-const savePanes = () => writeJson(PANES_KEY, { sidebar: panes.sidebar, history: panes.history, terminal: panes.terminal });
+// The same in every tab (see panes.js).
 
 function startResize(event, pane, min, max) {
   const startWidth = panes[pane];
@@ -1007,7 +1010,16 @@ const {
 
 // The window shows a terminal tab of this one's repository, as for its notice clicked
 // (see App.vue).
-defineExpose({ showTerminalTab });
+// The window asks too whether one of this tab's own dialogs is open, as Create Pull
+// Request is, which its keys mustn't go out from under (see App.vue).
+defineExpose({
+  // Once it's opened what it opens, so the terminal tab's repository isn't opened twice.
+  showTerminalTab: async (tab) => {
+    await started;
+    return showTerminalTab(tab);
+  },
+  dialogOpen,
+});
 
 // --- Review comments for the agent -------------------------------------------------
 
@@ -1081,7 +1093,7 @@ const { folderGone, loadRepository, refresh, loadsStarted } = useRepository({
     recents.value = recentRepositories();
   },
   onNotRepository: (path, options) => offerToCreateRepository(path, options),
-  openElsewhere: (path) => props.openElsewhere(path),
+  openElsewhere: props.openElsewhere,
   onOpenFailed(path, e) {
     showStatus({
       title: "Couldn't open the repository",
@@ -1178,9 +1190,14 @@ function removeRecent(path) {
 
 // --- Opening at startup ------------------------------------------------------------
 
-// Once the window has found git usable (see App.vue), what its tab gives it to open.
+// What its tab gives it to open, once it's in the page (the window's found git usable
+// first, see App.vue).
+let gone = false;
+onBeforeUnmount(() => (gone = true));
 async function start() {
   if (props.opens && !overview.value) await loadRepository(props.opens);
+  // Closed while it opened, there's nothing left to show it in: no agent's started.
+  if (gone) return;
   if (!overview.value) emit("shows", null);
   // Repositories deleted since Palace last ran are taken off the list, once, without
   // holding up what's opened.
@@ -1192,7 +1209,9 @@ async function start() {
   starting.value = false;
 }
 
-onMounted(() => watch(() => props.ready, (ready) => ready && start(), { immediate: true }));
+// Done once it's started, whether it opened anything or not.
+let started;
+onMounted(() => (started = start()));
 
 // Saved settings that couldn't be read are left alone until a restart, rather than
 // replaced by whatever's changed meanwhile.

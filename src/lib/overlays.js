@@ -140,7 +140,10 @@ export function askConfirm({ title, message, confirmLabel = "OK", danger = false
   });
 }
 
-/** Whether a dialog or menu is showing over the window. */
+/**
+ * Whether a dialog or menu is showing over the window: each of those above, which
+ * App.vue shows. A new one goes in both places.
+ */
 export const overlayOpen = () =>
   [formDialog, confirmDialog, contextMenu, mergeDialog, pullDialog, resetDialog, tagDialog, cloneDialog].some((d) => d.value);
 

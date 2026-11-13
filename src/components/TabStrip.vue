@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import Spinner from "./Spinner.vue";
 import { shortcut } from "../lib/platform.js";
+import { pointerDrag } from "../lib/rowDrag.js";
 import { dropPlace } from "../lib/tabs.js";
 
 // The window's tabs, across its top (see tabs.js): each a card naming its repository,
@@ -26,11 +27,8 @@ const titleOf = (tab) => [tab.path ?? "Choose a repository to open", agentOf(tab
 const detailOf = (tab) => [tab.branch, STATUS[agentOf(tab)]].filter(Boolean).join(" · ");
 
 // --- Dragging a tab to move it ------------------------------------------------------
-// As a branch is dragged in the sidebar (see Sidebar.vue): its name follows the pointer,
+// As a branch is dragged in the sidebar (see rowDrag.js): its name follows the pointer,
 // and a line shows where it would land; Escape, or dropping it anywhere else, leaves it.
-
-// How far the pointer moves, pressed, before it's a drag rather than a click.
-const DRAG_DISTANCE = 4;
 
 // The tabs' list, which a tab can be dropped in.
 const list = ref(null);
@@ -39,44 +37,29 @@ const list = ref(null);
 // tab `id`, or null for nowhere.
 const dragging = ref(null);
 const dropAt = ref(null);
-// The press that may become a drag, the pointer, and what follows it.
-let pressed = null;
-let dragImage = null;
+
+const drag = pointerDrag({
+  image({ data: tab }) {
+    const image = document.createElement("div");
+    image.textContent = tab.name ?? "New Tab";
+    return image;
+  },
+  start: ({ data: tab }) => (dragging.value = tab.id),
+  move: (event) => (dropAt.value = landing(event)),
+  drop() {
+    const at = dropAt.value;
+    const to = at && dropPlace({ list: props.tabs }, dragging.value, at.id, at.after);
+    if (to != null) emit("move", dragging.value, to);
+  },
+  end() {
+    dragging.value = null;
+    dropAt.value = null;
+  },
+});
 
 function onPointerDown(event, tab) {
   if (event.button !== 0 || event.target.closest(".close")) return;
-  pressed = { tab, x: event.clientX, y: event.clientY };
-  window.addEventListener("pointermove", onPointerMove, true);
-  window.addEventListener("pointerup", onPointerUp, true);
-  window.addEventListener("pointercancel", endDrag, true);
-  window.addEventListener("keydown", onDragKey, true);
-  window.addEventListener("blur", endDrag);
-}
-
-function startDrag() {
-  dragging.value = pressed.tab.id;
-  dragImage = document.createElement("div");
-  dragImage.className = "drag-image following";
-  dragImage.textContent = pressed.tab.name ?? "New Tab";
-  document.body.append(dragImage);
-  document.body.classList.add("dragging-row");
-  window.getSelection()?.removeAllRanges();
-}
-
-function onPointerMove(event) {
-  if (!pressed) return;
-  if (!dragging.value) {
-    if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < DRAG_DISTANCE) return;
-    startDrag();
-  }
-  event.preventDefault();
-  // Held 14px into its left end, at its middle, and kept in the window.
-  const { offsetWidth: width, offsetHeight: height } = dragImage;
-  const x = Math.min(Math.max(event.clientX - 14, 0), innerWidth - width);
-  const y = Math.min(Math.max(event.clientY - height / 2, 0), innerHeight - height);
-  dragImage.style.transform = `translate(${x}px, ${y}px)`;
-  dragImage.style.visibility = "visible";
-  dropAt.value = landing(event);
+  drag.press(event, tab);
 }
 
 // Where it would land: before or after the tab under the pointer, by which half it's
@@ -89,45 +72,7 @@ function landing(event) {
   return dropPlace({ list: props.tabs }, dragging.value, at.id, at.after) == null ? null : at;
 }
 
-function onDragKey(event) {
-  if (!dragging.value || event.key !== "Escape") return;
-  event.preventDefault();
-  event.stopPropagation();
-  endDrag();
-}
-
-function onPointerUp() {
-  const id = dragging.value;
-  const at = dropAt.value;
-  endDrag();
-  if (!id) return;
-  // The click that follows the release isn't one.
-  window.addEventListener("click", swallowClick, true);
-  setTimeout(() => window.removeEventListener("click", swallowClick, true));
-  const to = at && dropPlace({ list: props.tabs }, id, at.id, at.after);
-  if (to != null) emit("move", id, to);
-}
-
-function swallowClick(event) {
-  event.stopPropagation();
-  window.removeEventListener("click", swallowClick, true);
-}
-
-function endDrag() {
-  pressed = null;
-  dragging.value = null;
-  dropAt.value = null;
-  window.removeEventListener("pointermove", onPointerMove, true);
-  window.removeEventListener("pointerup", onPointerUp, true);
-  window.removeEventListener("pointercancel", endDrag, true);
-  window.removeEventListener("keydown", onDragKey, true);
-  window.removeEventListener("blur", endDrag);
-  document.body.classList.remove("dragging-row");
-  dragImage?.remove();
-  dragImage = null;
-}
-
-onBeforeUnmount(endDrag);
+onBeforeUnmount(() => drag.cancel());
 
 // The line where it would land, on the tab it's next to.
 const dropClass = (tab) => (dropAt.value?.id === tab.id ? (dropAt.value.after ? "drop-after" : "drop-before") : null);

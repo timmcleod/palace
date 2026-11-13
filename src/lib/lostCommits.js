@@ -37,7 +37,7 @@ export function describeLost(lost) {
     title,
     message: [
       ...lines,
-      "This wasn't done in this window: an agent, a command in a terminal, or another Palace window may have done it. Git keeps lost commits for a while; restored as a branch, they're kept.",
+      "This wasn't done in this window: an agent, a command in a terminal, or another Palace tab or window may have done it. Git keeps lost commits for a while; restored as a branch, they're kept.",
     ].join("\n"),
   };
 }

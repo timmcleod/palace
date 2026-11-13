@@ -58,7 +58,7 @@ kept by window and repository (`per_repo.rs`), not by window alone, and the even
 send say which repository they're about. A tab done with a repository lets go of its
 part (`release_repo`), and each tab's page hears only its own repository's events.
 
-On a Mac, the File menu's New Tab and Close Tab take ⌘N and ⌘W (`menu.rs`), so Close
+On a Mac, the File menu's New Tab and Close Tab take ⌘T and ⌘W (`menu.rs`), so Close
 Window, on ⇧⌘W, is the one that closes every tab at once, asking first as the window's
 close button does.
 

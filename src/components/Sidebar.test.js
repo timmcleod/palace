@@ -36,12 +36,13 @@ afterEach(() => {
 
 function sidebar(more) {
   const onCherryPick = vi.fn();
+  const onMergeIntoHead = vi.fn();
   const shown = ref(overview(more));
   const root = document.createElement("div");
   document.body.append(root);
-  app = createApp({ render: () => h(Sidebar, { overview: shown.value, onCherryPick }) });
+  app = createApp({ render: () => h(Sidebar, { overview: shown.value, onCherryPick, onMergeIntoHead }) });
   app.mount(root);
-  return { onCherryPick };
+  return { onCherryPick, onMergeIntoHead };
 }
 
 // A drag event of the web view's own: a commit's from the history, unless `types` says
@@ -130,5 +131,65 @@ describe("a commit dragged from another branch's history", () => {
     const over = dragEvent("dragover");
     row("branch:main").dispatchEvent(over);
     expect(over.defaultPrevented).toBe(false);
+  });
+});
+
+describe("a branch dragged by the pointer", () => {
+  // Each row 28 pixels tall, one under another, as laid out: the page under test has no
+  // layout of its own.
+  const ROW = 28;
+  const rows = () => [...document.querySelectorAll("[data-row]")];
+  function layOut() {
+    rows().forEach((el, i) => {
+      el.getBoundingClientRect = () => ({ top: i * ROW, height: ROW, bottom: (i + 1) * ROW, left: 0, right: 240, width: 240 });
+    });
+    document.elementFromPoint = (_, y) => rows()[Math.floor(y / ROW)] ?? null;
+  }
+  const at = (key) => rows().indexOf(row(key)) * ROW;
+  const pointer = (type, y) => new PointerEvent(type, { button: 0, clientX: 40, clientY: y, bubbles: true, cancelable: true });
+  const branchOrder = () => rows().map((el) => el.dataset.row).filter((key) => key.startsWith("branch:"));
+
+  async function drag(key, toY, { release = true } = {}) {
+    layOut();
+    row(key).dispatchEvent(pointer("pointerdown", at(key) + 14));
+    window.dispatchEvent(pointer("pointermove", at(key) + 30));
+    window.dispatchEvent(pointer("pointermove", toY));
+    await nextTick();
+    if (release) window.dispatchEvent(pointer("pointerup", toY));
+    await nextTick();
+  }
+
+  test("shows its name following the pointer, and onto the middle of HEAD's row, merges it there", async () => {
+    const { onMergeIntoHead } = sidebar();
+    layOut();
+    await drag("branch:feature", at("branch:main") + 14, { release: false });
+    expect(document.querySelector(".drag-image.following")?.textContent).toContain("feature");
+    window.dispatchEvent(pointer("pointerup", at("branch:main") + 14));
+    expect(onMergeIntoHead).toHaveBeenCalledWith("feature");
+    expect(document.querySelector(".drag-image")).toBeNull();
+  });
+
+  test("onto the edge of another branch's row, moves it there", async () => {
+    const { onMergeIntoHead } = sidebar();
+    layOut();
+    const before = branchOrder();
+    const [first, second] = before;
+    // Below the second's middle, past where it would merge.
+    await drag(first, at(second) + 26);
+    expect(onMergeIntoHead).not.toHaveBeenCalled();
+    expect(branchOrder()).toEqual([second, first]);
+  });
+
+  test("Escape leaves it where it was, and its release isn't a drop", async () => {
+    const { onMergeIntoHead } = sidebar();
+    layOut();
+    const before = branchOrder();
+    await drag("branch:feature", at("branch:main") + 14, { release: false });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    window.dispatchEvent(pointer("pointerup", at("branch:main") + 14));
+    await nextTick();
+    expect(onMergeIntoHead).not.toHaveBeenCalled();
+    expect(branchOrder()).toEqual(before);
+    expect(document.querySelector(".drag-image")).toBeNull();
   });
 });

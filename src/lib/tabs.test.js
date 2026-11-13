@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { activeTab, closeTab, dropPlace, moveTab, openTab, showNext, showNumber, tabWith, tabsForBackend } from "./tabs.js";
+import { activeTab, closeTab, closingLoses, dropPlace, leftBy, moveTab, openTab, showIn, showNext, showNumber, tabWith, tabsForBackend } from "./tabs.js";
 
 // Tabs with the repositories at `paths` open, the first showing.
 function tabsOf(...paths) {
@@ -90,4 +90,26 @@ test("the backend's told the repositories open, in order, and which shows among 
   showNumber(tabs, 2);
   expect(tabsForBackend(tabs)).toEqual({ repos: ["/a", "/b"], active: null });
   expect(tabWith(tabs, null)).toBeNull();
+});
+
+test("a tab remembers every repository it's shown, and closing it leaves those no other tab has", () => {
+  const tabs = tabsOf("/a", "/b");
+  const [first, second] = tabs.list;
+  showIn(first, { path: "/c", name: "c", branch: "main" });
+  showIn(first, { path: "/c", name: "c", branch: "next" });
+  expect(first).toMatchObject({ path: "/c", name: "c", branch: "next", seen: ["/a", "/c"] });
+  expect(leftBy(tabs, first)).toEqual(["/a", "/c"]);
+  // /a open in the other tab now: its terminals are that one's.
+  showIn(second, { path: "/a", name: "a", branch: "main" });
+  expect(leftBy(tabs, first)).toEqual(["/c"]);
+  showIn(first, null);
+  expect(first).toMatchObject({ path: null, name: null, branch: null });
+});
+
+test("what closing a tab would lose is said, one or many, or nothing", () => {
+  expect(closingLoses({ edited: [], running: [] })).toBeNull();
+  expect(closingLoses({ edited: ["a.txt", "b.txt"], running: ["npm run dev"] })).toBe(
+    "Edits to “a.txt”, “b.txt” aren't saved. Closing the tab loses them.\n\n“npm run dev” is still running. Closing the tab stops it.",
+  );
+  expect(closingLoses({ edited: [], running: ["Claude", "zsh"] })).toBe("2 terminals are still running: “Claude”, “zsh”. Closing the tab stops them.");
 });
