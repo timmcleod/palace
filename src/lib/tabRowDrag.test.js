@@ -92,6 +92,16 @@ test("dragged along the row, the tab's faded, the gap's where it'd land, and dro
   expect(root.querySelector(".dragging, .drop-before, .drop-after")).toBeNull();
 });
 
+test("what follows the pointer is marked as a tab's copy, to be drawn picked up", async () => {
+  const { root } = render(["k1", "k2"]);
+  root.querySelector('[data-key="k1"]').dispatchEvent(pointer("pointerdown", 50));
+  window.dispatchEvent(pointer("pointermove", 150));
+  const copy = document.body.querySelector(":scope > .following");
+  expect(copy.classList.contains("tab-copy")).toBe(true);
+  expect(copy.textContent).toBe("k1");
+  window.dispatchEvent(pointer("pointerup", 150));
+});
+
 test("let go well away from the row, or over where it was, it isn't moved", async () => {
   const { root, move } = render(["k1", "k2"]);
   root.querySelector('[data-key="k1"]').dispatchEvent(pointer("pointerdown", 50));

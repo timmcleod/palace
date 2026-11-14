@@ -700,6 +700,14 @@ kbd {
   opacity: 0.5;
 }
 
+/* Its copy following the pointer, picked up off the row: tilted a little. Turned and
+   scaled apart from the transform that places it (see rowDrag.js). Each row gives it
+   its own deeper shadow. */
+.tab-copy {
+  rotate: -1.5deg;
+  scale: 1.03;
+}
+
 .tab-row > .drop-before {
   margin-left: var(--drop-gap);
 }

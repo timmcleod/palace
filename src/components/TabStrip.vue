@@ -211,12 +211,9 @@ function onWheel(event) {
   background: var(--tab-color, var(--accent));
 }
 
-/* Its copy following the pointer as it's dragged, picked up off the row: tilted a
-   little, with a deeper shadow. Turned and scaled apart from the transform that places
-   it (see rowDrag.js). */
+/* Its copy following the pointer as it's dragged, picked up off the row (.tab-copy in
+   styles.css), with a deeper shadow. */
 .tab.following {
-  rotate: -1.5deg;
-  scale: 1.03;
   box-shadow:
     0 0 0 1px var(--border),
     0 12px 28px rgb(0 0 0 / 18%),

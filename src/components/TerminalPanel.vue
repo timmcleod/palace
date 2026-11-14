@@ -444,6 +444,15 @@ function startResize(event) {
   box-shadow: 0 0 0 1px var(--border);
 }
 
+/* Its copy following the pointer as it's dragged, picked up off the row (.tab-copy in
+   styles.css), with a deeper shadow, as the window's tabs' (TabStrip.vue). */
+.tab.following {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 12px 28px rgb(0 0 0 / 18%),
+    0 2px 6px rgb(0 0 0 / 8%);
+}
+
 .tab svg {
   flex-shrink: 0;
 }

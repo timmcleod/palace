@@ -87,7 +87,12 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
   }
 
   const drag = pointerDrag({
-    image: ({ element }) => image(element),
+    // Marked to be drawn picked up off the row (.tab-copy in styles.css).
+    image: ({ element }) => {
+      const copy = image(element);
+      copy.classList.add("tab-copy");
+      return copy;
+    },
     hold: ({ element, x, y }) => grabPoint(element, x, y),
     start({ data: key }) {
       dragging.value = key;
