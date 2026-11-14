@@ -53,11 +53,14 @@
   /* The tab showing, apart from the row of them (--sunken-bg) and those behind it. */
   --tab-active-bg: var(--content-bg);
   --content-bg: #ffffff;
-  /* What floats over the page (menus, cards, notices), raised from it. */
+  /* What floats over the page (cards, notices), raised from it. */
   --popover-bg: #ffffff;
   /* A shade below the page: a band set into it, as the terminal or the bar pinned over
      a commit's files, or a card over it that stands apart. */
   --sunken-bg: #f4f6f9;
+  /* Menus: halfway between the page and --sunken-bg, a little below the page, in either
+     theme. */
+  --menu-bg: color-mix(in srgb, var(--content-bg), var(--sunken-bg));
   --input-bg: #ffffff;
   --border: #e3e3e3;
   --row-hover: rgba(0, 0, 0, 0.04);

@@ -151,7 +151,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--popover-bg);
+  background: var(--menu-bg);
   box-shadow: var(--shadow-popover);
 }
 
