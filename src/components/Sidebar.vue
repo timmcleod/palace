@@ -23,8 +23,8 @@ import { githubAccount } from "../lib/github.js";
 import { branchOrder, dividerRows, moveKey } from "../lib/branchOrder.js";
 import { repositoryFolder } from "../lib/recents.js";
 import { splitKey } from "../lib/sidebarKeys.js";
-import { draggedCommits, isCommitDrag } from "../lib/commitDrag.js";
-import { edgeScroll, pointerDrag } from "../lib/rowDrag.js";
+import { commitPointer, draggedCommits, takeDroppedCommits } from "../lib/commitDrag.js";
+import { edgeScroller, pointerDrag } from "../lib/rowDrag.js";
 import { inMiddle, nearestPlace, placesAmong } from "../lib/branchDrag.js";
 import { dragCopy, grabPoint } from "../lib/dragImage.js";
 import { slideFrom } from "../lib/slide.js";
@@ -166,10 +166,8 @@ const draggedBranch = () => (dragRow.value && canMerge(dragRow.value) ? splitKey
 const rowsByKey = computed(() => new Map(sections.value.flatMap((s) => s.rows.map((row) => [row.key, row]))));
 const scroller = ref(null);
 
-// Where the pointer is while dragging, for what's under it, and the scrolling it does
-// near the list's ends.
+// Where the pointer is while dragging, for what's under it.
 let pointer = null;
-let scrolling = 0;
 
 // See rowDrag.js for what's the same as dragging a tab.
 const drag = pointerDrag({
@@ -188,7 +186,7 @@ const drag = pointerDrag({
     updateAlt(event);
     pointer = { x: event.clientX, y: event.clientY };
     aim();
-    if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
+    edgeScrolling.follow(pointer);
   },
   key(event) {
     if (event.key !== "Alt") return;
@@ -224,8 +222,7 @@ const drag = pointerDrag({
     places = [];
     gapAt.value = null;
     pointer = null;
-    cancelAnimationFrame(scrolling);
-    scrolling = 0;
+    edgeScrolling.stop();
     dragging.value = null;
     dragRow.value = null;
     dropAt.value = null;
@@ -271,32 +268,34 @@ function aim() {
   gapAt.value = at?.gap ?? null;
 }
 
-// Near the top or bottom of the list, it scrolls, faster the nearer the edge.
-function autoScroll() {
-  scrolling = 0;
-  const el = scroller.value;
-  if (!dragRow.value || !el || !pointer) return;
-  const rect = el.getBoundingClientRect();
-  const step = edgeScroll(pointer.y, rect.top, rect.bottom);
-  if (!step || pointer.x < rect.left || pointer.x > rect.right) return;
-  const before = el.scrollTop;
-  el.scrollTop += step;
-  if (el.scrollTop === before) return;
-  aim();
-  scrolling = requestAnimationFrame(autoScroll);
-}
+// Near the top or bottom of the list, with the pointer over it, it scrolls, faster the
+// nearer the edge, for a row dragged in it, or commits from the history (see below),
+// and what's under the pointer is looked at again.
+const edgeScrolling = edgeScroller({
+  element: () => scroller.value,
+  near: (at) => {
+    const rect = scroller.value?.getBoundingClientRect();
+    return !!rect && at.x >= rect.left && at.x <= rect.right;
+  },
+  scrolled: () => (dragRow.value ? aim() : findCommitTarget()),
+});
 
 onBeforeUnmount(() => drag.cancel());
 
-// Whether what dropping would do is told above where it'd land, rather than below,
-// for lack of room at the bottom of the sidebar. Asked again as the sidebar scrolls
-// under the pointer, which can bring where it'd land nearer the bottom.
+// Whether what dropping would do is told above where it'd land, rather than below:
+// for lack of room at the bottom of the sidebar; or for commits dragged from the
+// history, whose copy, a short card on the pointer (see HistoryList.vue), would hide it
+// below the row more than above, unless there's no room at the top. Asked again as the sidebar scrolls under
+// the pointer, which can bring where it'd land nearer either end.
 const sentenceAbove = ref(false);
 function placeSentence() {
   const sentence = scroller.value?.querySelector(".drop-sentence");
   if (!sentence) return;
-  const below = sentence.parentElement.getBoundingClientRect().bottom + 4 + sentence.offsetHeight;
-  sentenceAbove.value = below > scroller.value.getBoundingClientRect().bottom;
+  const row = sentence.parentElement.getBoundingClientRect();
+  const list = scroller.value.getBoundingClientRect();
+  const roomBelow = row.bottom + 4 + sentence.offsetHeight <= list.bottom;
+  const roomAbove = row.top - 4 - sentence.offsetHeight >= list.top;
+  sentenceAbove.value = commitOver.value ? roomAbove || !roomBelow : !roomBelow;
 }
 
 // Where a drop at `pointer` would land: merged into the HEAD branch, over the middle of
@@ -323,34 +322,36 @@ const dropClass = (row) => {
 
 // --- Commits dropped on the current branch --------------------------------------------
 // Commits dragged from another branch's history (see commitDrag.js) are cherry-picked
-// onto the current branch when they're dropped on its row. That drag is the web view's own,
-// and its events are apart from the pointer events branches are dragged with above, so
-// the two don't meet. Not while a merge or rebase waits on the user, as the menu has it.
+// onto the current branch when they're let go of over its row. The history says where
+// the pointer is, and this sidebar looks for that row there: under the pointer, so not
+// for a hidden tab's. Not while a merge or rebase waits on the user, as the menu has it.
 
 // The row commits are dragged over, ready to drop.
 const commitOver = ref(null);
-const takesCommit = (row, event) => !!(row.head && isCommitDrag(event) && !props.overview.operation);
-// Let go of, the row's let go of too.
-watch(draggedCommits, (commits) => commits || (commitOver.value = null));
 
-function onCommitDragOver(row, event) {
-  if (!takesCommit(row, event)) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-  commitOver.value = row.key;
+// The current branch's row, if it's under the pointer: looked for as the pointer moves,
+// and as the list scrolls under it, near its ends.
+function findCommitTarget() {
+  const at = commitPointer.value;
+  const element = at && draggedCommits.value?.length && document.elementFromPoint(at.x, at.y)?.closest?.("[data-row]");
+  const row = element && scroller.value?.contains(element) && rowsByKey.value.get(element.dataset.row);
+  commitOver.value = row?.head && !props.overview.operation ? row.key : null;
 }
 
-function onCommitDragLeave(row, event) {
-  if (commitOver.value === row.key && !event.currentTarget.contains(event.relatedTarget)) commitOver.value = null;
-}
+watch(commitPointer, (at) => {
+  findCommitTarget();
+  if (at && draggedCommits.value?.length) edgeScrolling.follow(at);
+  else edgeScrolling.stop();
+});
 
-function onCommitDrop(row, event) {
-  if (!takesCommit(row, event)) return;
-  event.preventDefault();
-  const commits = draggedCommits.value;
-  commitOver.value = null;
-  emit("cherry-pick", commits);
-}
+onBeforeUnmount(
+  takeDroppedCommits((commits) => {
+    if (!commitOver.value) return false;
+    commitOver.value = null;
+    emit("cherry-pick", commits);
+    return true;
+  }),
+);
 
 // Where what dropping would do is told, as the drop target or Alt changes (see
 // placeSentence): after the drop targets above, branches' and commits', are set up.
@@ -400,7 +401,7 @@ function onRowClick(row, event) {
       </button>
     </header>
 
-    <nav ref="scroller" class="sidebar-scroll" :class="{ sorting: dragRow }" @scroll.passive="dragRow && placeSentence()">
+    <nav ref="scroller" class="sidebar-scroll" :class="{ sorting: dragRow }" @scroll.passive="(dragRow || commitOver) && placeSentence()">
       <section v-for="section in sections" :key="section.id" class="section">
         <button
           class="section-header"
@@ -435,9 +436,6 @@ function onRowClick(row, event) {
             :title="dragRow ? undefined : row.title"
             :data-row="row.key"
             @pointerdown="onPointerDown(row, $event)"
-            @dragover="onCommitDragOver(row, $event)"
-            @dragleave="onCommitDragLeave(row, $event)"
-            @drop="onCommitDrop(row, $event)"
             @click="onRowClick(row, $event)"
             @dblclick="row.older || emit('activate', row)"
             @contextmenu.prevent="

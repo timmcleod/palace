@@ -24,6 +24,54 @@ export function edgeScroll(at, start, end) {
   return (Math.sign(into) * Math.min(SCROLL_EDGE, Math.abs(into))) / 2;
 }
 
+// How far beyond a list something dragged along it is let go of and still lands in
+// it, about a tab's height: a drag along it wanders, and missing it by a little
+// shouldn't lose it.
+export const DROP_REACH = 40;
+
+/**
+ * Scrolling a list near its ends while something's dragged over it, a frame at a time,
+ * by edgeScroll, for as long as the pointer stays there and it can go further:
+ *   element()        the list, which scrolls along `axis`, "x" or "y"
+ *   near(pointer)    whether the pointer's where it scrolls the list, as on it rather
+ *                    than beside it; by default, anywhere
+ *   scrolled()       it's scrolled, so where a drop would land has moved under the
+ *                    pointer
+ * Returns follow(pointer), as the pointer moves, { x, y } on the page; and stop(), as
+ * the drag ends.
+ */
+export function edgeScroller({ element, axis = "y", near = () => true, scrolled = () => {} }) {
+  let pointer = null;
+  let frame = 0;
+
+  function step() {
+    frame = 0;
+    const el = element();
+    if (!el || !pointer || !near(pointer)) return;
+    const rect = el.getBoundingClientRect();
+    const [at, start, end, scroll] = axis === "x" ? [pointer.x, rect.left, rect.right, "scrollLeft"] : [pointer.y, rect.top, rect.bottom, "scrollTop"];
+    const by = edgeScroll(at, start, end);
+    if (!by) return;
+    const before = el[scroll];
+    el[scroll] += by;
+    if (el[scroll] === before) return;
+    scrolled();
+    frame = requestAnimationFrame(step);
+  }
+
+  return {
+    follow(at) {
+      pointer = at;
+      if (!frame) frame = requestAnimationFrame(step);
+    },
+    stop() {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      pointer = null;
+    },
+  };
+}
+
 /**
  * A pointer drag, its parts the caller's own:
  *   image(pressed)  the element to follow the pointer, as the drag starts, styled as
@@ -32,6 +80,11 @@ export function edgeScroll(at, start, end) {
  *   hold(pressed)   the point in the image, { x, y } in CSS pixels, the pointer holds
  *                   it by; by default 14px into its left end, at its middle
  *   start(pressed)  as the drag starts, after the image is made
+ *   reshape(event, image)
+ *                   as the pointer moves, before the image is placed: the caller may
+ *                   change the image, as to a smaller one away from where it came from,
+ *                   and return the point to hold it by from now on, or nothing to go on
+ *                   holding it as it was
  *   move(event)     the pointer moved, the drag under way
  *   drop(event, image)
  *                   released, the drag under way: before end(), so what it reads of
@@ -40,7 +93,7 @@ export function edgeScroll(at, start, end) {
  *   end()           the drag over, dropped or not, to let go of what it had
  * Returns press(event, data), for the row's pointerdown, and cancel().
  */
-export function pointerDrag({ image, hold = null, start = () => {}, move = () => {}, drop = () => {}, key = () => {}, end = () => {} }) {
+export function pointerDrag({ image, hold = null, start = () => {}, reshape = () => null, move = () => {}, drop = () => {}, key = () => {}, end = () => {} }) {
   let pressed = null;
   let dragging = false;
   let following = null;
@@ -70,11 +123,15 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
     Object.assign(following.style, { position: "fixed", top: "0", left: "0", zIndex: "1000", visibility: "hidden", pointerEvents: "none", opacity: "0.9" });
     document.body.append(following);
     held = hold?.(pressed) ?? { x: 14, y: following.offsetHeight / 2 };
-    const drawn = following.getBoundingClientRect();
-    spill = { x: Math.max(0, (drawn.width - following.offsetWidth) / 2), y: Math.max(0, (drawn.height - following.offsetHeight) / 2) };
+    measureSpill();
     document.body.classList.add("dragging-row");
     window.getSelection()?.removeAllRanges();
     start(pressed);
+  }
+
+  function measureSpill() {
+    const drawn = following.getBoundingClientRect();
+    spill = { x: Math.max(0, (drawn.width - following.offsetWidth) / 2), y: Math.max(0, (drawn.height - following.offsetHeight) / 2) };
   }
 
   function onMove(event) {
@@ -84,7 +141,12 @@ export function pointerDrag({ image, hold = null, start = () => {}, move = () =>
       begin();
     }
     event.preventDefault();
-    // Held where hold() says. With the pointer out of the window, it stays at the
+    const regrip = reshape(event, following);
+    if (regrip) {
+      held = regrip;
+      measureSpill();
+    }
+    // Held where hold() says, or reshape() since. With the pointer out of the window, it stays at the
     // window's edge nearest it, as the page can't draw beyond the window, all of it as
     // drawn. Moved there by `translate`, which comes after any turn or scale its styles
     // give it, so those are about its own middle: with `transform`, they'd come after,

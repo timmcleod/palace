@@ -9,8 +9,11 @@ import { REF_ICONS, refBadges } from "../lib/refBadges.js";
 import { settings } from "../lib/settings.js";
 import CommitGraph from "./CommitGraph.vue";
 import { graphLayout, lanesOf } from "../lib/graphLayout.js";
-import { setDragImage } from "../lib/dragImage.js";
-import { COMMIT_TYPE, draggedCommits } from "../lib/commitDrag.js";
+import { dragCopy, grabPoint } from "../lib/dragImage.js";
+import { DROP_REACH, edgeScroller, pointerDrag } from "../lib/rowDrag.js";
+import { itemAt } from "../lib/listOffsets.js";
+import { commandKey } from "../lib/platform.js";
+import { commitLanding, commitPointer, draggedCommits, dropCommits, gapBefore } from "../lib/commitDrag.js";
 import { newestInView, slideDistance } from "../lib/historySlide.js";
 
 const props = defineProps({
@@ -33,8 +36,9 @@ const props = defineProps({
   // there: in another branch's history, a tag's or a remote branch's.
   pickable: { type: Boolean, default: false },
 });
-// "menu-many" is the context menu for several selected commits; "move" asks to move a
-// dragged commit above or below another; "count" reports how many commits are listed.
+// "menu-many" is the context menu for several selected commits; "move" asks to move
+// dragged commits, one or several, above or below another (see moveCommits); "count"
+// reports how many commits are listed.
 const emit = defineEmits(["select", "menu", "menu-many", "move", "count"]);
 
 const ROW_HEIGHT = 52;
@@ -99,6 +103,7 @@ async function load({ resetScroll }) {
     sliding?.cancel();
     pages.clear();
     summary.value = next;
+    if (!resetScroll && chosen.size) placeChosen(next.generation);
     if (firstPage) pages.set(0, firstPage);
     if (position != null && firstPage) slideIn(newestTop, position);
     emit("count", next.total);
@@ -119,6 +124,22 @@ async function load({ resetScroll }) {
     summary.value = null;
     error.value = String(e);
   }
+}
+
+// The commits chosen stay chosen as the history's read again, at where each is now,
+// found by its id: what's above them may have changed, as with a commit made in a
+// terminal, and dragging or squashing them goes by where they are. One that's gone from
+// it is let go of.
+async function placeChosen(generation) {
+  const entries = [...chosen.values()];
+  const places = await Promise.all(
+    entries.map(({ commit }) => invoke("history_position", { path: props.path, generation, id: commit.id }).catch(() => null)),
+  );
+  if (summary.value?.generation !== generation) return;
+  entries.forEach(({ commit }, i) => {
+    if (places[i] == null) chosen.delete(commit.id);
+    else chosen.set(commit.id, { commit, index: places[i] });
+  });
 }
 
 async function loadPage(page) {
@@ -208,26 +229,13 @@ async function slideIn(before, position) {
 }
 onBeforeUnmount(() => sliding?.cancel());
 
-// Binary search for the last item that starts at or above `y`.
-function itemAt(y) {
-  const { offsets } = layout.value;
-  let lo = 0;
-  let hi = offsets.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (offsets[mid] <= y) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-}
-
 const visible = computed(() => {
   const { items, offsets } = layout.value;
   if (!items.length) return [];
 
   const bottom = scrollTop.value + viewportHeight.value + OVERSCAN;
   const result = [];
-  for (let i = itemAt(Math.max(0, scrollTop.value - OVERSCAN)); i < items.length && offsets[i] < bottom; i++) {
+  for (let i = itemAt(offsets, Math.max(0, scrollTop.value - OVERSCAN)); i < items.length && offsets[i] < bottom; i++) {
     const item = items[i];
     const commit = commitAt(item.header ? item.next : item.index);
     // Its branches and tags as badges, worked out once for the row (see refBadges.js).
@@ -304,96 +312,166 @@ function onContextMenu(index, event) {
 }
 
 // --- Dragging to reorder, or to cherry-pick ----------------------------------------
-// In the current branch's own history, a commit's dragged to another place in it, to
-// move it there. In another's, to the sidebar's current branch, to cherry-pick it there
-// (see commitDrag.js), which the list itself doesn't take.
+// By the pointer, as a branch is in the sidebar (see rowDrag.js): a copy of the row
+// follows it, held where it was grabbed. In the current branch's own history, a commit's
+// dragged to another place in it, to move it there, or with several chosen, pressed on
+// one of them, all of them together: the rows below where they would go slide down to
+// open a gap, the graph's lanes running on through it, with a line in its middle. In
+// another's, to the sidebar's current branch, to cherry-pick them there (see
+// commitDrag.js).
 
-const DRAG_EDGE = 40;
-// The commit being moved: { commit, index }.
-let dragged = null;
-let dragImage = null;
-// Where a dropped commit would go: { index, above }.
+// How tall the gap opened where a commit would go is.
+const DROP_GAP = 20;
+// Away from the list, as over the sidebar's branches, the copy dragged is a compact card
+// this wide and high, held by its middle, so it covers little around the pointer, and
+// what's said about dropping there shows clear of it (see placeSentence in Sidebar.vue).
+const COMPACT_WIDTH = 240;
+const COMPACT_HEIGHT = 34;
+const COMPACT_GRIP = { x: COMPACT_WIDTH / 2, y: COMPACT_HEIGHT / 2 };
+
+// The commits being moved, each { commit, index }, newest first, or null.
+const dragged = shallowRef(null);
+// Where they would go: { index, above }, above or below that commit (see commitLanding).
 const dropAt = ref(null);
+// Whether a drag's under way, to move or to cherry-pick, and where the pointer is.
+let dragging = false;
+let pointer = null;
+// How the copy dragged is held and sized over the list, to go back to from the compact
+// card: { grip, width, height }; and whether it's that card now.
+let fullCopy = null;
+let compact = false;
 
 // Reordering is only of the branch's own commits, not those its upstream has that it
 // hasn't pulled (`incoming`); any shown can be cherry-picked.
 const canDrag = (commit) => props.editable && commit && !commit.incoming;
 const canPick = (commit) => props.pickable && !!commit;
 
-function onDragStart(index, event) {
-  // A drag holds back the pointer leaving the badges, which would close their card.
-  refsCard.value = null;
-  const commit = commitAt(index);
-  const moving = canDrag(commit);
-  if (!moving && !canPick(commit)) {
-    event.preventDefault();
-    return;
-  }
-  // To cherry-pick: the commit, or the several chosen with it, oldest first, as they're
-  // picked. The list is newest first.
-  const picking = moving ? [] : chosen.size > 1 && chosen.has(commit.id) ? [...chosen.values()].sort((a, b) => b.index - a.index).map((c) => c.commit) : [commit];
-  if (moving) dragged = { commit, index };
-  else draggedCommits.value = picking;
-  event.dataTransfer.effectAllowed = moving ? "move" : "copy";
-  event.dataTransfer.setData("text/plain", picking.length > 1 ? picking.map((c) => c.short_id).join(" ") : commit.short_id);
-  if (!moving) event.dataTransfer.setData(COMMIT_TYPE, picking.map((c) => c.id).join(" "));
-  // A compact image of what's being dragged: a commit's short hash and summary, or how
-  // many commits there are.
-  dragImage = document.createElement("div");
-  dragImage.className = "drag-image";
-  dragImage.textContent = picking.length > 1 ? `${picking.length} commits` : `${commit.short_id}  ${commit.summary}`;
-  document.body.append(dragImage);
-  setDragImage(event, dragImage);
-}
-
-function onDragOver(index, event) {
-  const target = commitAt(index);
-  if (!dragged || !canDrag(target)) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
-  const rect = event.currentTarget.getBoundingClientRect();
-  const above = event.clientY < rect.top + rect.height / 2;
-  // Dropping a commit right where it is changes nothing.
-  const same = target.id === dragged.commit.id || (above ? index === dragged.index + 1 : index === dragged.index - 1);
-  dropAt.value = same ? null : { index, above };
-}
-
-// While dragging near the top or bottom of the list, it scrolls.
-function onViewportDragOver(event) {
-  if (!dragged) return;
-  const rect = viewport.value.getBoundingClientRect();
-  if (event.clientY < rect.top + DRAG_EDGE) viewport.value.scrollTop -= 12;
-  else if (event.clientY > rect.bottom - DRAG_EDGE) viewport.value.scrollTop += 12;
-}
-
-function onDrop(index, event) {
-  if (!dragged || !dropAt.value) return onDragEnd();
-  event.preventDefault();
-  const target = { commit: commitAt(index), index };
-  const move = { commit: dragged.commit, index: dragged.index };
-  const above = dropAt.value.above;
-  onDragEnd();
-  emit("move", move, target, above ? "above" : "below");
-}
-
-// Gone mid-drag, its end isn't heard: what it was dragging is let go of now.
-onBeforeUnmount(() => onDragEnd());
-
-// Dropped anywhere, or let go of.
-function onDragEnd() {
-  dragImage?.remove();
-  dragImage = null;
-  dragged = null;
-  draggedCommits.value = null;
-  dropAt.value = null;
-}
-
-// The line showing where a dragged commit would land.
-const dropLine = computed(() => {
-  if (!dropAt.value) return null;
-  const top = layout.value.offsets[layout.value.itemOfCommit[dropAt.value.index]];
-  return top + (dropAt.value.above ? 0 : ROW_HEIGHT);
+const drag = pointerDrag({
+  image({ element, data: { moving, picking } }) {
+    const copy = dragCopy(element);
+    // Several chosen, it's a stack of them, saying how many.
+    const count = moving.length || picking.length;
+    if (count > 1) {
+      const badge = document.createElement("span");
+      badge.className = "drag-count";
+      badge.textContent = count;
+      copy.append(badge);
+      copy.classList.add(count > 2 ? "stack-3" : "stack-2");
+    }
+    return copy;
+  },
+  hold({ element, x, y }) {
+    const grip = grabPoint(element, x, y);
+    fullCopy = { grip };
+    return grip;
+  },
+  // Over the list it's the row; away from it, the compact card, and back again.
+  reshape(event, copy) {
+    const rect = viewport.value?.getBoundingClientRect();
+    const over = !!rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (over !== compact) return null;
+    compact = !over;
+    fullCopy.width ??= copy.style.width;
+    fullCopy.height ??= copy.style.height;
+    copy.classList.toggle("compact", compact);
+    Object.assign(copy.style, compact ? { width: `${COMPACT_WIDTH}px`, height: `${COMPACT_HEIGHT}px` } : { width: fullCopy.width, height: fullCopy.height });
+    return compact ? COMPACT_GRIP : fullCopy.grip;
+  },
+  start({ data: { moving, picking } }) {
+    // The card of a commit's branches and tags isn't shown while a drag goes over them
+    // (see showRefs), and one showing goes.
+    dragging = true;
+    refsCard.value = null;
+    if (picking.length) draggedCommits.value = picking;
+    else dragged.value = moving;
+  },
+  move(event) {
+    pointer = { x: event.clientX, y: event.clientY };
+    if (!dragged.value) {
+      commitPointer.value = pointer;
+      return;
+    }
+    dropAt.value = landing();
+    edgeScrolling.follow(pointer);
+  },
+  drop() {
+    if (!dragged.value) {
+      dropCommits();
+      return;
+    }
+    const at = dropAt.value;
+    if (!at) return;
+    emit("move", dragged.value, { commit: commitAt(at.index), index: at.index }, at.above ? "above" : "below");
+  },
+  end() {
+    edgeScrolling.stop();
+    dragging = false;
+    fullCopy = null;
+    compact = false;
+    pointer = null;
+    dragged.value = null;
+    dropAt.value = null;
+    draggedCommits.value = null;
+    commitPointer.value = null;
+  },
 });
+// Gone mid-drag, as its tab closed, what it was dragging is let go of.
+onBeforeUnmount(() => drag.cancel());
+// The history changed under commits being moved, as by a commit made in a terminal:
+// they're known by where they were in the list, which may not be where they are now, so
+// they're let go of rather than moved somewhere else than it seems.
+watch(
+  () => summary.value?.generation,
+  () => dragged.value && drag.cancel(),
+);
+
+// A row pressed: the start of a drag, unless it's let go of as a click: of the commit,
+// or the several chosen with it. To move, as they're listed, newest first, only if every
+// one of them can be; to cherry-pick, oldest first, as they're picked.
+function onPointerDown(index, event) {
+  const commit = commitAt(index);
+  // Not with Cmd (Ctrl) or Shift held, which choose commits: a click that wobbles
+  // shouldn't drag them instead.
+  if (event.button !== 0 || commandKey(event) || event.shiftKey || (!canDrag(commit) && !canPick(commit))) return;
+  const all = chosen.size > 1 && chosen.has(commit.id) ? [...chosen.values()].sort((a, b) => a.index - b.index) : [{ commit, index }];
+  const moving = canDrag(commit) ? (all.every((c) => canDrag(c.commit)) ? all : [{ commit, index }]) : [];
+  const picking = moving.length ? [] : [...all].reverse().map((c) => c.commit);
+  drag.press(event, { moving, picking });
+}
+
+// With the pointer over the list, or beside it, where the commit dragged would go.
+function landing() {
+  const rect = viewport.value?.getBoundingClientRect();
+  if (!rect || !pointer || pointer.x < rect.left - DROP_REACH || pointer.x > rect.right + DROP_REACH) return null;
+  const y = pointer.y - rect.top + viewport.value.scrollTop;
+  const moving = dragged.value.map((c) => c.index);
+  return commitLanding(layout.value, ROW_HEIGHT, y, moving, (index) => canDrag(commitAt(index)));
+}
+
+// Near the top or bottom of the list, with the pointer over it, it scrolls, faster the
+// nearer the end, and where the commits would go goes with it.
+const edgeScrolling = edgeScroller({
+  element: () => viewport.value,
+  near: (at) => {
+    const rect = viewport.value?.getBoundingClientRect();
+    return !!dragged.value && !!rect && at.x >= rect.left && at.x <= rect.right;
+  },
+  scrolled: () => (dropAt.value = landing()),
+});
+
+// The gap where the commit dragged would go: the layout item it opens before, and where
+// it is down the list; null for none. At the end, past the last commit, it's after it.
+const gap = computed(() => {
+  if (!dropAt.value) return null;
+  const { items, offsets, itemOfCommit } = layout.value;
+  const before = gapBefore(dropAt.value);
+  if (before < itemOfCommit.length) return { item: itemOfCommit[before], top: offsets[itemOfCommit[before]], commit: commitAt(before) };
+  return { item: items.length, top: offsets[itemOfCommit[before - 1]] + ROW_HEIGHT, commit: null };
+});
+
+// How far down an item, `key` in the layout, is moved for the gap: by its height, from
+// the item it opens before on.
+const gapShift = (key) => (gap.value && key >= gap.value.item ? DROP_GAP : 0);
 
 // A commit selected from outside the list, by going back to it say, is scrolled into
 // view: straight away, or once the history it's in has loaded.
@@ -520,6 +598,8 @@ const fullDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long", t
 // and pointing at them shows a card with every name in full.
 
 function showRefs(badges, event) {
+  // Not while a commit's dragged over them, as it passes.
+  if (dragging) return;
   const rect = event.currentTarget.getBoundingClientRect();
   // Below the badges, or above them where there's more room, no taller than that room.
   const roomBelow = window.innerHeight - rect.bottom - 14;
@@ -562,12 +642,14 @@ function showRefs(badges, event) {
     tabindex="0"
     @scroll="onScroll"
     @keydown="onKeydown"
-    @dragover="onViewportDragOver"
   >
-    <div ref="spacer" class="spacer" :style="{ height: `${layout.height}px` }">
-      <div v-if="dropLine != null" class="drop-line" :style="{ top: `${dropLine - 1}px` }" />
+    <div ref="spacer" class="spacer" :class="{ sorting: dragged }" :style="{ height: `${layout.height + (gap ? DROP_GAP : 0)}px` }">
+      <!-- Where a commit dragged would go: a gap, the lanes running on through it. -->
+      <div v-if="gap" class="drop-gap" :style="{ top: `${gap.top}px`, height: `${DROP_GAP}px` }">
+        <CommitGraph v-if="gap.commit" class="graph" :graph="gap.commit.graph" :lanes="lanes" :height="DROP_GAP" through />
+      </div>
       <template v-for="item in visible" :key="item.key">
-        <div v-if="item.header" class="month" :style="{ top: `${item.top}px`, height: `${HEADER_HEIGHT}px` }">
+        <div v-if="item.header" class="month" :style="{ top: `${item.top + gapShift(item.key)}px`, height: `${HEADER_HEIGHT}px` }">
           <CommitGraph
             class="graph"
             :graph="item.commit?.graph"
@@ -581,16 +663,12 @@ function showRefs(badges, event) {
         <div
           v-else
           class="commit"
-          :class="{ selected: isChosen(item.commit), incoming: item.commit?.incoming }"
+          :class="{ selected: isChosen(item.commit), incoming: item.commit?.incoming, dragging: dragged?.some((c) => c.index === item.index) }"
           :title="item.commit?.incoming ? 'Fetched, not pulled yet' : null"
-          :style="{ top: `${item.top}px`, height: `${ROW_HEIGHT}px` }"
-          :draggable="canDrag(item.commit) || canPick(item.commit)"
+          :style="{ top: `${item.top + gapShift(item.key)}px`, height: `${ROW_HEIGHT}px` }"
+          @pointerdown="onPointerDown(item.index, $event)"
           @click="onClick(item.index, $event)"
           @contextmenu.prevent="onContextMenu(item.index, $event)"
-          @dragstart="onDragStart(item.index, $event)"
-          @dragover="onDragOver(item.index, $event)"
-          @drop="onDrop(item.index, $event)"
-          @dragend="onDragEnd"
         >
           <template v-if="item.commit">
             <CommitGraph class="graph" :graph="item.commit.graph" :lanes="lanes" :height="ROW_HEIGHT" />
@@ -704,20 +782,113 @@ function showRefs(badges, event) {
   background: var(--row-selected);
 }
 
-.commit[draggable="true"] {
-  -webkit-user-drag: element;
+/* While a commit's dragged to move it: faded where it was, and where it would go, the
+   rows below slide down to open a gap, with a line in its middle, as between branches
+   in the sidebar. Let go of, it closes at once. */
+.spacer.sorting > .month,
+.spacer.sorting > .commit {
+  transition: top 150ms ease;
 }
 
-/* Where a dragged commit would land. */
-.drop-line {
+.commit.dragging {
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spacer.sorting > .month,
+  .spacer.sorting > .commit {
+    transition: none;
+  }
+}
+
+.drop-gap {
   position: absolute;
-  z-index: 2;
   left: 8px;
   right: 8px;
+  display: flex;
+  pointer-events: none;
+}
+
+.drop-gap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
   height: 3px;
+  margin-top: -1.5px;
   border-radius: var(--radius-xs);
   background: var(--accent-fill);
-  pointer-events: none;
+}
+
+/* A copy of a row following the pointer as it's dragged, on the list's color, as the
+   row is, its own over it where it's chosen. */
+.commit.following {
+  background-color: var(--content-bg);
+}
+
+.commit.following.selected {
+  background: linear-gradient(var(--row-selected), var(--row-selected)) var(--content-bg);
+}
+
+/* Several dragged, the rows behind it peek out below and to its right, one for two,
+   two for more: each a shadow the row's color, edged in the border's, as a row is. */
+.commit.following.stack-2 {
+  box-shadow:
+    0 0 0 1px var(--border),
+    5px 5px 0 -1px var(--content-bg),
+    5px 5px 0 0 var(--border);
+}
+
+.commit.following.stack-3 {
+  box-shadow:
+    0 0 0 1px var(--border),
+    5px 5px 0 -1px var(--content-bg),
+    5px 5px 0 0 var(--border),
+    10px 10px 0 -1px var(--content-bg),
+    10px 10px 0 0 var(--border);
+}
+
+/* Away from the list, a compact card of it, sized as COMPACT_WIDTH and COMPACT_HEIGHT
+   say: one line, its dot and its message. */
+.commit.following.compact .avatar,
+.commit.following.compact .ref-marks,
+.commit.following.compact .meta {
+  display: none;
+}
+
+.commit.following.compact .body {
+  border-bottom: none;
+}
+
+.commit.following.compact .graph {
+  height: 100%;
+  width: auto;
+}
+
+/* Its commit's dot alone, without the lines to the commits around it: picked up off
+   the graph, as the row is off the list. */
+.commit.following .graph :deep(path) {
+  display: none;
+}
+
+/* How many commits go with the one dragged, chosen with it, to cherry-pick: put in
+   its copy as that's made, so not one of this list's own elements. */
+.commit.following :deep(.drag-count) {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--accent-fill);
+  color: white;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
 }
 
 /* Fetched from the remote but not pulled into the branch yet. */

@@ -497,30 +497,36 @@ export function useGitActions({
     if (error && !isError(error, CONFLICT)) keepDraft(draft, values);
   }
 
-  // Moves a commit to just above (newer than) or below (older than) another.
-  async function moveCommit(moving, target, position) {
-    const plan = await rewritePlan([moving, target], "Can't Move This Commit");
+  // Moves commits to just above (newer than) or below (older than) another: `moving`,
+  // one or several, as { commit, index }, go there together, in the order they're in.
+  async function moveCommits(moving, target, position) {
+    const one = moving.length === 1;
+    const title = one ? "Can't Move This Commit" : "Can't Move These Commits";
+    const plan = await rewritePlan([...moving, target], title);
     if (!plan) return;
-    const order = plan.commits.map((c) => c.id).filter((id) => id !== moving.commit.id);
+    const ids = new Set(moving.map((m) => m.commit.id));
+    const order = plan.commits.map((c) => c.id).filter((id) => !ids.has(id));
     const at = order.indexOf(target.commit.id);
-    if (at < 0 || !plan.commits.some((c) => c.id === moving.commit.id)) {
-      await tell("Can't Move This Commit", `Only commits on ${plan.branch} can be moved here.`);
+    // Those moved, in the order they're in on the branch, oldest first.
+    const block = plan.commits.map((c) => c.id).filter((id) => ids.has(id));
+    if (at < 0 || block.length !== ids.size) {
+      await tell(title, `Only commits on ${plan.branch} can be moved here.`);
       return;
     }
     // The list is oldest first: above in the history means after.
-    order.splice(position === "above" ? at + 1 : at, 0, moving.commit.id);
+    order.splice(position === "above" ? at + 1 : at, 0, ...block);
 
     const subject = (commit) => `“${commit.summary}”`;
+    const what = one ? subject(moving[0].commit) : `${moving.length} commits`;
     const ok = await askConfirm({
-      title: "Move Commit",
-      message: `Move ${subject(moving.commit)} ${position} ${subject(target.commit)}?\n\nThis rewrites ${plan.commits.length} commits on ${plan.branch}, giving them new hashes. If the changes depend on each other, git may stop for you to resolve conflicts.${pushedNote(plan)}`,
+      title: one ? "Move Commit" : "Move Commits",
+      message: `Move ${what} ${position} ${subject(target.commit)}?\n\nThis rewrites ${plan.commits.length} commits on ${plan.branch}, giving them new hashes. If the changes depend on each other, git may stop for you to resolve conflicts.${pushedNote(plan)}`,
       confirmLabel: "Move",
     });
     if (!ok) return;
     const steps = order.map((id) => ({ id, action: "pick", message: null }));
-    await run(["Moving commit…", "Moved commit", "Couldn't move the commit"], "rebase_interactive", { base: plan.base, steps }, {
-      undo: "Move Commit",
-    });
+    const done = one ? ["Moving commit…", "Moved commit", "Couldn't move the commit"] : ["Moving commits…", "Moved commits", "Couldn't move the commits"];
+    await run(done, "rebase_interactive", { base: plan.base, steps }, { undo: one ? "Move Commit" : "Move Commits" });
   }
 
   // The menu for several selected commits.
@@ -1055,7 +1061,7 @@ export function useGitActions({
     deleteMergedBranch,
     merge,
     commitsMenu,
-    moveCommit,
+    moveCommits,
     addMenu,
     remoteMenu,
     pull,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm, openForm, openPullDialog, openTagDialog } from "./overlays.js";
+import { askConfirm, openForm, openPullDialog, openTagDialog, tell } from "./overlays.js";
 import { addDivider, branchOrder, resetOrder } from "./branchOrder.js";
 import { CANCELED } from "./errors.js";
 import { draftFor } from "./drafts.js";
@@ -441,4 +441,50 @@ test("a commit's menu resets the branch whose history is shown, and only rewrite
   expect(labels(menu)).toContain("Reset “main” to “abc1234”…");
   expect(item(menu, "Edit Message…").disabled).toBe(true);
   expect(item(actions.commitMenu(commit, true), "Edit Message…").disabled).toBe(false);
+});
+
+describe("moving commits", () => {
+  // The branch's commits, oldest first, as the rebase plan has them; listed newest first
+  // in the history, D at 0 down to A at 3.
+  const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => ({ id: id.repeat(40), summary: `Commit ${id.toUpperCase()}`, message: `Commit ${id.toUpperCase()}` }));
+  const entry = (commit) => ({ commit, index: [d, c, b, a].indexOf(commit) });
+  beforeEach(() => {
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "rebase_plan" ? { branch: "main", base: "base", commits: [a, b, c, d], pushed: false, upstream: null } : null,
+    );
+  });
+  const picks = (ran) => ran.at(-1)[1].steps.map((step) => step.id[0]);
+
+  test("one moves above another, the branch rewritten in that order, once it's said to", async () => {
+    const { actions, ran } = actionsOn();
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    await actions.moveCommits([entry(a)], entry(c), "above");
+    expect(vi.mocked(askConfirm).mock.calls[0][0].message).toContain("Move “Commit A” above “Commit C”?");
+    expect(ran().at(-1)[0]).toBe("rebase_interactive");
+    expect(picks(ran())).toEqual(["b", "c", "a", "d"]);
+  });
+
+  test("several move together, in the order they were in, said as how many", async () => {
+    const { actions, ran } = actionsOn();
+    vi.mocked(askConfirm).mockResolvedValue(true);
+    // D and B, below A, the oldest.
+    await actions.moveCommits([entry(d), entry(b)], entry(a), "below");
+    expect(vi.mocked(askConfirm).mock.calls[0][0]).toMatchObject({ title: "Move Commits", message: expect.stringContaining("Move 2 commits below “Commit A”?") });
+    expect(picks(ran())).toEqual(["b", "d", "a", "c"]);
+  });
+
+  test("not when one isn't on the branch", async () => {
+    const { actions, run } = actionsOn();
+    const elsewhere = { commit: { id: "e".repeat(40), summary: "Commit E" }, index: 5 };
+    await actions.moveCommits([entry(b), elsewhere], entry(d), "above");
+    expect(tell).toHaveBeenCalledWith("Can't Move These Commits", "Only commits on main can be moved here.");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("nothing's done when it's said not to", async () => {
+    const { actions, run } = actionsOn();
+    vi.mocked(askConfirm).mockResolvedValue(false);
+    await actions.moveCommits([entry(a)], entry(c), "above");
+    expect(run).not.toHaveBeenCalled();
+  });
 });

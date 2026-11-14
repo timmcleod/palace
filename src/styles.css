@@ -656,29 +656,6 @@ kbd {
   --tab-row-height: 48px;
 }
 
-/* A compact image of commits dragged from the history, what the web view's own drag
-   shows (see HistoryList.vue). */
-.drag-image {
-  position: fixed;
-  top: -100px;
-  left: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--content-bg);
-  font-size: var(--font-lg);
-  white-space: nowrap;
-  color: var(--text-primary);
-  /* A long name doesn't make it wider than the window. */
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* A row of tabs a tab can be dragged along (see tabRowDrag.js): the one dragged is
    faded where it was, and where it would land, the tabs slide apart, with a line in
    the middle of the gap. Only the last tab has a gap after it, as anywhere else,

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { SCROLL_EDGE, edgeScroll, pointerDrag } from "./rowDrag.js";
+import { SCROLL_EDGE, edgeScroll, edgeScroller, pointerDrag } from "./rowDrag.js";
 
 afterEach(() => (document.body.innerHTML = ""));
 
@@ -50,6 +50,23 @@ test("or held at the point hold() gives", () => {
   window.dispatchEvent(pointer("pointermove", 40, 10));
   expect(hold).toHaveBeenCalledWith(expect.objectContaining({ data: "feature", element: row, x: 10, y: 10 }));
   expect(document.querySelector(".following").style.getPropertyValue("translate")).toBe("10px 6px");
+});
+
+test("reshaped as it moves, it's held as it's then told, from that move on", () => {
+  const reshape = vi.fn((event, image) => {
+    if (event.clientX < 100) return null;
+    image.classList.add("compact");
+    return { x: -12, y: -14 };
+  });
+  const { row } = setUp({ reshape, hold: () => ({ x: 5, y: 5 }) });
+  row.dispatchEvent(pointer("pointerdown", 10));
+  window.dispatchEvent(pointer("pointermove", 40, 10));
+  const image = document.querySelector(".following");
+  expect(image.style.getPropertyValue("translate")).toBe("35px 5px");
+  window.dispatchEvent(pointer("pointermove", 200, 10));
+  expect(image.classList.contains("compact")).toBe(true);
+  expect(image.style.getPropertyValue("translate")).toBe("212px 24px");
+  expect(reshape).toHaveBeenLastCalledWith(expect.objectContaining({ clientX: 200 }), image);
 });
 
 test("turned or scaled, all of it as drawn stays in the window, its corners too", () => {
@@ -138,4 +155,50 @@ test("near a list's ends, dragging scrolls it, faster the nearer or further past
   expect(edgeScroll(-100, 0, 300)).toBe(-SCROLL_EDGE / 2);
   expect(edgeScroll(290, 0, 300)).toBe(9);
   expect(edgeScroll(900, 0, 300)).toBe(SCROLL_EDGE / 2);
+});
+
+test("an edge scroller scrolls a frame at a time while the pointer's near an end, and stops once it can't go further", () => {
+  const frames = [];
+  vi.stubGlobal("requestAnimationFrame", (run) => frames.push(run));
+  vi.stubGlobal("cancelAnimationFrame", () => frames.splice(0));
+  // A list that scrolls no further up than its top, as one on the page doesn't.
+  let top = 100;
+  const list = {
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(value) {
+      top = Math.max(0, value);
+    },
+    getBoundingClientRect: () => ({ top: 0, bottom: 300, left: 0, right: 200 }),
+  };
+  const scrolled = vi.fn();
+  let beside = false;
+  const scroller = edgeScroller({ element: () => list, near: () => !beside, scrolled });
+  const nextFrame = () => frames.shift()?.();
+
+  scroller.follow({ x: 50, y: 0 });
+  // Asked again as it moves, it's still one frame at a time.
+  scroller.follow({ x: 50, y: 0 });
+  expect(frames).toHaveLength(1);
+  nextFrame();
+  expect([list.scrollTop, scrolled.mock.calls.length]).toEqual([100 - SCROLL_EDGE / 2, 1]);
+  // At the top already, it stops.
+  list.scrollTop = 0;
+  nextFrame();
+  expect(frames).toHaveLength(0);
+
+  // Not where it's said not to, as beside the list.
+  beside = true;
+  list.scrollTop = 100;
+  scroller.follow({ x: 50, y: 0 });
+  nextFrame();
+  expect(list.scrollTop).toBe(100);
+
+  // Stopped, nothing's left to run.
+  beside = false;
+  scroller.follow({ x: 50, y: 0 });
+  scroller.stop();
+  expect(frames).toHaveLength(0);
+  vi.unstubAllGlobals();
 });

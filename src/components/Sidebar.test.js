@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createApp, h, nextTick, ref } from "vue";
-import { COMMIT_TYPE, draggedCommits } from "../lib/commitDrag.js";
+import { commitPointer, draggedCommits, dropCommits } from "../lib/commitDrag.js";
 import Sidebar from "./Sidebar.vue";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
@@ -31,6 +31,7 @@ let app;
 afterEach(() => {
   app?.unmount();
   draggedCommits.value = null;
+  commitPointer.value = null;
   document.body.innerHTML = "";
 });
 
@@ -45,92 +46,123 @@ function sidebar(more) {
   return { onCherryPick, onMergeIntoHead };
 }
 
-// A drag event of the web view's own: a commit's from the history, unless `types` says
-// otherwise, as a file's.
-function dragEvent(type, types = ["text/plain", COMMIT_TYPE]) {
-  const event = new Event(type, { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "dataTransfer", { value: { dropEffect: "none", types } });
-  return event;
-}
 const row = (key) => document.querySelector(`[data-row="${key}"]`);
 const commit = { id: "abc1234def", short_id: "abc1234", summary: "Fix the login redirect" };
+
+// Commits dragged from the history, the pointer over the row `key`, or over nothing.
+async function dragCommitsOver(commits, key) {
+  draggedCommits.value = commits;
+  document.elementFromPoint = () => (key ? row(key) : null);
+  commitPointer.value = { x: 40, y: 14 };
+  await nextTick();
+}
 
 describe("a commit dragged from another branch's history", () => {
   test("drops on the current branch, said and shown, and is cherry-picked there", async () => {
     const { onCherryPick } = sidebar();
-    draggedCommits.value = [commit];
-    const over = dragEvent("dragover");
-    row("branch:main").dispatchEvent(over);
-    await nextTick();
-    expect(over.defaultPrevented).toBe(true);
-    expect(over.dataTransfer.dropEffect).toBe("copy");
+    await dragCommitsOver([commit], "branch:main");
     expect(row("branch:main").classList.contains("drop-target")).toBe(true);
     expect(row("branch:main").textContent).toContain("Cherry-pick Fix the login redirect into main");
-
-    row("branch:main").dispatchEvent(dragEvent("drop"));
+    expect(dropCommits()).toBe(true);
     await nextTick();
     expect(onCherryPick).toHaveBeenCalledWith([commit]);
     expect(row("branch:main").classList.contains("drop-target")).toBe(false);
   });
 
+  test("says so above the branch's row, clear of the commit's copy below the pointer, unless there's no room there", async () => {
+    sidebar();
+    const list = document.querySelector(".sidebar-scroll");
+    list.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 240 });
+    const at = (top) => (row("branch:main").getBoundingClientRect = () => ({ top, bottom: top + 28, left: 0, right: 240 }));
+    at(200);
+    await dragCommitsOver([commit], "branch:main");
+    await nextTick();
+    const sentence = () => row("branch:main").querySelector(".drop-sentence");
+    expect(sentence().classList.contains("above")).toBe(true);
+    // Scrolled to the very top of the sidebar, below it after all.
+    at(0);
+    list.dispatchEvent(new Event("scroll"));
+    await nextTick();
+    expect(sentence().classList.contains("above")).toBe(false);
+  });
+
   test("several, oldest first, drop together, said as how many", async () => {
     const { onCherryPick } = sidebar();
     const older = { id: "0000001aaa", short_id: "0000001", summary: "Add the login form" };
-    draggedCommits.value = [older, commit];
-    row("branch:main").dispatchEvent(dragEvent("dragover"));
-    await nextTick();
+    await dragCommitsOver([older, commit], "branch:main");
     expect(row("branch:main").textContent).toContain("Cherry-pick 2 commits into main");
-    row("branch:main").dispatchEvent(dragEvent("drop"));
+    dropCommits();
     expect(onCherryPick).toHaveBeenCalledWith([older, commit]);
   });
 
-  test("doesn't drop on another branch", async () => {
-    sidebar();
-    draggedCommits.value = [commit];
-    const over = dragEvent("dragover");
-    row("branch:feature").dispatchEvent(over);
-    await nextTick();
-    expect(over.defaultPrevented).toBe(false);
+  test("doesn't drop on another branch, or nowhere", async () => {
+    const { onCherryPick } = sidebar();
+    await dragCommitsOver([commit], "branch:feature");
     expect(row("branch:feature").classList.contains("drop-target")).toBe(false);
+    expect(dropCommits()).toBe(false);
+    await dragCommitsOver([commit], null);
+    expect(dropCommits()).toBe(false);
+    expect(onCherryPick).not.toHaveBeenCalled();
   });
 
   test("doesn't drop while a merge or rebase waits on the user", async () => {
     const { onCherryPick } = sidebar({ operation: "rebase" });
-    draggedCommits.value = [commit];
-    const over = dragEvent("dragover");
-    row("branch:main").dispatchEvent(over);
-    row("branch:main").dispatchEvent(dragEvent("drop"));
-    await nextTick();
-    expect(over.defaultPrevented).toBe(false);
+    await dragCommitsOver([commit], "branch:main");
+    expect(row("branch:main").classList.contains("drop-target")).toBe(false);
+    dropCommits();
     expect(onCherryPick).not.toHaveBeenCalled();
   });
 
   test("lets go of the row once the drag ends elsewhere", async () => {
     sidebar();
-    draggedCommits.value = [commit];
-    row("branch:main").dispatchEvent(dragEvent("dragover"));
-    await nextTick();
+    await dragCommitsOver([commit], "branch:main");
     draggedCommits.value = null;
+    commitPointer.value = null;
     await nextTick();
     expect(row("branch:main").classList.contains("drop-target")).toBe(false);
   });
 
-  test("isn't taken for a file, or another drag, even with a commit's left from a drag whose end went unheard", async () => {
-    const { onCherryPick } = sidebar();
+  test("near the sidebar's bottom, scrolls it, to reach the current branch out of sight", async () => {
+    sidebar();
+    const frames = [];
+    vi.stubGlobal("requestAnimationFrame", (run) => frames.push(run));
+    const list = document.querySelector(".sidebar-scroll");
+    list.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 240, height: 600, width: 240 });
+    let top = 0;
+    Object.defineProperty(list, "scrollTop", {
+      get: () => top,
+      set: (value) => {
+        top = value;
+      },
+      configurable: true,
+    });
     draggedCommits.value = [commit];
-    const over = dragEvent("dragover", ["Files"]);
-    row("branch:main").dispatchEvent(over);
-    row("branch:main").dispatchEvent(dragEvent("drop", ["Files"]));
+    document.elementFromPoint = () => null;
+    commitPointer.value = { x: 40, y: 595 };
     await nextTick();
-    expect(over.defaultPrevented).toBe(false);
-    expect(onCherryPick).not.toHaveBeenCalled();
+    frames.shift()();
+    expect(top).toBeGreaterThan(0);
+    // Beside it, over the history, it doesn't.
+    const was = top;
+    commitPointer.value = { x: 400, y: 595 };
+    await nextTick();
+    frames.shift()?.();
+    expect(top).toBe(was);
+    vi.unstubAllGlobals();
   });
 
-  test("isn't anything to the sidebar when nothing's dragged from the history", async () => {
-    sidebar();
-    const over = dragEvent("dragover");
-    row("branch:main").dispatchEvent(over);
-    expect(over.defaultPrevented).toBe(false);
+  test("isn't taken by a sidebar the pointer isn't over, as a hidden tab's", async () => {
+    const { onCherryPick } = sidebar();
+    // Over a row of the same branch, elsewhere on the page.
+    const elsewhere = document.createElement("div");
+    elsewhere.dataset.row = "branch:main";
+    document.body.append(elsewhere);
+    draggedCommits.value = [commit];
+    document.elementFromPoint = () => elsewhere;
+    commitPointer.value = { x: 900, y: 14 };
+    await nextTick();
+    expect(dropCommits()).toBe(false);
+    expect(onCherryPick).not.toHaveBeenCalled();
   });
 });
 

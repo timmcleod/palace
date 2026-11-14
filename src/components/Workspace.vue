@@ -1621,7 +1621,7 @@ const breadcrumb = computed(() => {
           @select="selectedCommit = $event"
           @menu="(commit, event) => openMenu(event, actions.commitMenu(commit, rewritable))"
           @menu-many="(entries, event) => openMenu(event, actions.commitsMenu(entries, rewritable, pickable))"
-          @move="actions.moveCommit"
+          @move="actions.moveCommits"
           @count="historyCount = $event"
         />
       </div>

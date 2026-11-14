@@ -1,6 +1,6 @@
 import { nextTick, onBeforeUnmount, ref } from "vue";
 import { grabPoint, dragCopy } from "./dragImage.js";
-import { edgeScroll, pointerDrag } from "./rowDrag.js";
+import { DROP_REACH, edgeScroller, pointerDrag } from "./rowDrag.js";
 import { slideFrom } from "./slide.js";
 
 // Dragging a tab along a row of them to put it elsewhere, as the window's tabs and a
@@ -10,10 +10,6 @@ import { slideFrom } from "./slide.js";
 // and dropped there, they slide into their new order. Escape, or dropping it well away
 // from the row, leaves it, the gap sliding shut. Near either end of a row that scrolls,
 // it scrolls, to reach the tabs out of sight.
-
-// How far beyond the row a tab let go of still lands in it, about a tab's height: a
-// drag along the row wanders, and missing it by a little shouldn't lose it.
-export const DROP_REACH = 40;
 
 /**
  * Where a tab dragged along the row would land, with the pointer at `x`: at whichever
@@ -64,9 +60,8 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
   let spans = [];
   // Where the tab dropped was let go, on the page, to slide into its place from.
   let droppedAt = null;
-  // Where the pointer is, for the scrolling it does near the row's ends.
+  // Where the pointer is, for where the tab would land as the row scrolls under it.
   let pointer = null;
-  let scrolling = 0;
 
   // Keys as data-key has them, whatever they were.
   const keysNow = () => keys().map(String);
@@ -104,7 +99,7 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
     move(event) {
       pointer = { x: event.clientX, y: event.clientY };
       dropAt.value = landing(pointer);
-      if (!scrolling) scrolling = requestAnimationFrame(autoScroll);
+      scroller.follow(pointer);
     },
     drop(event, followed) {
       const to = dropAt.value && dropPlace(keysNow(), String(dragging.value), dropAt.value);
@@ -127,8 +122,7 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
         if (dropped) before.set(dropped, droppedAt);
         nextTick(() => slideFrom(before));
       }
-      cancelAnimationFrame(scrolling);
-      scrolling = 0;
+      scroller.stop();
       pointer = null;
       droppedAt = null;
       dragging.value = null;
@@ -140,18 +134,12 @@ export function useTabRowDrag({ row, list, keys, move, image = dragCopy }) {
 
   // Near either end of the row, on it or near it, it scrolls, faster the nearer the end,
   // or the further past it, and where it'd land goes with it.
-  function autoScroll() {
-    scrolling = 0;
-    const el = list.value;
-    const rect = row.value?.getBoundingClientRect();
-    if (dragging.value == null || !el || !pointer || !rect || !nearRow(rect, pointer.y)) return;
-    const { left, right } = el.getBoundingClientRect();
-    const before = el.scrollLeft;
-    el.scrollLeft += edgeScroll(pointer.x, left, right);
-    if (el.scrollLeft === before) return;
-    dropAt.value = landing(pointer);
-    scrolling = requestAnimationFrame(autoScroll);
-  }
+  const scroller = edgeScroller({
+    element: () => list.value,
+    axis: "x",
+    near: (at) => dragging.value != null && !!row.value && nearRow(row.value.getBoundingClientRect(), at.y),
+    scrolled: () => (dropAt.value = landing(pointer)),
+  });
 
   function classOf(key) {
     if (dragging.value == null) return null;
