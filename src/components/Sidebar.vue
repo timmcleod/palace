@@ -581,12 +581,18 @@ function onRowClick(row, event) {
   flex-shrink: 0;
 }
 
-/* The macOS window buttons get a row of their own above the name, which then lines
-   up with the section labels below; with tabs, they're in the tabs' row instead. */
+/* With the window's top drawn by Palace (macOS), the name sits 2px below the middle of
+   its bar, set by eye. */
+:root[data-title-bar="overlay"] .sidebar-toolbar {
+  padding-top: 4px;
+}
+
+/* The macOS window buttons get a row of their own above the name; with tabs, they're in
+   the tabs' row instead. That row is as tall as the tabs' (--tab-row-height in
+   styles.css), so the name and all below it sit where they do with tabs. */
 :root[data-title-bar="overlay"]:not([data-tabs="many"]) .sidebar-toolbar {
-  height: auto;
-  padding-top: 30px;
-  padding-bottom: 6px;
+  height: calc(48px + var(--toolbar-height));
+  padding-top: calc(48px + 4px);
 }
 
 .sidebar-scroll {

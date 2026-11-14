@@ -2248,7 +2248,7 @@ const breadcrumb = computed(() => {
    tabs' row is there instead. */
 :root[data-title-bar="overlay"]:not([data-tabs="many"]) .standalone-page {
   box-sizing: border-box;
-  padding-top: 28px;
+  padding-top: 36px;
 }
 
 /* The terminal button's mark: a tab in the hidden panel has finished or needs you. */

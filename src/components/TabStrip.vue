@@ -139,9 +139,11 @@ function onWheel(event) {
 }
 
 /* Beside the macOS window buttons, which sit at the row's left, in its middle (see
-   tauri.macos.conf.json), where they are with no tabs too: the window can't move them. */
+   tauri.macos.conf.json), where they are with no tabs too: the window can't move them.
+   They end 78px in, and the first tab, 2px inside the list, starts as far past them
+   as they start from the window's edge. */
 :root[data-title-bar="overlay"] .tab-strip {
-  padding-left: 84px;
+  padding-left: 94px;
 }
 
 /* See .tab-row in styles.css, for dragging a tab along it. Room around the tabs, inside

@@ -627,14 +627,15 @@ kbd {
 }
 
 /* Where the window has no toolbar of its own, as on the welcome screen or with git
-   missing, a strip across its top, under the macOS window buttons, to drag it by. */
+   missing, a strip across its top, under the macOS window buttons, to drag it by. They
+   end 31px down (see tauri.macos.conf.json); its pages leave it room (Workspace.vue). */
 .title-strip {
   position: fixed;
   top: 0;
   right: 0;
   left: 0;
   z-index: 1;
-  height: 28px;
+  height: 36px;
 }
 
 /* With tabs, their row is the title bar (see TabStrip.vue). */
