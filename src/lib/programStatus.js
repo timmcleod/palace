@@ -84,8 +84,11 @@ export function applyReport(records, report) {
   records.set(id, report);
 }
 
-// Most in need of the user first.
-const URGENCY = ["blocked", "error", "done", "working", "idle"];
+// Most in need of the user first; then working, over finished or stopped: a program's
+// workers report apart from it, as Claude Code's background tasks do, and one that's
+// finished stays so until it's cleared (see the protocol), which would otherwise hide
+// the program working on. The protocol leaves which to show to the terminal.
+const URGENCY = ["blocked", "working", "error", "done", "idle"];
 
 /** The record that says most about the terminal: one waiting on the user, say. */
 export function summarize(records) {
