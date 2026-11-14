@@ -161,9 +161,12 @@ function onWheel(event) {
 
 /* A width of its own, which the row makes room for, rather than one from its name,
    which would have the row too narrow for its tabs: then they shrink, as there are
-   more, to their least, and the row scrolls. Those not showing sit on the row itself;
-   the one showing is lifted off it, with a line in its color along its foot. */
+   more, to their least, and the row scrolls. Those not showing are each a shade off the
+   row, so they read as tabs rather than words floating on it, and solid rather than a
+   see-through tint, so the ring around a tile's badge (--tab-bg) matches them; the one
+   showing is lifted off it, with a line in its color along its foot. */
 .tab {
+  --tab-bg: color-mix(in srgb, var(--text-primary) 5%, var(--sunken-bg));
   position: relative;
   display: flex;
   flex: 0 1 auto;
@@ -175,12 +178,13 @@ function onWheel(event) {
   box-sizing: border-box;
   padding: 0 6px 0 7px;
   border-radius: var(--radius-xl);
+  background: var(--tab-bg);
   color: var(--text-secondary);
   cursor: default;
 }
 
 .tab:hover {
-  background: var(--toolbar-group-bg);
+  --tab-bg: color-mix(in srgb, var(--text-primary) 9%, var(--sunken-bg));
 }
 
 .tab.active,
@@ -248,12 +252,12 @@ function onWheel(event) {
   display: flex;
   padding: 1px;
   border-radius: 50%;
-  background: var(--tab-bg, var(--sunken-bg));
+  background: var(--tab-bg);
   color: var(--accent);
 }
 
 /* An agent finished, with a check; needing the user; or stopped with an error. Ringed
-   in the tab's color, the row's or the lifted one's, to stand off the tile. */
+   in the tab's own color, to stand off the tile. */
 .badge {
   position: absolute;
   top: -3px;
@@ -264,7 +268,7 @@ function onWheel(event) {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--tab-bg, var(--sunken-bg));
+  box-shadow: 0 0 0 2px var(--tab-bg);
   color: #fff;
 }
 
