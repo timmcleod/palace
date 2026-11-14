@@ -6,8 +6,8 @@ import { settings } from "./settings.js";
 
 // Updates come from the latest GitHub release, whose latest.json lists the newest
 // version and its signed packages. Palace checks a few seconds after starting, then
-// daily and when its window comes to the front (at most hourly), and installs only
-// when asked, checking once more first so it installs the newest.
+// daily, and installs only when asked, checking once more first so it installs the
+// newest.
 export const updates = reactive({
   current: "",
   // "idle", "checking", "none" (up to date), "available", "installing" or "error".
@@ -33,15 +33,12 @@ const RELEASES = "https://github.com/timmcleod/palace/releases";
 export const releaseNotesUrl = (version) => `${RELEASES}/tag/v${version}`;
 
 const FIRST_CHECK = 5 * 1000;
-const HOURLY = 60 * 60 * 1000;
-const DAILY = 24 * HOURLY;
+const DAILY = 24 * 60 * 60 * 1000;
 
 let found = null;
 let checking = false;
 // Whether the check running was asked for, so its errors are shown.
 let loud = false;
-// When it last asked, whatever the answer: 0 until the first check after starting.
-let checkedAt = 0;
 
 getVersion()
   .then((v) => (updates.current = v))
@@ -82,7 +79,6 @@ export async function checkForUpdates({ quiet = false } = {}) {
   } finally {
     checking = false;
     loud = false;
-    checkedAt = Date.now();
   }
 }
 
@@ -136,11 +132,3 @@ function schedule() {
   }, FIRST_CHECK);
 }
 watch(() => settings.checkForUpdates, schedule, { immediate: true });
-
-// Palace may stay open for days, so it also checks when its window comes to the front,
-// if it hasn't for an hour, to offer the newest version rather than an older one.
-window.addEventListener("focus", () => {
-  if (!settings.checkForUpdates || import.meta.env.DEV) return;
-  if (!checkedAt || Date.now() - checkedAt < HOURLY) return;
-  checkForUpdates({ quiet: true });
-});

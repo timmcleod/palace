@@ -635,8 +635,7 @@ const SAMPLE = {
               <div class="text">
                 <div class="title">Check for updates automatically</div>
                 <div class="desc">
-                  When Palace starts, once a day, and when you come back to it after an hour or more. Updates are
-                  installed only when you say so.
+                  When Palace starts, then once a day. Updates are installed only when you say so.
                 </div>
               </div>
               <label class="switch"><input v-model="settings.checkForUpdates" type="checkbox" /><span /></label>
